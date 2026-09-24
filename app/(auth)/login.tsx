@@ -5,7 +5,6 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -26,6 +25,11 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Inline error state variables
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [generalError, setGeneralError] = useState('');
 
   // Helper function to insert logs into your simple logs table
   const logActivity = async (userId: string | null, action: string, details: string) => {
@@ -50,7 +54,7 @@ export default function LoginScreen() {
       .maybeSingle();
 
     if (profileError || !profile) {
-      Alert.alert("Error", "Could not fetch user profile details.");
+      setGeneralError("Could not fetch user profile details.");
       return;
     }
 
@@ -74,11 +78,24 @@ export default function LoginScreen() {
 
   // 1. Password Login Handler
   const handleLogin = async () => {
+    // Reset errors before validation
+    setEmailError('');
+    setPasswordError('');
+    setGeneralError('');
+
     const trimmedEmail = email.trim();
-    if (!trimmedEmail || !password) {
-      Alert.alert("Missing Fields", "Please enter both your email and password.");
-      return;
+    let hasError = false;
+
+    if (!trimmedEmail) {
+      setEmailError('Email is a required field.');
+      hasError = true;
     }
+    if (!password) {
+      setPasswordError('Password is a required field.');
+      hasError = true;
+    }
+
+    if (hasError) return;
 
     setLoading(true);
     try {
@@ -88,7 +105,7 @@ export default function LoginScreen() {
       });
 
       if (authError) {
-        Alert.alert("Authentication Failed", authError.message);
+        setGeneralError(authError.message);
         return;
       }
 
@@ -98,13 +115,12 @@ export default function LoginScreen() {
         await navigateBasedOnRole(authData.user.id);
       }
     } catch (e: any) {
-      Alert.alert("Error", e.message || "An unexpected error occurred.");
+      setGeneralError(e.message || "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }
   };
 
-  // 2. Forgot Password Handler
   // 2. Forgot Password Navigation
   const handleForgotPassword = () => {
     router.push('/forgot-password');
@@ -142,6 +158,7 @@ export default function LoginScreen() {
 
   // 4. OAuth Handler
   const performOAuthLogin = async (provider: 'google' | 'facebook') => {
+    setGeneralError('');
     setLoading(true);
     try {
       const redirectTo = Linking.createURL('/login');
@@ -171,7 +188,7 @@ export default function LoginScreen() {
         }
       }
     } catch (e: any) {
-      Alert.alert("Authentication Error", e.message || "An unexpected error occurred.");
+      setGeneralError(e.message || "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }
@@ -193,33 +210,51 @@ export default function LoginScreen() {
             </Text>
           </View>
 
+          {/* General / Authentication-wide error message */}
+          {generalError ? (
+            <View style={styles.generalErrorContainer}>
+              <Text style={styles.errorText}>{generalError}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.form}>
-            <View style={styles.inputWrapper}>
+            {/* Email Input Field */}
+            <View style={[styles.inputWrapper, emailError ? styles.inputErrorBorder : null]}>
               <Feather name="mail" color="#085334" size={20} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Email Address"
                 placeholderTextColor="#A0AEC0"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  if (emailError) setEmailError('');
+                }}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
                 editable={!loading}
+                underlineColorAndroid="transparent"
               />
             </View>
+            {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
 
-            <View style={styles.inputWrapper}>
+            {/* Password Input Field */}
+            <View style={[styles.inputWrapper, passwordError ? styles.inputErrorBorder : null]}>
               <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Password"
                 placeholderTextColor="#A0AEC0"
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(text) => {
+                  setPassword(text);
+                  if (passwordError) setPasswordError('');
+                }}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
                 editable={!loading}
+                underlineColorAndroid="transparent"
               />
 
               <TouchableOpacity 
@@ -230,6 +265,7 @@ export default function LoginScreen() {
                 <Feather name={showPassword ? 'eye-off' : 'eye'} color="#718096" size={20} />
               </TouchableOpacity>
             </View>
+            {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
 
             <TouchableOpacity onPress={handleForgotPassword} disabled={loading}>
               <Text style={styles.forgot}>Forgot Password?</Text>
@@ -298,7 +334,7 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   headerContainer: { 
-    marginBottom: 40,
+    marginBottom: 30,
   },
   title: { 
     fontSize: 34, 
@@ -326,12 +362,24 @@ const styles = StyleSheet.create({
     borderRadius: 30, 
     paddingHorizontal: 20,
     height: 58,
-    marginBottom: 18,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
+    marginBottom: 6,
+    elevation: 0,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  inputErrorBorder: {
+    borderWidth: 1.5,
+    borderColor: '#E53E3E',
+  },
+  errorText: {
+    color: '#E53E3E',
+    fontSize: 12,
+    marginLeft: 20,
+    marginBottom: 12,
+  },
+  generalErrorContainer: {
+    marginBottom: 15,
+    paddingHorizontal: 4,
   },
   inputIcon: {
     marginRight: 12,
@@ -341,6 +389,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1A202C',
     height: '100%',
+    backgroundColor: 'transparent',
   },
   eyeIcon: {
     padding: 4,
