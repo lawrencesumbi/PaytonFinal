@@ -32,7 +32,6 @@ interface AllowanceDashboardItem {
   spender_id: string;
   spender_name: string;
   spender_avatar_url: string | null;
-  isActive: boolean;
   received_at: string;
 }
 
@@ -60,7 +59,7 @@ const COLORS = {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [activeAllowances, setActiveAllowances] = useState<AllowanceDashboardItem[]>([]);
+  const [allAllowances, setAllAllowances] = useState<AllowanceDashboardItem[]>([]);
   const [connectedSpenders, setConnectedSpenders] = useState<ConnectedSpender[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -88,9 +87,7 @@ export default function HomeScreen() {
         .single();
       setSponsorProfile(profile);
 
-      const today = new Date().toISOString().split('T')[0];
-
-      // 1. Fetch active allowances with received_at included
+      // 1. Fetch ALL allowances with received_at included (regardless of date range)
       const { data: allowancesData, error: allowancesError } = await supabase
         .from('allowances')
         .select(`
@@ -103,7 +100,7 @@ export default function HomeScreen() {
 
       if (allowancesError) throw allowancesError;
 
-      // 2. Fetch connected spenders gikan sa sponsor_spenders table
+      // 2. Fetch connected spenders from sponsor_spenders table
       const { data: connectedData, error: connectedError } = await supabase
         .from('sponsor_spenders')
         .select(`
@@ -119,7 +116,7 @@ export default function HomeScreen() {
       let calculatedAllocated = 0;
       let calculatedSpent = 0;
 
-      const activeList: AllowanceDashboardItem[] = [];
+      const allowancesList: AllowanceDashboardItem[] = [];
       const spendersMap = new Map<string, ConnectedSpender>();
 
       (connectedData || []).forEach((item: any) => {
@@ -134,17 +131,15 @@ export default function HomeScreen() {
 
       (allowancesData || []).forEach((item: any) => {
         const allowanceAmount = Number(item.amount);
-        const isActive = item.start_date <= today && item.end_date >= today;
 
         const spentForAllowance = (item.expenses || []).reduce(
           (sum: number, exp: { amount: number }) => sum + Number(exp.amount),
           0
         );
 
-        if (isActive) {
-          calculatedAllocated += allowanceAmount;
-          calculatedSpent += spentForAllowance;
-        }
+        // Include all fetched allowances in totals
+        calculatedAllocated += allowanceAmount;
+        calculatedSpent += spentForAllowance;
 
         const formattedItem: AllowanceDashboardItem = {
           id: item.id,
@@ -156,16 +151,13 @@ export default function HomeScreen() {
           spender_id: item.spender_id,
           spender_name: item.profiles?.full_name || 'Unknown',
           spender_avatar_url: item.profiles?.avatar_url || null,
-          isActive,
           received_at: item.received_at,
         };
 
-        if (isActive) {
-          activeList.push(formattedItem);
-        }
+        allowancesList.push(formattedItem);
       });
 
-      setActiveAllowances(activeList);
+      setAllAllowances(allowancesList);
       setConnectedSpenders(Array.from(spendersMap.values()));
       setTotalAllocated(calculatedAllocated);
       setTotalRemaining(Math.max(0, calculatedAllocated - calculatedSpent));
@@ -214,7 +206,6 @@ export default function HomeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Find profile matching the email
       const { data: targetProfile, error: profileError } = await supabase
         .from('profiles')
         .select('id, full_name')
@@ -226,13 +217,11 @@ export default function HomeScreen() {
         return;
       }
 
-      // Check if trying to connect to yourself
       if (targetProfile.id === user.id) {
         Alert.alert('Invalid Action', 'You cannot connect your own account as a spender.');
         return;
       }
 
-      // 2. Check if this spender is already connected to ANY sponsor (or already connected to you)
       const { data: existingConnection, error: checkError } = await supabase
         .from('sponsor_spenders')
         .select('sponsor_id, status')
@@ -253,7 +242,6 @@ export default function HomeScreen() {
         return;
       }
 
-      // 3. Insert into sponsor_spenders table if no existing connection found
       const { error: insertError } = await supabase
         .from('sponsor_spenders')
         .insert({
@@ -283,11 +271,10 @@ export default function HomeScreen() {
   };
 
   const filteredAllowances = selectedSpenderId
-    ? activeAllowances.filter(a => a.spender_id === selectedSpenderId)
-    : activeAllowances;
+    ? allAllowances.filter(a => a.spender_id === selectedSpenderId)
+    : allAllowances;
 
   const totalSpent = Math.max(0, totalAllocated - totalRemaining);
-  const overallSpentPercent = totalAllocated > 0 ? Math.min(100, Math.round((totalSpent / totalAllocated) * 100)) : 0;
   const currentDateFormatted = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
 
   const formatDateRange = (startDateStr: string, endDateStr: string) => {
@@ -400,7 +387,6 @@ export default function HomeScreen() {
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.horizontalSpendersContainer}
                 >
-                  {/* CHANGED: Opens the Add Spender Modal instead of router.push */}
                   <TouchableOpacity
                     style={styles.addSpenderItem}
                     activeOpacity={0.7}
@@ -440,10 +426,10 @@ export default function HomeScreen() {
                   })}
                 </ScrollView>
 
-                {/* ACTIVE ALLOWANCES HEADER */}
+                {/* ALL ALLOWANCES HEADER */}
                 <View style={[styles.sectionHeader, { marginTop: 15 }]}>
                   <Text style={styles.sectionTitle}>Allowances</Text>
-                  <Text style={styles.seeAllText}>{filteredAllowances.length} active</Text>
+                  <Text style={styles.seeAllText}>{filteredAllowances.length} total</Text>
                 </View>
               </>
             }
@@ -453,14 +439,13 @@ export default function HomeScreen() {
                   <Ionicons name="wallet-outline" size={22} color={COLORS.deepTeal} />
                 </View>
                 <Text style={styles.emptyTitle}>
-                  {selectedSpenderId ? 'No allowances for this spender' : 'No active allowances'}
+                  {selectedSpenderId ? 'No allowances for this spender' : 'No allowances found'}
                 </Text>
                 <Text style={styles.emptySubtitle}>
                   {selectedSpenderId
-                    ? 'This member does not have any active allowances set up yet.'
-                    : 'Connect with a spender above and set up their first allowance by clicking the (+) button at the bottom.'}
+                    ? 'This member does not have any allowances set up yet.'
+                    : 'Connect with a spender above and set up their first allowance.'}
                 </Text>
-                
               </View>
             }
             renderItem={({ item }) => {
