@@ -49,11 +49,13 @@ export default function SponsorTabsLayout() {
   const isMonitoringScreen = pathname === "/monitoring" || pathname.includes("monitoring");
   const isInsightScreen = pathname === "/insight" || pathname.includes("insight");
   
-  // Only hide the AI button on the insight screen (or keep it visible everywhere if you prefer)
+  // 1. Check if the current route is allowance
+  const isAllowanceScreen = pathname === "/allowance" || pathname.includes("allowance");
+  
   const shouldHideAiButton = isInsightScreen; 
   
-  // Only hide the tab bar on full-screen views like insight (monitoring is a regular tab, so keep it visible!)
-  const shouldHideTabBar = isInsightScreen;
+  // 2. Hide the tab bar if it's either the insight screen OR the allowance screen
+  const shouldHideTabBar = isInsightScreen || isAllowanceScreen;
 
   // Animation values for the bubble & button
   const bubbleScale = useSharedValue(0);
@@ -148,9 +150,9 @@ export default function SponsorTabsLayout() {
         
 
         <Tabs.Screen
-          name="monitoring"
+          name="allowance"
           options={{
-            title: "Monitoring",
+            title: "Add Allowance",
             tabBarLabelStyle: styles.monitoringLabel,
             tabBarIcon: ({ focused }: any) => (
               <View
@@ -160,7 +162,7 @@ export default function SponsorTabsLayout() {
                 ]}
               >
                 <Ionicons
-                  name={focused ? "pulse" : "pulse-outline"}
+                  name={focused ? "add" : "add-outline"}
                   size={30}
                   color="#FFFFFF"
                 />
@@ -187,7 +189,7 @@ export default function SponsorTabsLayout() {
         />
 
         <Tabs.Screen name="members" options={{ href: null }} />
-        <Tabs.Screen name="allowance" options={{ href: null }} />
+        <Tabs.Screen name="monitoring" options={{ href: null }} />
 
       </Tabs>
 

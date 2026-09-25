@@ -347,11 +347,20 @@ export default function HomeScreen() {
             <View style={styles.walletIconContainer}>
               <Ionicons name="wallet-outline" size={12} color={COLORS.deepTeal} />
             </View>
-            <Text style={styles.heroLabel}>TOTAL ALLOCATED ALLOWANCE</Text>
+            <Text style={styles.heroLabel}>TOTAL REMAINING</Text>
           </View>
 
           <View style={styles.heroProgressTrack}>
-            <View style={[styles.heroProgressBar, { width: `${100 - overallSpentPercent}%` }]} />
+            <View 
+              style={[
+                styles.heroProgressBar, 
+                { 
+                  width: totalAllocated === 0 || totalRemaining === 0 
+                    ? '0%' 
+                    : `${Math.max(0, Math.min(100, ((totalRemaining / totalAllocated) * 100)))}%` 
+                }
+              ]} 
+            />
           </View>
 
           <View style={styles.heroAmountRow}>
@@ -382,7 +391,7 @@ export default function HomeScreen() {
               <>
                 {/* Connected Spenders Section */}
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Connected Spenders</Text>
+                  <Text style={styles.sectionTitle}>Spenders</Text>
                   <Text style={styles.seeAllText}>{connectedSpenders.length} members</Text>
                 </View>
 
@@ -433,7 +442,7 @@ export default function HomeScreen() {
 
                 {/* ACTIVE ALLOWANCES HEADER */}
                 <View style={[styles.sectionHeader, { marginTop: 15 }]}>
-                  <Text style={styles.sectionTitle}>Active Allowances</Text>
+                  <Text style={styles.sectionTitle}>Allowances</Text>
                   <Text style={styles.seeAllText}>{filteredAllowances.length} active</Text>
                 </View>
               </>
@@ -449,16 +458,9 @@ export default function HomeScreen() {
                 <Text style={styles.emptySubtitle}>
                   {selectedSpenderId
                     ? 'This member does not have any active allowances set up yet.'
-                    : 'Connect with a spender above and set up their first allowance.'}
+                    : 'Connect with a spender above and set up their first allowance by clicking the (+) button at the bottom.'}
                 </Text>
-                <TouchableOpacity
-                  style={styles.navigateBtn}
-                  activeOpacity={0.85}
-                  onPress={() => setIsAddModalVisible(true)}
-                >
-                  <Text style={styles.navigateBtnText}>Connect New Spender</Text>
-                  <Ionicons name="arrow-forward" size={13} color={COLORS.white} />
-                </TouchableOpacity>
+                
               </View>
             }
             renderItem={({ item }) => {
@@ -946,6 +948,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ECEFF3',
     marginTop: 10,
+    paddingVertical: 75,
   },
   emptyIconCircle: {
     width: 44, height: 44, borderRadius: 22,
