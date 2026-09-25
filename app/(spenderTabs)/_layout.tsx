@@ -240,6 +240,8 @@ export default function SpenderLayout() {
         <Tabs.Screen name="Budgetcategorydetails" options={{ href: null }} />
       </Tabs>
 
+
+{/* */}
       {!shouldHideAiButton && (
         <View style={styles.aiContainer}>
           <Animated.View style={[styles.speechBubble, animatedBubbleStyle]}>
@@ -262,6 +264,9 @@ export default function SpenderLayout() {
           </Animated.View>
         </View>
       )}
+
+
+
     </>
   );
 }

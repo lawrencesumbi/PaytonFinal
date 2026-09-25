@@ -145,20 +145,7 @@ export default function SponsorTabsLayout() {
           }}
         />
 
-        <Tabs.Screen
-          name="allowance"
-          options={{
-            title: "Allowance",
-            tabBarIcon: ({ color, focused }: any) => (
-              <TabIcon
-                color={color}
-                focused={focused}
-                activeIcon="wallet"
-                inactiveIcon="wallet-outline"
-              />
-            ),
-          }}
-        />
+        
 
         <Tabs.Screen
           name="monitoring"
@@ -182,20 +169,7 @@ export default function SponsorTabsLayout() {
           }}
         />
 
-        <Tabs.Screen
-          name="members"
-          options={{
-            title: "Members",
-            tabBarIcon: ({ color, focused }: any) => (
-              <TabIcon
-                color={color}
-                focused={focused}
-                activeIcon="people"
-                inactiveIcon="people-outline"
-              />
-            ),
-          }}
-        />
+        
 
         <Tabs.Screen
           name="profile"
@@ -211,6 +185,10 @@ export default function SponsorTabsLayout() {
             ),
           }}
         />
+
+        <Tabs.Screen name="members" options={{ href: null }} />
+        <Tabs.Screen name="allowance" options={{ href: null }} />
+
       </Tabs>
 
       

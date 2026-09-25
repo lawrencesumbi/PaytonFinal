@@ -3,15 +3,12 @@ import { Tabs, usePathname, useRouter } from "expo-router";
 import type { ComponentProps } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
-  Image,
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+  View
 } from "react-native";
-import Animated, {
+import {
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -240,6 +237,8 @@ export default function PersonalLayout() {
         <Tabs.Screen name="Budgetcategorydetails" options={{ href: null }} />
       </Tabs>
 
+{/*  
+
       {!shouldHideAiButton && (
         <View style={styles.aiContainer}>
           <Animated.View style={[styles.speechBubble, animatedBubbleStyle]}>
@@ -262,6 +261,10 @@ export default function PersonalLayout() {
           </Animated.View>
         </View>
       )}
+
+*/}
+
+
     </>
   );
 }

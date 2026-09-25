@@ -8,12 +8,14 @@ import {
   Alert,
   FlatList,
   Image,
+  Modal,
   StatusBar as NativeStatusBar,
   Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -68,6 +70,11 @@ export default function HomeScreen() {
 
   const [selectedSpenderId, setSelectedSpenderId] = useState<string | null>(null);
 
+  // Modal States for Adding Spender
+  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [spenderEmail, setSpenderEmail] = useState('');
+  const [submittingSpender, setSubmittingSpender] = useState(false);
+
   const fetchDashboardData = async (isRefreshing = false) => {
     try {
       if (!isRefreshing) setLoading(true);
@@ -83,10 +90,7 @@ export default function HomeScreen() {
 
       const today = new Date().toISOString().split('T')[0];
 
-      // 1. Fetch active allowances para sa listahan sa cards ug calculations
-      // Inside fetchDashboardData()
-
-      // 1. Fetch active allowances with received_at included in the select string
+      // 1. Fetch active allowances with received_at included
       const { data: allowancesData, error: allowancesError } = await supabase
         .from('allowances')
         .select(`
@@ -95,11 +99,11 @@ export default function HomeScreen() {
           expenses (amount)
         `)
         .eq('sponsor_id', user.id)
-        .order('received_at', { ascending: false }); // <-- 2. Sort by received_at descending (latest to oldest)
+        .order('received_at', { ascending: false });
 
       if (allowancesError) throw allowancesError;
 
-      // 2. Fetch ang tanang connected spenders direkta gikan sa sponsor_spenders table
+      // 2. Fetch connected spenders gikan sa sponsor_spenders table
       const { data: connectedData, error: connectedError } = await supabase
         .from('sponsor_spenders')
         .select(`
@@ -118,7 +122,6 @@ export default function HomeScreen() {
       const activeList: AllowanceDashboardItem[] = [];
       const spendersMap = new Map<string, ConnectedSpender>();
 
-      // I-load una ang tanang connected spenders aron maapil bisan kadtong walay allowance
       (connectedData || []).forEach((item: any) => {
         if (item.profiles) {
           spendersMap.set(item.profiles.id, {
@@ -129,7 +132,6 @@ export default function HomeScreen() {
         }
       });
 
-      // Sunod, i-process ang allowances para sa active list ug calculations
       (allowancesData || []).forEach((item: any) => {
         const allowanceAmount = Number(item.amount);
         const isActive = item.start_date <= today && item.end_date >= today;
@@ -200,6 +202,79 @@ export default function HomeScreen() {
   const handleEdit = (item: AllowanceDashboardItem) =>
     router.push({ pathname: '/allowance', params: { id: item.id } });
 
+  // Handle adding a new spender via modal submission
+  const handleAddSpenderSubmit = async () => {
+    if (!spenderEmail.trim()) {
+      Alert.alert('Error', 'Please enter a valid email address.');
+      return;
+    }
+
+    try {
+      setSubmittingSpender(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Find profile matching the email
+      const { data: targetProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('email', spenderEmail.trim().toLowerCase())
+        .single();
+
+      if (profileError || !targetProfile) {
+        Alert.alert('Not Found', 'No user account found with this email address.');
+        return;
+      }
+
+      // Check if trying to connect to yourself
+      if (targetProfile.id === user.id) {
+        Alert.alert('Invalid Action', 'You cannot connect your own account as a spender.');
+        return;
+      }
+
+      // 2. Check if this spender is already connected to ANY sponsor (or already connected to you)
+      const { data: existingConnection, error: checkError } = await supabase
+        .from('sponsor_spenders')
+        .select('sponsor_id, status')
+        .eq('spender_id', targetProfile.id)
+        .maybeSingle();
+
+      if (checkError) throw checkError;
+
+      if (existingConnection) {
+        if (existingConnection.sponsor_id === user.id) {
+          Alert.alert('Already Connected', 'This spender is already connected to your account.');
+        } else {
+          Alert.alert(
+            'Connection Unavailable',
+            'This spender is already connected to another sponsor and cannot be linked.'
+          );
+        }
+        return;
+      }
+
+      // 3. Insert into sponsor_spenders table if no existing connection found
+      const { error: insertError } = await supabase
+        .from('sponsor_spenders')
+        .insert({
+          sponsor_id: user.id,
+          spender_id: targetProfile.id,
+          status: 'accepted',
+        });
+
+      if (insertError) throw insertError;
+
+      Alert.alert('Success', 'Spender connected successfully!');
+      setSpenderEmail('');
+      setIsAddModalVisible(false);
+      fetchDashboardData(true);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to connect spender.');
+    } finally {
+      setSubmittingSpender(false);
+    }
+  };
+
   const initials = (sponsorProfile?.full_name || 'S')
     .split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -227,12 +302,9 @@ export default function HomeScreen() {
       const endDay = String(end.getDate()).padStart(2, '0');
       const endYear = end.getFullYear();
 
-      // Kung parehas ra og bulan ug tuig
       if (startMonth === endMonth && start.getFullYear() === endYear) {
         return `${startMonth} ${startDay} - ${endDay}, ${endYear}`;
       }
-
-      // Kung lahi og bulan o tuig
       return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${endYear}`;
     } catch (e) {
       return `${startDateStr} to ${endDateStr}`;
@@ -293,7 +365,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* BODY CONTENT / SINGLE FLATLIST STRUCTURE TO PREVENT GAP & REFRESH BUGS */}
+      {/* BODY CONTENT */}
       <View style={styles.bodyContent}>
         {loading && !refreshing ? (
           <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
@@ -307,67 +379,65 @@ export default function HomeScreen() {
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.deepTeal]} tintColor={COLORS.deepTeal} />
             }
             ListHeaderComponent={
-  <>
-    {/* Connected Spenders Section */}
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>Connected Spenders</Text>
-      <Text style={styles.seeAllText}>{connectedSpenders.length} members</Text>
-    </View>
-
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.horizontalSpendersContainer}
-    >
-      <TouchableOpacity
-        style={styles.addSpenderItem}
-        activeOpacity={0.7}
-        onPress={() => router.push('/(sponsorTabs)/members')}
-      >
-        <View style={styles.addDashedCircle}>
-          <Ionicons name="add" size={22} color={COLORS.deepTeal} />
-        </View>
-        <Text style={styles.addSpenderLabel} numberOfLines={1}>Add</Text>
-      </TouchableOpacity>
-
-      {connectedSpenders.map((spender) => {
-        const firstName = getFirstName(spender.full_name);
-        const spenderInitials = spender.full_name
-          .split(' ')
-          .map((w) => w[0])
-          .slice(0, 2)
-          .join('')
-          .toUpperCase();
-
-        return (
-          <View
-            key={spender.id}
-            style={styles.spenderHorizontalItem}
-          >
-            <View style={styles.avatarBorderRing}>
-              {spender.avatar_url ? (
-                <Image source={{ uri: spender.avatar_url }} style={styles.spenderGridAvatar} />
-              ) : (
-                <View style={styles.spenderGridAvatarPlaceholder}>
-                  <Text style={styles.spenderGridInitials}>{spenderInitials}</Text>
+              <>
+                {/* Connected Spenders Section */}
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Connected Spenders</Text>
+                  <Text style={styles.seeAllText}>{connectedSpenders.length} members</Text>
                 </View>
-              )}
-            </View>
-            <Text style={styles.spenderGridFirstName} numberOfLines={1}>
-              {firstName}
-            </Text>
-          </View>
-        );
-      })}
-    </ScrollView>
 
-    {/* ACTIVE ALLOWANCES HEADER WITH COUNTER BADGE */}
-    <View style={[styles.sectionHeader, { marginTop: 15 }]}>
-            <Text style={styles.sectionTitle}>Active Allowances</Text>
-            <Text style={styles.seeAllText}>{filteredAllowances.length} active</Text>
-    </View>
-  </>
-}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.horizontalSpendersContainer}
+                >
+                  {/* CHANGED: Opens the Add Spender Modal instead of router.push */}
+                  <TouchableOpacity
+                    style={styles.addSpenderItem}
+                    activeOpacity={0.7}
+                    onPress={() => setIsAddModalVisible(true)}
+                  >
+                    <View style={styles.addDashedCircle}>
+                      <Ionicons name="add" size={22} color={COLORS.deepTeal} />
+                    </View>
+                    <Text style={styles.addSpenderLabel} numberOfLines={1}>Add</Text>
+                  </TouchableOpacity>
+
+                  {connectedSpenders.map((spender) => {
+                    const firstName = getFirstName(spender.full_name);
+                    const spenderInitials = spender.full_name
+                      .split(' ')
+                      .map((w) => w[0])
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase();
+
+                    return (
+                      <View key={spender.id} style={styles.spenderHorizontalItem}>
+                        <View style={styles.avatarBorderRing}>
+                          {spender.avatar_url ? (
+                            <Image source={{ uri: spender.avatar_url }} style={styles.spenderGridAvatar} />
+                          ) : (
+                            <View style={styles.spenderGridAvatarPlaceholder}>
+                              <Text style={styles.spenderGridInitials}>{spenderInitials}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.spenderGridFirstName} numberOfLines={1}>
+                          {firstName}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* ACTIVE ALLOWANCES HEADER */}
+                <View style={[styles.sectionHeader, { marginTop: 15 }]}>
+                  <Text style={styles.sectionTitle}>Active Allowances</Text>
+                  <Text style={styles.seeAllText}>{filteredAllowances.length} active</Text>
+                </View>
+              </>
+            }
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconCircle}>
@@ -379,23 +449,22 @@ export default function HomeScreen() {
                 <Text style={styles.emptySubtitle}>
                   {selectedSpenderId
                     ? 'This member does not have any active allowances set up yet.'
-                    : 'Head to the Members tab to select a person and set up their first allowance.'}
+                    : 'Connect with a spender above and set up their first allowance.'}
                 </Text>
                 <TouchableOpacity
                   style={styles.navigateBtn}
                   activeOpacity={0.85}
-                  onPress={() => router.push('/(sponsorTabs)/members')}
+                  onPress={() => setIsAddModalVisible(true)}
                 >
-                  <Text style={styles.navigateBtnText}>Go to Members</Text>
+                  <Text style={styles.navigateBtnText}>Connect New Spender</Text>
                   <Ionicons name="arrow-forward" size={13} color={COLORS.white} />
                 </TouchableOpacity>
               </View>
             }
             renderItem={({ item }) => {
-            const remainingAmount = Math.max(0, item.amount - item.spent_amount);
-            const remainingPercent = item.amount > 0 ? Math.min(100, Math.round((remainingAmount / item.amount) * 100)) : 0;
-            
-
+              const remainingAmount = Math.max(0, item.amount - item.spent_amount);
+              const remainingPercent = item.amount > 0 ? Math.min(100, Math.round((remainingAmount / item.amount) * 100)) : 0;
+              
               const spenderInitials = item.spender_name
                 .split(' ')
                 .map((w) => w[0])
@@ -405,7 +474,6 @@ export default function HomeScreen() {
 
               return (
                 <View style={styles.allowanceCard}>
-                  {/* Top Row: Spender Avatar + Title + Edit/Delete Icons */}
                   <View style={styles.cardHeaderRow}>
                     <View style={styles.cardHeaderLeft}>
                       {item.spender_avatar_url ? (
@@ -440,7 +508,6 @@ export default function HomeScreen() {
 
                   <View style={styles.cardDivider} />
 
-                  {/* Allocated and Remaining Values */}
                   <View style={styles.amountsRow}>
                     <View style={styles.amountColumn}>
                       <Text style={styles.amountLabel}>ALLOCATED</Text>
@@ -456,12 +523,10 @@ export default function HomeScreen() {
                     </View>
                   </View>
 
-                  {/* Progress Bar */}
                   <View style={styles.progressTrack}>
                     <View style={[styles.progressBar, { width: `${remainingPercent}%` }]} />
                   </View>
 
-                  {/* Footer Row: Spent text and Percentage badge */}
                   <View style={styles.cardFooterRow}>
                     <Text style={styles.spentSoFarText}>
                       ₱{item.spent_amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} spent so far
@@ -471,7 +536,6 @@ export default function HomeScreen() {
                     </View>
                   </View>
 
-                  {/* Date Range Pill */}
                   <View style={styles.dateRangePill}>
                     <Ionicons name="calendar-outline" size={12} color={COLORS.deepTeal} />
                     <Text style={styles.dateRangeText}>
@@ -484,6 +548,60 @@ export default function HomeScreen() {
           />
         )}
       </View>
+
+      {/* ADD SPENDER MODAL */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isAddModalVisible}
+        onRequestClose={() => setIsAddModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Connect New Spender</Text>
+              <TouchableOpacity onPress={() => setIsAddModalVisible(false)}>
+                <Ionicons name="close" size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Enter your spender's registered account email address to connect them.
+            </Text>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="spender@email.com"
+              placeholderTextColor={COLORS.textMuted}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={spenderEmail}
+              onChangeText={setSpenderEmail}
+            />
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setIsAddModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalSubmitBtn}
+                onPress={handleAddSpenderSubmit}
+                disabled={submittingSpender}
+              >
+                {submittingSpender ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalSubmitText}>Connect</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -522,7 +640,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: COLORS.cyan,
   },
   avatarInitials: { color: COLORS.deepTeal, fontWeight: '700', fontSize: 13 },
-  
   dateBadge: {
     backgroundColor: 'rgba(255, 255, 255, 0.12)',
     paddingHorizontal: 12,
@@ -531,7 +648,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dateBadgeText: { color: COLORS.white, fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-
   balanceCard: {
     marginTop: 4,
   },
@@ -581,7 +697,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-
   bodyContent: {
     flex: 1,
     backgroundColor: COLORS.bg,
@@ -589,7 +704,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingTop: 16,
   },
-
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -607,25 +721,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontWeight: '600',
   },
-  activeAllowancesTitleWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  countBadge: {
-    backgroundColor: COLORS.cyan,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  countBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.deepTeal,
-  },
-
   horizontalSpendersContainer: {
     paddingHorizontal: 5,
     paddingTop: 15,
@@ -662,9 +757,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
-  avatarBorderRingActive: {
-    borderColor: COLORS.deepTeal,
-  },
   spenderGridAvatar: {
     width: 50,
     height: 50,
@@ -690,18 +782,11 @@ const styles = StyleSheet.create({
     marginTop: 3,
     textAlign: 'center',
   },
-  spenderGridFirstNameActive: {
-    color: COLORS.deepTeal,
-    fontWeight: '700',
-  },
-
   listScrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,
     gap: 14,
   },
-
-  /* ACTIVE ALLOWANCE CARD STYLING */
   allowanceCard: {
     backgroundColor: COLORS.card,
     borderRadius: 20,
@@ -712,7 +797,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 8,
-    
   },
   cardHeaderRow: {
     flexDirection: 'row',
@@ -854,7 +938,6 @@ const styles = StyleSheet.create({
     color: COLORS.deepTeal,
     fontWeight: '600',
   },
-
   emptyContainer: {
     alignItems: 'center',
     padding: 24,
@@ -884,4 +967,83 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   navigateBtnText: { color: COLORS.white, fontWeight: '700', fontSize: 12 },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginBottom: 16,
+    lineHeight: 16,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: COLORS.darkOlive,
+    backgroundColor: COLORS.bg,
+    marginBottom: 20,
+  },
+  modalButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    alignItems: 'center',
+    backgroundColor: COLORS.bg,
+  },
+  modalCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  modalSubmitBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: COLORS.deepTeal,
+  },
+  modalSubmitText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
 });

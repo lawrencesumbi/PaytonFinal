@@ -92,7 +92,12 @@ export default function RegisterScreen() {
       if (error) {
         Alert.alert("Signup Failed", error.message);
       } else {
-        router.push('/verify-email');
+        // Kung na-authenticate na dayon ang user (depende sa Supabase settings nimo)
+        if (data?.user) {
+          await navigateBasedOnRole(data.user.id);
+        } else {
+          router.replace('/role-selection');
+        }
       }
     } catch (e: any) {
       Alert.alert("Error", e.message || "An unexpected error occurred.");
