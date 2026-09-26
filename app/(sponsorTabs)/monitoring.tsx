@@ -1,785 +1,417 @@
-// app/(sponsorTabs)/monitoring.tsx
+// app/monitoring.tsx
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
-  Image,
+  Alert,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 
-// UPDATED PASTEL CARD ACCENTS  
-const CARD_PASTELS = [
-  { bg: '#EBF8F8', border: '#D0ECEE', accent: '#2CA89F' },
-  { bg: '#F4F9E6', border: '#E4EFC7', accent: '#78B133' },
-  { bg: '#FAF9E2', border: '#F1EFC0', accent: '#C8BC23' },
-];
-
-const UI_COLORS = {
-  bg: '#1F4F59',
-  surface: '#FFFFFF',
-  textMain: '#1E293B',
-  textMuted: '#64748B',
-  border: '#F1F5F9',
-  pillActiveBg: '#1E293B',
-};
-
-interface SpenderMonitoringInfo {
-  id: string; // spender_id
-  full_name: string;
-  email: string;
-  avatar_url: string | null;
-  allowance_id: string;
+interface AllowanceItem {
+  id: string;
   allowance_name: string;
-  total_allowance: number;
-  total_allocated: number;
-  total_spent: number;
-  start_date: string | null;
-  end_date: string | null;
-  is_active: boolean;
-  themeIndex?: number;
+  amount: number;
+  start_date: string;
+  end_date: string;
+  received_at: string;
 }
 
-interface ExpenseHistoryItem {
+interface ExpenseItem {
   id: string;
   description: string;
   amount: number;
-  category_name: string;
-  icon: string | null;
   spent_at: string;
+  category_id?: string;
+  categories?: {
+    name?: string;
+    icon?: string;
+  };
 }
 
+const COLORS = {
+  deepTeal: '#1F4F59',
+  headerBg: '#133D44',
+  cyan: '#54C9CC',
+  cyanLight: '#7EDDE0',
+  darkOlive: '#213502',
+  bg: '#F4F8F4',
+  card: '#FFFFFF',
+  white: '#FFFFFF',
+  textMuted: '#7E8F82',
+  danger: '#DC2626',
+  borderLight: '#E2ECE9',
+  successGreen: '#16A34A',
+};
+
 export default function MonitoringScreen() {
-  const [spenders, setSpenders] = useState<SpenderMonitoringInfo[]>([]);
+  const router = useRouter();
+  const { spenderId } = useLocalSearchParams<{ spenderId: string }>();
 
-  const [selectedSpender, setSelectedSpender] = useState<SpenderMonitoringInfo | null>(null);
-  const [expenses, setExpenses] = useState<ExpenseHistoryItem[]>([]);
-  const [filteredExpenses, setFilteredExpenses] = useState<ExpenseHistoryItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [spenderName, setSpenderName] = useState('Spender Log');
+  const [allowances, setAllowances] = useState<AllowanceItem[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
 
-  const [loadingSpenders, setLoadingSpenders] = useState(true);
-  const [loadingExpenses, setLoadingExpenses] = useState(false);
-
-  // 1. FETCH MASTER LIST OF ACTIVE SPENDERS WITH ALLOWANCE-SPECIFIC TOTALS
-  const fetchMonitoredSpenders = async (showLoadingIndicator = true) => {
+  const fetchMonitoringData = async () => {
+    if (!spenderId) return;
     try {
-      if (showLoadingIndicator) setLoadingSpenders(true);
-      const { data: { user: currentSponsor } } = await supabase.auth.getUser();
-      if (!currentSponsor) return;
+      setLoading(true);
 
-      const today = new Date().toISOString().split('T')[0];
+      // Fetch Spender Profile Name
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', spenderId)
+        .single();
 
-      const { data: allowancesData, error: allowanceError } = await supabase
+      if (profile?.full_name) {
+        setSpenderName(profile.full_name);
+      }
+
+      // Fetch Allowances for this spender
+      const { data: allowanceData, error: allowanceError } = await supabase
         .from('allowances')
-        .select(`
-          id,
-          allowance_name,
-          amount,
-          start_date,
-          end_date,
-          received_at,
-          spender_id,
-          profiles!spender_id (
-            full_name,
-            email,
-            avatar_url
-          )
-        `)
-        .eq('sponsor_id', currentSponsor.id)
-        .order('received_at', { ascending: false });
+        .select('*')
+        .eq('spender_id', spenderId)
+        .order('start_date', { ascending: false });
 
       if (allowanceError) throw allowanceError;
+      setAllowances(allowanceData || []);
 
-      if (!allowancesData || allowancesData.length === 0) {
-        setSpenders([]);
-        return;
-      }
-
-      const activeAllowances = allowancesData.filter((allowance: any) => {
-        const startDate = allowance.start_date;
-        const endDate = allowance.end_date;
-        return Boolean(startDate && endDate && startDate <= today && endDate >= today);
-      });
-
-      if (activeAllowances.length === 0) {
-        setSpenders([]);
-        return;
-      }
-
-      const spenderIds = activeAllowances
-        .map((a: any) => a.spender_id)
-        .filter(Boolean);
-
-      let budgetsMap: Record<string, any[]> = {};
-
-      if (spenderIds.length > 0) {
-        const { data: budgetsData, error: budgetsError } = await supabase
-          .from('budgets')
-          .select(`
-            id,
-            user_id,
-            allocated_amount,
-            expenses (
-              amount,
-              allowance_id
-            )
-          `)
-          .in('user_id', spenderIds);
-
-        if (budgetsError) console.error("Budgets fetch error:", budgetsError.message);
-
-        if (budgetsData) {
-          budgetsData.forEach((b: any) => {
-            if (!budgetsMap[b.user_id]) budgetsMap[b.user_id] = [];
-            budgetsMap[b.user_id].push(b);
-          });
-        }
-      }
-
-      const formattedSpenders: SpenderMonitoringInfo[] = activeAllowances.map((allowance: any, index: number) => {
-        const userBudgets = budgetsMap[allowance.spender_id] || [];
-
-        let totalAllocated = 0;
-        let totalSpent = 0;
-
-        userBudgets.forEach((budget: any) => {
-          const expensesList = budget.expenses || [];
-
-          const allowanceExpenses = expensesList.filter(
-            (exp: any) => exp.allowance_id === allowance.id
-          );
-
-          const budgetSpent = allowanceExpenses.reduce(
-            (sum: number, exp: any) => sum + Number(exp.amount || 0),
-            0
-          );
-
-          totalSpent += budgetSpent;
-
-          if (allowanceExpenses.length > 0) {
-            totalAllocated += Number(budget.allocated_amount || 0);
-          }
-        });
-
-        return {
-          id: allowance.spender_id,
-          full_name: allowance.profiles?.full_name || 'Spender User',
-          email: allowance.profiles?.email || 'No Email Registered',
-          avatar_url: allowance.profiles?.avatar_url || null,
-          allowance_id: allowance.id,
-          allowance_name: allowance.allowance_name || 'Allowance',
-          total_allowance: Number(allowance.amount || 0),
-          total_allocated: totalAllocated,
-          total_spent: totalSpent,
-          start_date: allowance.start_date,
-          end_date: allowance.end_date,
-          received_at: allowance.received_at, // <--- Optional: include if tracked in your interface
-          is_active: true,
-          themeIndex: index % CARD_PASTELS.length
-        };
-      });
-
-      // SORT BY received_at DESCENDING (Newest first)
-      formattedSpenders.sort((a: any, b: any) => {
-        const dateA = new Date(a.received_at || 0).getTime();
-        const dateB = new Date(b.received_at || 0).getTime();
-        return dateB - dateA;
-      });
-
-      // Re-assign themeIndex based on the final sorted order so colors match consistently
-      const reindexedSpenders = formattedSpenders.map((spender, idx) => ({
-        ...spender,
-        themeIndex: idx % CARD_PASTELS.length
-      }));
-
-      setSpenders(reindexedSpenders);
-    } catch (error: any) {
-      console.error("Fetch Monitored Spenders Error:", error.message);
-    } finally {
-      setLoadingSpenders(false);
-    }
-  };
-
-  // 2. FETCH SPECIFIC TRANSACTIONS FILTERED BY ALLOWANCE ID & GET CATEGORY ICON
-  const fetchSpenderExpenses = async (spenderId: string, allowanceId: string) => {
-    try {
-      setLoadingExpenses(true);
-
-      const { data: budgetsData, error: budgetError } = await supabase
-        .from('budgets')
+      // Fetch Expenses logged by this spender via their allowances
+      const { data: expenseData, error: expenseError } = await supabase
+        .from('expenses')
         .select(`
-          id,
-          categories (
-            name,
-            icon
-          ),
-          expenses!inner (
-            id,
-            description,
-            amount,
-            spent_at,
-            allowance_id
-          )
+          id, description, amount, spent_at, category_id,
+          allowances!inner (spender_id),
+          categories (name, icon)
         `)
-        .eq('user_id', spenderId)
-        .eq('expenses.allowance_id', allowanceId);
+        .eq('allowances.spender_id', spenderId)
+        .order('spent_at', { ascending: false });
 
-      if (budgetError && budgetError.code !== 'PGRST116') {
-        console.error("Fetch Spender Expenses Error:", budgetError.message);
-      }
+      if (expenseError) throw expenseError;
+      setExpenses(
+        (expenseData || []).map((expense) => ({
+          ...expense,
+          categories: Array.isArray(expense.categories)
+            ? expense.categories[0]
+            : expense.categories,
+        }))
+      );
 
-      const allExpenses: ExpenseHistoryItem[] = [];
-
-      (budgetsData || []).forEach((budget: any) => {
-        const categoryName = budget.categories?.name || 'General Expense';
-        const categoryIcon = budget.categories?.icon || null;
-        const expensesList = budget.expenses || [];
-
-        expensesList.forEach((exp: any) => {
-          allExpenses.push({
-            id: exp.id,
-            description: exp.description || 'No Description',
-            amount: Number(exp.amount || 0),
-            spent_at: exp.spent_at || new Date().toISOString(),
-            category_name: categoryName,
-            icon: categoryIcon
-          });
-        });
-      });
-
-      allExpenses.sort((a, b) => b.spent_at.localeCompare(a.spent_at));
-      setExpenses(allExpenses);
-      applySearchFilter(searchQuery, allExpenses);
-    } catch (error: any) {
-      console.error("Fetch Spender Expenses Error:", error.message);
+    } catch (e: any) {
+      console.error('Error loading monitoring data:', e.message);
     } finally {
-      setLoadingExpenses(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchMonitoredSpenders();
-  }, []);
+    fetchMonitoringData();
+  }, [spenderId]);
 
-  const applySearchFilter = (query: string, list = expenses) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      setFilteredExpenses(list);
-    } else {
-      const lowerQuery = query.toLowerCase();
-      setFilteredExpenses(
-        list.filter(
-          exp =>
-            exp.description.toLowerCase().includes(lowerQuery) ||
-            exp.category_name.toLowerCase().includes(lowerQuery)
-        )
-      );
+  const handleDeleteAllowance = (allowanceId: string) => {
+    Alert.alert('Delete Allowance', 'Are you sure you want to remove this allowance item?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('allowances').delete().eq('id', allowanceId);
+          if (error) {
+            Alert.alert('Error', 'Failed to delete allowance.');
+          } else {
+            fetchMonitoringData();
+          }
+        },
+      },
+    ]);
+  };
+
+  const formatDateTime = (dateStr: string) => {
+    try {
+      if (!dateStr) return '';
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + 
+        ' at ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return dateStr;
     }
   };
 
-  const handleSelectSpender = (spender: SpenderMonitoringInfo) => {
-    setSelectedSpender(spender);
-    setSearchQuery('');
-    fetchSpenderExpenses(spender.id, spender.allowance_id);
-  };
-
-  const handleBackToList = () => {
-    setSelectedSpender(null);
-    setExpenses([]);
-    setFilteredExpenses([]);
-    setSearchQuery('');
-    fetchMonitoredSpenders(true);
-  };
-
-  const getCategoryIcon = (iconName: string | null, categoryName: string): keyof typeof Ionicons.glyphMap => {
-    if (iconName) {
-      const cleaned = iconName.toLowerCase().trim();
-      
-      if (cleaned === 'flash') return 'flash-outline';
-      if (cleaned === 'car') return 'car-outline';
-      if (cleaned === 'cart') return 'cart-outline';
-      if (cleaned === 'book') return 'book-outline';
-      if (cleaned === 'medical') return 'medical-outline';
-      if (cleaned === 'game-controller') return 'game-controller-outline';
-      if (cleaned === 'fast-food') return 'fast-food-outline';
-      
-      return `${cleaned}-outline` as any;
-    }
-
-    switch (categoryName?.toLowerCase()) {
-      case 'food':
-      case 'food & dining': return 'fast-food-outline';
-      case 'travel':
-      case 'transport': return 'car-outline';
-      case 'education':
-      case 'books': return 'book-outline';
-      case 'bills':
-      case 'utilities': return 'receipt-outline';
-      default: return 'cart-outline';
+  const formatDateOnly = (dateStr: string) => {
+    try {
+      if (!dateStr) return '';
+      // Append time or parse safely if it's a pure YYYY-MM-DD date string
+      const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch {
+      return dateStr;
     }
   };
-
-  const formatAllowancePeriod = (startDate: string | null, endDate: string | null) => {
-    if (!startDate && !endDate) return 'No Date Set';
-
-    const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-
-    if (startDate && endDate) {
-      const start = new Date(startDate).toLocaleDateString('en-US', options);
-      const end = new Date(endDate).toLocaleDateString('en-US', { ...options, year: 'numeric' });
-      return `${start} - ${end}`;
-    }
-
-    if (startDate) {
-      return `From ${new Date(startDate).toLocaleDateString('en-US', { ...options, year: 'numeric' })}`;
-    }
-
-    return `Until ${new Date(endDate!).toLocaleDateString('en-US', { ...options, year: 'numeric' })}`;
-  };
-
-  const formatExpenseDate = (dateString: string) => {
-    if (!dateString) return '';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
-
-  const activeSpenderTheme = selectedSpender
-    ? CARD_PASTELS[selectedSpender.themeIndex ?? 0]
-    : CARD_PASTELS[0];
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      <View style={styles.headerRow} />
-
-      <View style={styles.content}>
-        {selectedSpender ? (
-          <View style={{ flex: 1 }}>
-            <TouchableOpacity style={styles.backButton} onPress={handleBackToList}>
-              <Ionicons name="arrow-back" size={18} color={UI_COLORS.textMain} />
-              <Text style={styles.backButtonText}>Back to Overview</Text>
-            </TouchableOpacity>
-
-            <View style={[
-              styles.detailCard, 
-              { 
-                backgroundColor: activeSpenderTheme.bg, 
-                borderColor: activeSpenderTheme.border 
-              }
-            ]}>
-              <View style={styles.ccHeaderRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.ccTypeLabel, { color: activeSpenderTheme.accent }]}>
-                    {selectedSpender.allowance_name.toUpperCase()}
-                  </Text>
-                  <Text style={styles.ccHolderNameCompact}>{selectedSpender.full_name}</Text>
-                  <Text style={styles.ccEmailText}>
-                    {formatAllowancePeriod(selectedSpender.start_date, selectedSpender.end_date)}
-                  </Text>
-                </View>
-
-                <View style={styles.ccRightWidgets}>
-                  {selectedSpender.avatar_url ? (
-                    <Image source={{ uri: selectedSpender.avatar_url }} style={styles.avatarCircle} />
-                  ) : (
-                    <View style={[
-                      styles.avatarPlaceholder, 
-                      { backgroundColor: '#FFFFFF', borderColor: activeSpenderTheme.border }
-                    ]}>
-                      <Text style={[styles.avatarText, { color: activeSpenderTheme.accent }]}>
-                        {selectedSpender.full_name.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              <View style={styles.metricsRow}>
-                <View style={[styles.metricBadge, { backgroundColor: '#FFFFFF', borderColor: activeSpenderTheme.border }]}>
-                  <Text style={[styles.ccMiniLabel, { color: UI_COLORS.textMuted }]}>ALLOWANCE</Text>
-                  <Text style={[styles.ccMiniValue, { color: UI_COLORS.textMain }]}>
-                    ₱{selectedSpender.total_allowance.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </Text>
-                </View>
-
-                <View style={[styles.metricBadge, { backgroundColor: '#FFFFFF', borderColor: activeSpenderTheme.border }]}>
-                  <Text style={[styles.ccMiniLabel, { color: UI_COLORS.textMuted }]}>SPENT</Text>
-                  <Text style={[styles.ccMiniValue, { color: '#C5221F' }]}>
-                    ₱{selectedSpender.total_spent.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </Text>
-                </View>
-
-                <View style={[styles.metricBadge, { backgroundColor: '#FFFFFF', borderColor: activeSpenderTheme.border }]}>
-                  <Text style={[styles.ccMiniLabel, { color: activeSpenderTheme.accent }]}>REMAINING</Text>
-                  <Text style={[styles.ccMiniValue, { color: activeSpenderTheme.accent }]}>
-                    ₱{Math.max(0, selectedSpender.total_allowance - selectedSpender.total_spent).toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.searchContainer}>
-              <Ionicons name="search-outline" size={18} color={UI_COLORS.textMuted} style={styles.searchIcon} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search transactions..."
-                placeholderTextColor={UI_COLORS.textMuted}
-                value={searchQuery}
-                onChangeText={(text) => applySearchFilter(text)}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => applySearchFilter('')}>
-                  <Ionicons name="close-circle" size={16} color={UI_COLORS.textMuted} />
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {loadingExpenses ? (
-              <View style={styles.centerLoading}>
-                <ActivityIndicator size="small" color={UI_COLORS.textMain} />
-              </View>
-            ) : filteredExpenses.length === 0 ? (
-              <View style={styles.emptyExpensesBlock}>
-                <View style={styles.emptyIconWrapper}>
-                  <Ionicons name="receipt-outline" size={28} color={UI_COLORS.textMuted} />
-                </View>
-                <Text style={styles.emptyExpensesText}>No transactions found.</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={filteredExpenses}
-                keyExtractor={(item) => item.id}
-                refreshing={loadingExpenses}
-                showsVerticalScrollIndicator={false}
-                onRefresh={() => fetchSpenderExpenses(selectedSpender.id, selectedSpender.allowance_id)}
-                contentContainerStyle={styles.listContent}
-                renderItem={({ item }) => (
-                  <View style={styles.expenseListItem}>
-                    <View style={styles.expenseItemLeft}>
-                      <View style={styles.iconCircle}>
-                        <Ionicons name={getCategoryIcon(item.icon, item.category_name)} size={16} color={UI_COLORS.textMuted} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.expenseItemName} numberOfLines={1}>{item.description}</Text>
-                        <Text style={styles.expenseItemCategory}>
-                          {item.category_name} • {formatExpenseDate(item.spent_at)}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.expenseItemAmount}>- ₱{item.amount.toFixed(2)}</Text>
-                  </View>
-                )}
-              />
-            )}
-          </View>
-        ) : (
-          <View style={{ flex: 1 }}>
-            <Text style={styles.mainTitle}>Spender Monitoring</Text>
-            <Text style={styles.mainSubtitle}>Select a dependent below to inspect their ledger updates.</Text>
-
-            {loadingSpenders ? (
-              <View style={styles.centerLoading}>
-                <ActivityIndicator size="small" color={UI_COLORS.textMain} />
-              </View>
-            ) : spenders.length === 0 ? (
-              <View style={styles.emptySpendersBlock}>
-                <View style={styles.emptyIconWrapper}>
-                  <Ionicons name="analytics-outline" size={32} color={UI_COLORS.textMuted} />
-                </View>
-                <Text style={styles.emptySpendersText}>No spenders found</Text>
-                <Text style={styles.emptySubtext}>
-                  There are currently no active allowances assigned.
-                </Text>
-              </View>
-            ) : (
-              <FlatList
-                data={spenders}
-                keyExtractor={(item) => item.allowance_id || item.id}
-                refreshing={loadingSpenders}
-                showsVerticalScrollIndicator={false}
-                onRefresh={() => fetchMonitoredSpenders(true)}
-                contentContainerStyle={styles.listContent}
-                renderItem={({ item }) => {
-                  const remainingAmount = Math.max(0, item.total_allowance - item.total_spent);
-                  const remainingPercentage = item.total_allowance > 0
-                    ? Math.min(Math.max((remainingAmount / item.total_allowance) * 100, 0), 100)
-                    : 0;
-
-                  const theme = CARD_PASTELS[item.themeIndex ?? 0];
-
-                  return (
-                    <TouchableOpacity onPress={() => handleSelectSpender(item)} activeOpacity={0.85}>
-                      <View style={[
-                        styles.overviewCard, 
-                        { backgroundColor: theme.bg, borderColor: theme.border }
-                      ]}>
-                        <View style={styles.ccHeaderRow}>
-                          <View style={{ flex: 1, marginRight: 12 }}>
-                            <Text style={[styles.overviewTypeLabel, { color: theme.accent }]}>
-                              {item.allowance_name.toUpperCase()}
-                            </Text>
-                            <Text style={styles.overviewHolderName}>{item.full_name}</Text>
-                            <Text style={styles.overviewDateText}>
-                              {formatAllowancePeriod(item.start_date, item.end_date)}
-                            </Text>
-                          </View>
-
-                          <View style={styles.overviewRightCol}>
-                            {item.avatar_url ? (
-                              <Image source={{ uri: item.avatar_url }} style={styles.overviewAvatarCircle} />
-                            ) : (
-                              <View style={[styles.overviewAvatarPlaceholder, { backgroundColor: '#FFFFFF', borderColor: theme.border }]}>
-                                <Text style={[styles.overviewAvatarText, { color: theme.accent }]}>
-                                  {item.full_name.charAt(0).toUpperCase()}
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                        </View>
-
-                        <View style={styles.overviewProgressWrapper}>
-                          <View style={styles.overviewProgressRow}>
-                            <Text style={styles.overviewSubLabel}>Remaining Balance</Text>
-                            <Text style={[styles.overviewProgressText, { color: theme.accent }]}>
-                              ₱{remainingAmount.toLocaleString('en-US')} / ₱{item.total_allowance.toLocaleString('en-US')}
-                            </Text>
-                          </View>
-                          <View style={styles.overviewProgressBarTrack}>
-                            <View
-                              style={[
-                                styles.overviewProgressBarFill,
-                                {
-                                  width: `${remainingPercentage}%`,
-                                  backgroundColor: theme.accent
-                                }
-                              ]}
-                            />
-                          </View>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            )}
-          </View>
-        )}
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={20} color={COLORS.white} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>{spenderName}</Text>
+        <View style={{ width: 36 }} />
       </View>
+
+      {loading ? (
+        <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          
+          {/* RECEIPT STYLE CONTAINER FOR ALLOWANCES */}
+          <View style={styles.receiptCard}>
+            <View style={styles.receiptHeaderRow}>
+              <Ionicons name="receipt-outline" size={16} color={COLORS.deepTeal} />
+              <Text style={styles.receiptTitle}>Allocated Allowances</Text>
+            </View>
+
+            <View style={styles.receiptDividerDashed} />
+
+            {allowances.length === 0 ? (
+              <Text style={styles.emptyReceiptText}>No allowances assigned yet.</Text>
+            ) : (
+              allowances.map((item) => (
+                <View key={item.id} style={styles.receiptItemRow}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
+                    <Text style={styles.receiptItemDate}>
+                      {item.start_date && item.end_date 
+                        ? `${formatDateOnly(item.start_date)} - ${formatDateOnly(item.end_date)}`
+                        : formatDateOnly(item.start_date || item.received_at)}
+                    </Text>
+                  </View>
+                  <View style={styles.receiptRightSection}>
+                    <Text style={styles.receiptItemAmount}>+₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                    <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.deleteAllowanceBtn}>
+                      <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          {/* EXPENSES LOG LIST */}
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionHeading}>Logged Expenses</Text>
+            <Text style={styles.expenseCountText}>{expenses.length} entries</Text>
+          </View>
+
+          {expenses.length === 0 ? (
+            <View style={styles.emptyExpensesBox}>
+              <Ionicons name="wallet-outline" size={24} color={COLORS.textMuted} />
+              <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
+            </View>
+          ) : (
+            <View style={styles.expensesListContainer}>
+              {expenses.map((exp) => (
+                <View key={exp.id} style={styles.expenseCard}>
+                  <View style={styles.expenseCategoryIconCircle}>
+                    <Ionicons 
+                      name={(exp.categories?.icon as any) || 'pricetag-outline'} 
+                      size={18} 
+                      color={COLORS.deepTeal} 
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
+                    <Text style={styles.expenseTime}>{formatDateTime(exp.spent_at)}</Text>
+                  </View>
+                  <Text style={styles.expenseAmount}>-₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: UI_COLORS.bg },
-  content: { flex: 1, paddingHorizontal: 16, backgroundColor: UI_COLORS.surface, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
-  centerLoading: { flex: 1, justifyContent: 'center', alignItems: 'center', marginTop: 40 },
-  listContent: { paddingBottom: 100, paddingTop: 10, paddingHorizontal: 10 },
-  mainTitle: { fontSize: 22, fontWeight: '700', color: UI_COLORS.textMain, marginTop: 24, paddingHorizontal: 10 },
-  mainSubtitle: { fontSize: 13, color: UI_COLORS.textMuted, marginTop: 2, marginBottom: 12, lineHeight: 18, paddingHorizontal: 10 },
-
-  headerRow: {
-    height: 40,
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
   },
-
-  searchContainer: {
+  header: {
+    backgroundColor: COLORS.headerBg,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: UI_COLORS.surface,
-    borderWidth: 1,
-    borderColor: UI_COLORS.border,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 16,
-    marginHorizontal: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    paddingTop: 40,
   },
-  searchIcon: {
-    marginRight: 8,
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  searchInput: {
+  headerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.white,
     flex: 1,
-    fontSize: 13,
-    color: UI_COLORS.textMain,
-    padding: 0,
+    textAlign: 'center',
   },
-
-  overviewCard: {
+  scrollContent: {
     padding: 20,
-    borderRadius: 20,
-    marginBottom: 14,
-    borderWidth: 1.5,
+    paddingBottom: 40,
+  },
+  receiptCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
+    marginBottom: 24,
   },
-  overviewTypeLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
+  receiptHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
   },
-  overviewHolderName: {
-    fontSize: 19,
+  receiptTitle: {
+    fontSize: 14,
     fontWeight: '700',
-    color: UI_COLORS.textMain,
-    marginTop: 3,
+    color: COLORS.darkOlive,
   },
-  overviewDateText: {
-    fontSize: 12,
-    color: UI_COLORS.textMuted,
-    marginTop: 3,
-  },
-  overviewRightCol: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overviewAvatarCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-  },
-  overviewAvatarPlaceholder: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    justifyContent: 'center',
-    alignItems: 'center',
+  receiptDividerDashed: {
+    height: 1,
     borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderStyle: 'dashed',
+    marginBottom: 12,
   },
-  overviewAvatarText: {
-    fontSize: 16,
+  emptyReceiptText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    paddingVertical: 12,
+  },
+  receiptItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F4F8F4',
+  },
+  receiptItemName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
+  receiptItemDate: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  receiptRightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  receiptItemAmount: {
+    fontSize: 13,
     fontWeight: '700',
+    color: COLORS.successGreen,
   },
-  overviewProgressWrapper: {
-    marginTop: 18,
+  deleteAllowanceBtn: {
+    padding: 4,
   },
-  overviewProgressRow: {
+  sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
-  overviewSubLabel: {
+  sectionHeading: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+  },
+  expenseCountText: {
     fontSize: 12,
     fontWeight: '600',
-    color: UI_COLORS.textMuted,
+    color: COLORS.textMuted,
   },
-  overviewProgressText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  overviewProgressBarTrack: {
-    width: '100%',
-    height: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.06)',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  overviewProgressBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-
-  detailCard: {
-    padding: 20,
-    borderRadius: 20,
-    marginBottom: 20,
-    borderWidth: 1.5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-  },
-  ccHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  emptyExpensesBox: {
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 30,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
-  ccRightWidgets: {
+  emptyExpensesText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 8,
+  },
+  expensesListContainer: {
+    gap: 10,
+  },
+  expenseCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
-
-  avatarCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  expenseCategoryIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EAF6F7',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
   },
-  avatarText: {
-    fontSize: 16,
-    fontWeight: '700',
+  expenseName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
   },
-  ccTypeLabel: {
+  expenseTime: {
     fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
+    color: COLORS.textMuted,
+    marginTop: 2,
   },
-  ccEmailText: {
-    fontSize: 12,
-    color: UI_COLORS.textMuted,
-    marginTop: 3,
-  },
-  ccHolderNameCompact: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: UI_COLORS.textMain,
-    marginTop: 3,
-  },
-  metricsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 18,
-  },
-  metricBadge: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  ccMiniLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  ccMiniValue: {
+  expenseAmount: {
     fontSize: 13,
     fontWeight: '700',
-    marginTop: 3,
+    color: COLORS.danger,
   },
-
-  backButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 20, marginTop: 24 },
-  backButtonText: { fontSize: 13, fontWeight: '600', color: UI_COLORS.textMuted },
-  expenseListItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: UI_COLORS.surface, padding: 12, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: UI_COLORS.border },
-  expenseItemLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 },
-  iconCircle: { width: 32, height: 32, borderRadius: 8, backgroundColor: UI_COLORS.surface, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: UI_COLORS.border },
-  expenseItemName: { fontSize: 13, fontWeight: '600', color: UI_COLORS.textMain },
-  expenseItemCategory: { fontSize: 11, color: UI_COLORS.textMuted, marginTop: 1 },
-  expenseItemAmount: { fontSize: 13, fontWeight: '700', color: '#C5221F' },
-  emptySpendersBlock: { flex: 0.8, justifyContent: 'center', alignItems: 'center' },
-  emptyIconWrapper: { width: 56, height: 56, borderRadius: 16, backgroundColor: UI_COLORS.surface, justifyContent: 'center', alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: UI_COLORS.border },
-  emptySpendersText: { fontSize: 14, fontWeight: '600', color: UI_COLORS.textMain },
-  emptyExpensesBlock: { flex: 0.3, justifyContent: 'center', alignItems: 'center', marginTop: 20 },
-  emptyExpensesText: { fontSize: 13, fontWeight: '600', color: UI_COLORS.textMuted },
-  emptySubtext: { fontSize: 12, color: UI_COLORS.textMuted, textAlign: 'center', marginTop: 4, paddingHorizontal: 32, lineHeight: 16 },
 });

@@ -22,17 +22,22 @@ import {
 
 import { supabase } from '../../lib/supabase';
 
-interface AllowanceDashboardItem {
+interface AllowanceGroupItem {
   id: string;
   allowance_name: string;
   amount: number;
-  spent_amount: number;
   start_date: string;
   end_date: string;
+}
+
+interface SpenderAllowanceCardData {
   spender_id: string;
   spender_name: string;
   spender_avatar_url: string | null;
-  received_at: string;
+  allowances: AllowanceGroupItem[];
+  totalAllocated: number;
+  totalSpent: number;
+  totalRemaining: number;
 }
 
 interface ConnectedSpender {
@@ -59,7 +64,7 @@ const COLORS = {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const [allAllowances, setAllAllowances] = useState<AllowanceDashboardItem[]>([]);
+  const [spenderCards, setSpenderCards] = useState<SpenderAllowanceCardData[]>([]);
   const [connectedSpenders, setConnectedSpenders] = useState<ConnectedSpender[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -87,7 +92,7 @@ export default function HomeScreen() {
         .single();
       setSponsorProfile(profile);
 
-      // 1. Fetch ALL allowances with received_at included (regardless of date range)
+      // 1. Fetch ALL allowances (without is_archived column filter)
       const { data: allowancesData, error: allowancesError } = await supabase
         .from('allowances')
         .select(`
@@ -116,9 +121,7 @@ export default function HomeScreen() {
       let calculatedAllocated = 0;
       let calculatedSpent = 0;
 
-      const allowancesList: AllowanceDashboardItem[] = [];
       const spendersMap = new Map<string, ConnectedSpender>();
-
       (connectedData || []).forEach((item: any) => {
         if (item.profiles) {
           spendersMap.set(item.profiles.id, {
@@ -129,35 +132,53 @@ export default function HomeScreen() {
         }
       });
 
+      // Group allowances by spender_id
+      const spenderCardMap = new Map<string, SpenderAllowanceCardData>();
+
       (allowancesData || []).forEach((item: any) => {
         const allowanceAmount = Number(item.amount);
-
         const spentForAllowance = (item.expenses || []).reduce(
           (sum: number, exp: { amount: number }) => sum + Number(exp.amount),
           0
         );
 
-        // Include all fetched allowances in totals
         calculatedAllocated += allowanceAmount;
         calculatedSpent += spentForAllowance;
 
-        const formattedItem: AllowanceDashboardItem = {
+        const spenderId = item.spender_id;
+        const spenderName = item.profiles?.full_name || 'Unknown';
+        const spenderAvatar = item.profiles?.avatar_url || null;
+
+        if (!spenderCardMap.has(spenderId)) {
+          spenderCardMap.set(spenderId, {
+            spender_id: spenderId,
+            spender_name: spenderName,
+            spender_avatar_url: spenderAvatar,
+            allowances: [],
+            totalAllocated: 0,
+            totalSpent: 0,
+            totalRemaining: 0,
+          });
+        }
+
+        const cardData = spenderCardMap.get(spenderId)!;
+        cardData.totalAllocated += allowanceAmount;
+        cardData.totalSpent += spentForAllowance;
+        cardData.allowances.push({
           id: item.id,
           allowance_name: item.allowance_name,
           amount: allowanceAmount,
-          spent_amount: spentForAllowance,
           start_date: item.start_date,
           end_date: item.end_date,
-          spender_id: item.spender_id,
-          spender_name: item.profiles?.full_name || 'Unknown',
-          spender_avatar_url: item.profiles?.avatar_url || null,
-          received_at: item.received_at,
-        };
-
-        allowancesList.push(formattedItem);
+        });
       });
 
-      setAllAllowances(allowancesList);
+      // Compute remaining per card group
+      spenderCardMap.forEach((card) => {
+        card.totalRemaining = Math.max(0, card.totalAllocated - card.totalSpent);
+      });
+
+      setSpenderCards(Array.from(spenderCardMap.values()));
       setConnectedSpenders(Array.from(spendersMap.values()));
       setTotalAllocated(calculatedAllocated);
       setTotalRemaining(Math.max(0, calculatedAllocated - calculatedSpent));
@@ -176,23 +197,17 @@ export default function HomeScreen() {
     await fetchDashboardData(true);
   }, []);
 
-  const handleDelete = (id: string) => {
-    Alert.alert('Delete Allowance', 'Are you sure you want to delete this?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.from('allowances').delete().eq('id', id);
-          if (error) Alert.alert('Error', 'Failed to delete allowance.');
-          else fetchDashboardData();
-        },
-      },
-    ]);
+  const handleArchiveSpenderAllowances = (spenderName: string) => {
+    Alert.alert(
+      'Archive Feature', 
+      `Archive functionality for ${spenderName}'s allowances will be available soon.`,
+      [{ text: 'OK' }]
+    );
   };
 
-  const handleEdit = (item: AllowanceDashboardItem) =>
-    router.push({ pathname: '/allowance', params: { id: item.id } });
+  const handleCardPress = (spenderId: string) => {
+    router.push({ pathname: '/monitoring', params: { spenderId } });
+  };
 
   // Handle adding a new spender via modal submission
   const handleAddSpenderSubmit = async () => {
@@ -270,33 +285,11 @@ export default function HomeScreen() {
     return fullName.trim().split(' ')[0] || fullName;
   };
 
-  const filteredAllowances = selectedSpenderId
-    ? allAllowances.filter(a => a.spender_id === selectedSpenderId)
-    : allAllowances;
+  const filteredSpenderCards = selectedSpenderId
+    ? spenderCards.filter(c => c.spender_id === selectedSpenderId)
+    : spenderCards;
 
-  const totalSpent = Math.max(0, totalAllocated - totalRemaining);
   const currentDateFormatted = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
-
-  const formatDateRange = (startDateStr: string, endDateStr: string) => {
-    try {
-      const start = new Date(startDateStr);
-      const end = new Date(endDateStr);
-
-      const startMonth = start.toLocaleString('en-US', { month: 'long' });
-      const startDay = String(start.getDate()).padStart(2, '0');
-      
-      const endMonth = end.toLocaleString('en-US', { month: 'long' });
-      const endDay = String(end.getDate()).padStart(2, '0');
-      const endYear = end.getFullYear();
-
-      if (startMonth === endMonth && start.getFullYear() === endYear) {
-        return `${startMonth} ${startDay} - ${endDay}, ${endYear}`;
-      }
-      return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${endYear}`;
-    } catch (e) {
-      return `${startDateStr} to ${endDateStr}`;
-    }
-  };
 
   return (
     <View style={styles.container}>
@@ -367,8 +360,8 @@ export default function HomeScreen() {
           <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
         ) : (
           <FlatList
-            data={filteredAllowances}
-            keyExtractor={(item) => item.id}
+            data={filteredSpenderCards}
+            keyExtractor={(item) => item.spender_id}
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listScrollContent}
             refreshControl={
@@ -398,6 +391,18 @@ export default function HomeScreen() {
                     <Text style={styles.addSpenderLabel} numberOfLines={1}>Add</Text>
                   </TouchableOpacity>
 
+                  <TouchableOpacity
+                    style={[styles.spenderHorizontalItem, selectedSpenderId === null && { opacity: 1 }]}
+                    onPress={() => setSelectedSpenderId(null)}
+                  >
+                    <View style={[styles.avatarBorderRing, selectedSpenderId === null && styles.activeRing]}>
+                      <View style={styles.spenderGridAvatarPlaceholder}>
+                        <Ionicons name="apps" size={18} color={COLORS.deepTeal} />
+                      </View>
+                    </View>
+                    <Text style={styles.spenderGridFirstName}>All</Text>
+                  </TouchableOpacity>
+
                   {connectedSpenders.map((spender) => {
                     const firstName = getFirstName(spender.full_name);
                     const spenderInitials = spender.full_name
@@ -407,9 +412,15 @@ export default function HomeScreen() {
                       .join('')
                       .toUpperCase();
 
+                    const isSelected = selectedSpenderId === spender.id;
+
                     return (
-                      <View key={spender.id} style={styles.spenderHorizontalItem}>
-                        <View style={styles.avatarBorderRing}>
+                      <TouchableOpacity 
+                        key={spender.id} 
+                        style={styles.spenderHorizontalItem}
+                        onPress={() => setSelectedSpenderId(isSelected ? null : spender.id)}
+                      >
+                        <View style={[styles.avatarBorderRing, isSelected && styles.activeRing]}>
                           {spender.avatar_url ? (
                             <Image source={{ uri: spender.avatar_url }} style={styles.spenderGridAvatar} />
                           ) : (
@@ -421,7 +432,7 @@ export default function HomeScreen() {
                         <Text style={styles.spenderGridFirstName} numberOfLines={1}>
                           {firstName}
                         </Text>
-                      </View>
+                      </TouchableOpacity>
                     );
                   })}
                 </ScrollView>
@@ -429,7 +440,7 @@ export default function HomeScreen() {
                 {/* ALL ALLOWANCES HEADER */}
                 <View style={[styles.sectionHeader, { marginTop: 15 }]}>
                   <Text style={styles.sectionTitle}>Allowances</Text>
-                  <Text style={styles.seeAllText}>{filteredAllowances.length} total</Text>
+                  <Text style={styles.seeAllText}>{filteredSpenderCards.length} spenders</Text>
                 </View>
               </>
             }
@@ -443,14 +454,14 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.emptySubtitle}>
                   {selectedSpenderId
-                    ? 'This member does not have any allowances set up yet.'
+                    ? 'This member does not have any active allowances set up yet.'
                     : 'Connect with a spender above and set up their first allowance.'}
                 </Text>
               </View>
             }
             renderItem={({ item }) => {
-              const remainingAmount = Math.max(0, item.amount - item.spent_amount);
-              const remainingPercent = item.amount > 0 ? Math.min(100, Math.round((remainingAmount / item.amount) * 100)) : 0;
+              const remainingAmount = Math.max(0, item.totalAllocated - item.totalSpent);
+              const remainingPercent = item.totalAllocated > 0 ? Math.min(100, Math.round((remainingAmount / item.totalAllocated) * 100)) : 0;
               
               const spenderInitials = item.spender_name
                 .split(' ')
@@ -460,7 +471,11 @@ export default function HomeScreen() {
                 .toUpperCase();
 
               return (
-                <View style={styles.allowanceCard}>
+                <TouchableOpacity 
+                  style={styles.allowanceCard} 
+                  activeOpacity={0.9}
+                  onPress={() => handleCardPress(item.spender_id)}
+                >
                   <View style={styles.cardHeaderRow}>
                     <View style={styles.cardHeaderLeft}>
                       {item.spender_avatar_url ? (
@@ -472,34 +487,46 @@ export default function HomeScreen() {
                       )}
                       <View style={{ flex: 1, marginLeft: 10 }}>
                         <Text style={styles.cardTitleText} numberOfLines={1}>
-                          {item.allowance_name}
+                          {item.spender_name}
                         </Text>
                         <View style={styles.cardSpenderRow}>
-                          <Ionicons name="person-outline" size={11} color={COLORS.textMuted} />
+                          <Ionicons name="wallet-outline" size={11} color={COLORS.textMuted} />
                           <Text style={styles.cardSpenderName} numberOfLines={1}>
-                            {item.spender_name}
+                            {item.allowances.length} active allowance{item.allowances.length > 1 ? 's' : ''}
                           </Text>
                         </View>
                       </View>
                     </View>
 
                     <View style={styles.cardActionIcons}>
-                      <TouchableOpacity onPress={() => handleEdit(item)} style={styles.iconCircleBtn}>
-                        <Ionicons name="pencil-outline" size={14} color={COLORS.deepTeal} />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.iconCircleBtn}>
-                        <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                      <TouchableOpacity 
+                        onPress={() => handleArchiveSpenderAllowances(item.spender_name)} 
+                        style={styles.iconCircleBtn}
+                      >
+                        <Ionicons name="archive-outline" size={14} color={COLORS.deepTeal} />
                       </TouchableOpacity>
                     </View>
                   </View>
 
                   <View style={styles.cardDivider} />
 
+                  {/* List out individual allowance names under this spender */}
+                  <View style={styles.subAllowanceList}>
+                    {item.allowances.map((sub, idx) => (
+                      <View key={sub.id || idx} style={styles.subAllowanceRow}>
+                        <Text style={styles.subAllowanceName} numberOfLines={1}>• {sub.allowance_name}</Text>
+                        <Text style={styles.subAllowanceAmount}>₱{sub.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  <View style={styles.cardDivider} />
+
                   <View style={styles.amountsRow}>
                     <View style={styles.amountColumn}>
-                      <Text style={styles.amountLabel}>ALLOCATED</Text>
+                      <Text style={styles.amountLabel}>TOTAL ALLOCATED</Text>
                       <Text style={styles.allocatedAmountText}>
-                        ₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₱{item.totalAllocated.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </Text>
                     </View>
                     <View style={styles.amountColumn}>
@@ -516,20 +543,13 @@ export default function HomeScreen() {
 
                   <View style={styles.cardFooterRow}>
                     <Text style={styles.spentSoFarText}>
-                      ₱{item.spent_amount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} spent so far
+                      ₱{item.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} spent total
                     </Text>
                     <View style={styles.percentBadge}>
                       <Text style={styles.percentBadgeText}>{remainingPercent}%</Text>
                     </View>
                   </View>
-
-                  <View style={styles.dateRangePill}>
-                    <Ionicons name="calendar-outline" size={12} color={COLORS.deepTeal} />
-                    <Text style={styles.dateRangeText}>
-                      {formatDateRange(item.start_date, item.end_date)}
-                    </Text>
-                  </View>
-                </View>
+                </TouchableOpacity>
               );
             }}
           />
@@ -744,6 +764,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'transparent',
   },
+  activeRing: {
+    borderColor: COLORS.deepTeal,
+  },
   spenderGridAvatar: {
     width: 50,
     height: 50,
@@ -849,6 +872,26 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.borderLight,
     marginVertical: 12,
   },
+  subAllowanceList: {
+    gap: 6,
+  },
+  subAllowanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  subAllowanceName: {
+    fontSize: 13,
+    color: COLORS.darkOlive,
+    flex: 1,
+    marginRight: 10,
+    fontWeight: '500',
+  },
+  subAllowanceAmount: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.deepTeal,
+  },
   amountsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -890,7 +933,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
   },
   spentSoFarText: {
     fontSize: 12,
@@ -907,23 +949,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: COLORS.deepTeal,
-  },
-  dateRangePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F4F8F4',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
-  dateRangeText: {
-    fontSize: 11,
-    color: COLORS.deepTeal,
-    fontWeight: '600',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -948,15 +973,6 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: 4, marginBottom: 16,
     lineHeight: 16, paddingHorizontal: 10,
   },
-  navigateBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: COLORS.deepTeal,
-    paddingVertical: 10, paddingHorizontal: 16,
-    borderRadius: 8,
-  },
-  navigateBtnText: { color: COLORS.white, fontWeight: '700', fontSize: 12 },
-
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
