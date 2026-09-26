@@ -48,14 +48,13 @@ export default function SponsorTabsLayout() {
 
   const isMonitoringScreen = pathname === "/monitoring" || pathname.includes("monitoring");
   const isInsightScreen = pathname === "/insight" || pathname.includes("insight");
-  
-  // 1. Check if the current route is allowance
   const isAllowanceScreen = pathname === "/allowance" || pathname.includes("allowance");
+  const isProfileScreen = pathname === "/profile" || pathname.includes("profile");
   
   const shouldHideAiButton = isInsightScreen; 
   
-  // 2. Hide the tab bar if it's either the insight screen OR the allowance screen
-  const shouldHideTabBar = isInsightScreen || isAllowanceScreen;
+  // Hide the tab bar if it's insight, allowance, monitoring, or profile
+  const shouldHideTabBar = isInsightScreen || isAllowanceScreen || isMonitoringScreen || isProfileScreen;
 
   // Animation values for the bubble & button
   const bubbleScale = useSharedValue(0);
@@ -147,8 +146,6 @@ export default function SponsorTabsLayout() {
           }}
         />
 
-        
-
         <Tabs.Screen
           name="allowance"
           options={{
@@ -171,8 +168,6 @@ export default function SponsorTabsLayout() {
           }}
         />
 
-        
-
         <Tabs.Screen
           name="profile"
           options={{
@@ -192,8 +187,6 @@ export default function SponsorTabsLayout() {
         <Tabs.Screen name="monitoring" options={{ href: null }} />
 
       </Tabs>
-
-      
     </>
   );
 }
@@ -255,62 +248,5 @@ const styles = StyleSheet.create({
   },
   floatingButtonActive: {
     backgroundColor: "#1F4F59",
-  },
-  aiContainer: {
-    position: "absolute",
-    bottom: Platform.OS === "ios" ? 98 : 88,
-    right: 20,
-    alignItems: "flex-end",
-  },
-  floatingAiButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgb(255, 255, 255)",
-    borderWidth: 2,
-    borderColor: "#43E7A3",
-    shadowColor: "#1B494E",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 7,
-  },
-  paytonLogo: {
-    width: 35,
-    height: 35,
-  },
-  speechBubble: {
-    backgroundColor: "#FFFFFF",
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  speechBubbleText: {
-    color: "#1F4F59",
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  speechBubbleArrow: {
-    position: "absolute",
-    bottom: -6,
-    right: 20,
-    width: 0,
-    height: 0,
-    borderLeftWidth: 6,
-    borderRightWidth: 6,
-    borderTopWidth: 6,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderTopColor: "#FFFFFF",
   },
 });

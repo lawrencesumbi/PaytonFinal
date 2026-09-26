@@ -70,7 +70,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [totalAllocated, setTotalAllocated] = useState(0);
   const [totalRemaining, setTotalRemaining] = useState(0);
-  const [sponsorProfile, setSponsorProfile] = useState<{ full_name: string; avatar_url: string | null } | null>(null);
+  const [sponsorProfile, setSponsorProfile] = useState<{ full_name: string; avatar_url: string | null; role: string | null } | null>(null);
 
   const [selectedSpenderId, setSelectedSpenderId] = useState<string | null>(null);
 
@@ -78,6 +78,11 @@ export default function HomeScreen() {
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [spenderEmail, setSpenderEmail] = useState('');
   const [submittingSpender, setSubmittingSpender] = useState(false);
+
+  // Modal States for Deleting Spender Connection
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [spenderToDelete, setSpenderToDelete] = useState<ConnectedSpender | null>(null);
+  const [deletingSpender, setDeletingSpender] = useState(false);
 
   const fetchDashboardData = async (isRefreshing = false) => {
     try {
@@ -87,12 +92,12 @@ export default function HomeScreen() {
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name, avatar_url')
+        .select('full_name, avatar_url, role')
         .eq('id', user.id)
         .single();
       setSponsorProfile(profile);
 
-      // 1. Fetch ALL allowances (without is_archived column filter)
+      // 1. Fetch ALL allowances
       const { data: allowancesData, error: allowancesError } = await supabase
         .from('allowances')
         .select(`
@@ -209,6 +214,11 @@ export default function HomeScreen() {
     router.push({ pathname: '/monitoring', params: { spenderId } });
   };
 
+  const handleCloseAddModal = () => {
+    setSpenderEmail('');
+    setIsAddModalVisible(false);
+  };
+
   // Handle adding a new spender via modal submission
   const handleAddSpenderSubmit = async () => {
     if (!spenderEmail.trim()) {
@@ -223,7 +233,7 @@ export default function HomeScreen() {
 
       const { data: targetProfile, error: profileError } = await supabase
         .from('profiles')
-        .select('id, full_name')
+        .select('id, full_name, role')
         .eq('email', spenderEmail.trim().toLowerCase())
         .single();
 
@@ -236,6 +246,14 @@ export default function HomeScreen() {
         Alert.alert('Invalid Action', 'You cannot connect your own account as a spender.');
         return;
       }
+
+      // Ensure the user account actually has the spender role
+      if (targetProfile.role !== 'spender') {
+        Alert.alert('Invalid Role', 'This account is not registered as a spender.');
+        return;
+      }
+
+      
 
       const { data: existingConnection, error: checkError } = await supabase
         .from('sponsor_spenders')
@@ -278,6 +296,34 @@ export default function HomeScreen() {
     }
   };
 
+  // Handle deleting a connected spender
+  const handleDeleteSpenderConfirm = async () => {
+    if (!spenderToDelete) return;
+
+    try {
+      setDeletingSpender(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('sponsor_spenders')
+        .delete()
+        .eq('sponsor_id', user.id)
+        .eq('spender_id', spenderToDelete.id);
+
+      if (error) throw error;
+
+      Alert.alert('Success', `${spenderToDelete.full_name} has been disconnected.`);
+      setIsDeleteModalVisible(false);
+      setSpenderToDelete(null);
+      fetchDashboardData(true);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to remove spender.');
+    } finally {
+      setDeletingSpender(false);
+    }
+  };
+
   const initials = (sponsorProfile?.full_name || 'S')
     .split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
 
@@ -289,7 +335,7 @@ export default function HomeScreen() {
     ? spenderCards.filter(c => c.spender_id === selectedSpenderId)
     : spenderCards;
 
-  const currentDateFormatted = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
+  const roleText = (sponsorProfile?.role || 'Sponsor').toUpperCase();
 
   return (
     <View style={styles.container}>
@@ -317,7 +363,7 @@ export default function HomeScreen() {
           </View>
 
           <View style={styles.dateBadge}>
-            <Text style={styles.dateBadgeText}>{currentDateFormatted}</Text>
+            <Text style={styles.dateBadgeText}>{roleText}</Text>
           </View>
         </View>
 
@@ -391,20 +437,9 @@ export default function HomeScreen() {
                     <Text style={styles.addSpenderLabel} numberOfLines={1}>Add</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.spenderHorizontalItem, selectedSpenderId === null && { opacity: 1 }]}
-                    onPress={() => setSelectedSpenderId(null)}
-                  >
-                    <View style={[styles.avatarBorderRing, selectedSpenderId === null && styles.activeRing]}>
-                      <View style={styles.spenderGridAvatarPlaceholder}>
-                        <Ionicons name="apps" size={18} color={COLORS.deepTeal} />
-                      </View>
-                    </View>
-                    <Text style={styles.spenderGridFirstName}>All</Text>
-                  </TouchableOpacity>
-
                   {connectedSpenders.map((spender) => {
                     const firstName = getFirstName(spender.full_name);
+                    const isSelected = selectedSpenderId === spender.id;
                     const spenderInitials = spender.full_name
                       .split(' ')
                       .map((w) => w[0])
@@ -412,13 +447,16 @@ export default function HomeScreen() {
                       .join('')
                       .toUpperCase();
 
-                    const isSelected = selectedSpenderId === spender.id;
-
                     return (
-                      <TouchableOpacity 
-                        key={spender.id} 
+                      <TouchableOpacity
+                        key={spender.id}
                         style={styles.spenderHorizontalItem}
+                        activeOpacity={0.7}
                         onPress={() => setSelectedSpenderId(isSelected ? null : spender.id)}
+                        onLongPress={() => {
+                          setSpenderToDelete(spender);
+                          setIsDeleteModalVisible(true);
+                        }}
                       >
                         <View style={[styles.avatarBorderRing, isSelected && styles.activeRing]}>
                           {spender.avatar_url ? (
@@ -429,7 +467,7 @@ export default function HomeScreen() {
                             </View>
                           )}
                         </View>
-                        <Text style={styles.spenderGridFirstName} numberOfLines={1}>
+                        <Text style={[styles.spenderGridFirstName, isSelected && { color: COLORS.deepTeal, fontWeight: '700' }]} numberOfLines={1}>
                           {firstName}
                         </Text>
                       </TouchableOpacity>
@@ -440,7 +478,7 @@ export default function HomeScreen() {
                 {/* ALL ALLOWANCES HEADER */}
                 <View style={[styles.sectionHeader, { marginTop: 15 }]}>
                   <Text style={styles.sectionTitle}>Allowances</Text>
-                  <Text style={styles.seeAllText}>{filteredSpenderCards.length} spenders</Text>
+                  <Text style={styles.seeAllText}>{filteredSpenderCards.length} overall</Text>
                 </View>
               </>
             }
@@ -510,18 +548,6 @@ export default function HomeScreen() {
 
                   <View style={styles.cardDivider} />
 
-                  {/* List out individual allowance names under this spender */}
-                  <View style={styles.subAllowanceList}>
-                    {item.allowances.map((sub, idx) => (
-                      <View key={sub.id || idx} style={styles.subAllowanceRow}>
-                        <Text style={styles.subAllowanceName} numberOfLines={1}>• {sub.allowance_name}</Text>
-                        <Text style={styles.subAllowanceAmount}>₱{sub.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.cardDivider} />
-
                   <View style={styles.amountsRow}>
                     <View style={styles.amountColumn}>
                       <Text style={styles.amountLabel}>TOTAL ALLOCATED</Text>
@@ -561,13 +587,13 @@ export default function HomeScreen() {
         animationType="fade"
         transparent={true}
         visible={isAddModalVisible}
-        onRequestClose={() => setIsAddModalVisible(false)}
+        onRequestClose={handleCloseAddModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Connect New Spender</Text>
-              <TouchableOpacity onPress={() => setIsAddModalVisible(false)}>
+              <TouchableOpacity onPress={handleCloseAddModal}>
                 <Ionicons name="close" size={22} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
@@ -589,7 +615,7 @@ export default function HomeScreen() {
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
-                onPress={() => setIsAddModalVisible(false)}
+                onPress={handleCloseAddModal}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
@@ -603,6 +629,50 @@ export default function HomeScreen() {
                   <ActivityIndicator size="small" color={COLORS.white} />
                 ) : (
                   <Text style={styles.modalSubmitText}>Connect</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* DELETE SPENDER CONFIRMATION MODAL */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isDeleteModalVisible}
+        onRequestClose={() => setIsDeleteModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Disconnect Spender</Text>
+              <TouchableOpacity onPress={() => setIsDeleteModalVisible(false)}>
+                <Ionicons name="close" size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Are you sure you want to remove <Text style={{ fontWeight: '700', color: COLORS.darkOlive }}>{spenderToDelete?.full_name}</Text>? This will disconnect them from your account.
+            </Text>
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setIsDeleteModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, { backgroundColor: COLORS.danger }]}
+                onPress={handleDeleteSpenderConfirm}
+                disabled={deletingSpender}
+              >
+                {deletingSpender ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalSubmitText}>Delete</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -871,26 +941,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: COLORS.borderLight,
     marginVertical: 12,
-  },
-  subAllowanceList: {
-    gap: 6,
-  },
-  subAllowanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  subAllowanceName: {
-    fontSize: 13,
-    color: COLORS.darkOlive,
-    flex: 1,
-    marginRight: 10,
-    fontWeight: '500',
-  },
-  subAllowanceAmount: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.deepTeal,
   },
   amountsRow: {
     flexDirection: 'row',

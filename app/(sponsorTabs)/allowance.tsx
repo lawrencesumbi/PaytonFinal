@@ -354,7 +354,7 @@ export default function AllowanceScreen() {
           ) : (
             <TouchableOpacity style={styles.selectMemberButton} activeOpacity={0.7} onPress={handleOpenMemberModal}>
               <View style={styles.addCircleOutline}>
-                <Ionicons name="add" size={26} color={COLORS.brand} />
+                <Ionicons name="add" size={18} color={COLORS.brand} />
               </View>
               <Text style={styles.selectMemberText}>Select a Member to Allocate</Text>
             </TouchableOpacity>
@@ -692,15 +692,15 @@ const styles = StyleSheet.create({
   selectMemberButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 28,
+    paddingVertical: 15,
     backgroundColor: COLORS.surface,
     borderRadius: 24,
     gap: 10,
   },
   addCircleOutline: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 50,
     borderWidth: 2,
     borderColor: COLORS.brand,
     justifyContent: 'center',
@@ -709,7 +709,7 @@ const styles = StyleSheet.create({
   selectMemberText: {
     color: COLORS.brand,
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 12,
   },
   selectedSpenderCard: {
     flexDirection: 'row',
