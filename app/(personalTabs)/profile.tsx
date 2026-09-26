@@ -1,4 +1,4 @@
-// app/(spenderTabs)/profile.tsx
+// app/(personalTabs)/profile.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -85,45 +85,42 @@ export default function PersonalProfileScreen() {
     fetchProfile();
   };
 
-const handleLogout = async () => {
-  Alert.alert(
-    "Sign Out",
-    "Are you sure you want to exit your session?",
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: async () => {
-          setIsLoggingOut(true);
-          try {
-            // 1. Kuhaa ang current user ug ang email niini
-            const { data: { user } } = await supabase.auth.getUser();
+  const handleLogout = async () => {
+    Alert.alert(
+      "Sign Out",
+      "Are you sure you want to exit your session?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: async () => {
+            setIsLoggingOut(true);
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
 
-            // 2. I-save sa logs table nga email ray sulod sa details
-            if (user) {
-              await supabase.from('logs').insert({
-                user_id: user.id,
-                action: 'USER_LOGOUT',
-                details: `${user.email} successfully signed out.`,
-              });
+              if (user) {
+                await supabase.from('logs').insert({
+                  user_id: user.id,
+                  action: 'USER_LOGOUT',
+                  details: `${user.email} successfully signed out.`,
+                });
+              }
+
+              const { error } = await supabase.auth.signOut();
+              if (error) throw error;
+
+              router.replace('/');
+            } catch (error: any) {
+              Alert.alert("Error", error.message);
+            } finally {
+              setIsLoggingOut(false);
             }
-
-            // 3. I-execute ang sign out
-            const { error } = await supabase.auth.signOut();
-            if (error) throw error;
-
-            router.replace('/');
-          } catch (error: any) {
-            Alert.alert("Error", error.message);
-          } finally {
-            setIsLoggingOut(false);
           }
         }
-      }
-    ]
-  );
-};
+      ]
+    );
+  };
 
   if (isLoadingProfile) {
     return (
@@ -167,17 +164,17 @@ const handleLogout = async () => {
           )}
           <Text style={styles.heroName}>{fullName || "User Account"}</Text>
           <View style={styles.badgeContainer}>
-            <Text style={styles.badgeText}>{role ? role.toUpperCase() : "SPENDER"}</Text>
+            <Text style={styles.badgeText}>{role ? role.toUpperCase() : "USER"}</Text>
           </View>
         </View>
 
         <View style={styles.modernCardGroup}>
-          <Text style={styles.groupContextLabel}>Info & Security</Text>
+          <Text style={styles.groupContextLabel}>Account & Security</Text>
           <View style={styles.groupCard}>
             {[
-              { id: 'personal', label: 'Personal Details', description: 'Manage your primary account info', icon: 'person-outline', action: () => router.push('/profile/personal' as any) },
-              { id: 'password', label: 'Security & Password', description: 'Keep your login credentials secure', icon: 'shield-checkmark-outline', action: () => router.push('/profile/change-password' as any) },
-              { id: 'logs', label: 'Activity Logs', description: 'View your recent system activities', icon: 'list-outline', action: () => router.push('/profile/logs' as any) },
+              { id: 'personal', label: 'Personal Details', icon: 'person-outline', action: () => router.push('/profile/personal' as any) },
+              { id: 'password', label: 'Change Password', icon: 'shield-checkmark-outline', action: () => router.push('/profile/change-password' as any) },
+              { id: 'logs', label: 'Activity Logs', icon: 'list-outline', action: () => router.push('/profile/logs' as any) },
             ].map((item, index, arr) => (
               <TouchableOpacity
                 key={item.id}
@@ -188,10 +185,7 @@ const handleLogout = async () => {
                   <View style={styles.iconWrapperSquare}>
                     <Ionicons name={item.icon as any} size={18} color="#000000" />
                   </View>
-                  <View style={styles.rowTextColumn}>
-                    <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
-                    <Text style={styles.rowSubLabel}>{item.description}</Text>
-                  </View>
+                  <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#173D45" />
               </TouchableOpacity>
@@ -203,8 +197,8 @@ const handleLogout = async () => {
           <Text style={styles.groupContextLabel}>Data Ledger</Text>
           <View style={styles.groupCard}>
             {[
-              { id: 'archive', label: 'Data Inactive Archive', description: 'Access hidden history loops', icon: 'archive-outline', action: () => router.push('/profile/archive' as any) },
-              { id: 'export', label: 'Export Data', description: 'Download complete data CSVs', icon: 'cloud-download-outline', action: () => router.push('/profile/export' as any) },
+              { id: 'archive', label: 'Archive Data', icon: 'archive-outline', action: () => router.push('/profile/archive' as any) },
+              { id: 'export', label: 'Export Data', icon: 'cloud-download-outline', action: () => router.push('/profile/export' as any) },
             ].map((item, index, arr) => (
               <TouchableOpacity
                 key={item.id}
@@ -215,10 +209,7 @@ const handleLogout = async () => {
                   <View style={styles.iconWrapperSquare}>
                     <Ionicons name={item.icon as any} size={18} color="#000000" />
                   </View>
-                  <View style={styles.rowTextColumn}>
-                    <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
-                    <Text style={styles.rowSubLabel}>{item.description}</Text>
-                  </View>
+                  <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#173D45" />
               </TouchableOpacity>
@@ -230,9 +221,9 @@ const handleLogout = async () => {
           <Text style={styles.groupContextLabel}>Support & Info</Text>
           <View style={styles.groupCard}>
             {[
-              { id: 'help', label: 'Help Desk', description: 'Get quick customer service fixes', icon: 'chatbubbles-outline', action: () => router.push('/profile/help' as any) },
-              { id: 'terms', label: 'Terms of Use', description: 'Review legal terms & agreements', icon: 'document-attach-outline', action: () => router.push('/profile/terms' as any) },
-              { id: 'about', label: 'App Version', description: 'Payton Mobile Edition v1.0.0', icon: 'information-circle-outline', action: () => router.push('/profile/about' as any) },
+              { id: 'help', label: 'Help Desk', icon: 'chatbubbles-outline', action: () => router.push('/profile/help' as any) },
+              { id: 'terms', label: 'Terms of Use', icon: 'document-attach-outline', action: () => router.push('/profile/terms' as any) },
+              { id: 'about', label: 'App Version', icon: 'information-circle-outline', action: () => router.push('/profile/about' as any) },
             ].map((item, index, arr) => (
               <TouchableOpacity
                 key={item.id}
@@ -243,10 +234,7 @@ const handleLogout = async () => {
                   <View style={styles.iconWrapperSquare}>
                     <Ionicons name={item.icon as any} size={18} color="#000000" />
                   </View>
-                  <View style={styles.rowTextColumn}>
-                    <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
-                    <Text style={styles.rowSubLabel}>{item.description}</Text>
-                  </View>
+                  <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#173D45" />
               </TouchableOpacity>
@@ -306,9 +294,7 @@ const styles = StyleSheet.create({
   groupContextLabel: { fontSize: 12, fontWeight: '600', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.5, paddingLeft: 4 },
   modernRowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 10 },
   iconWrapperSquare: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
-  rowTextColumn: { flex: 1 },
   rowPrimaryLabel: { fontSize: 14, fontWeight: '600', color: '#1E293B' },
-  rowSubLabel: { fontSize: 12, color: '#64748B', marginTop: 2, fontWeight: '400' },
   groupCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 22,
@@ -336,7 +322,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#ffb8b8',    
+    borderColor: '#ffb8b8',       
     marginTop: 30,          
     marginHorizontal: 24,      
   },

@@ -205,7 +205,7 @@ export default function ArchiveScreen() {
           <Ionicons name="arrow-back" size={20} color="#ffffff" />
         </TouchableOpacity>
         <Text style={styles.headerTitleCentered} numberOfLines={1}>
-          {selectedItem ? (selectedItem.allowance_name || selectedItem.source_name) : 'Data Inactive Archive'}
+          {selectedItem ? (selectedItem.allowance_name || selectedItem.source_name) : 'Archive Data'}
         </Text>
         <View style={{ width: 20 }} />
       </View>
@@ -330,7 +330,7 @@ export default function ArchiveScreen() {
             <Ionicons name="archive-outline" size={40} color="#173D45" />
           </View>
           <Text style={styles.mainTitle}>Archive Empty</Text>
-          <Text style={styles.subTitle}>You have no inactive allowances or income records at this moment.</Text>
+          <Text style={styles.subTitle}>You have no inactive records at this moment.</Text>
         </View>
       ) : (
         <FlatList

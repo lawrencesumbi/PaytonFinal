@@ -98,7 +98,7 @@ export default function ChangePasswordScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtnTouchable}>
           <Ionicons name="arrow-back" size={20} color="#ffffff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitleCentered}>Security & Password</Text>
+        <Text style={styles.headerTitleCentered}>Change Password</Text>
         <View style={{ width: 20 }} />
       </View>
 
