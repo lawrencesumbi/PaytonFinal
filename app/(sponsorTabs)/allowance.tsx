@@ -68,6 +68,33 @@ const formatDisplayDate = (dateStr: string) => {
   });
 };
 
+// Helper function to format a date range cleanly (e.g., "September 01 - 07, 2026")
+const formatDisplayDateRange = (startStr: string, endStr: string) => {
+  if (!startStr) return '';
+  if (startStr === endStr) return formatDisplayDate(startStr);
+
+  const [startYear, startMonth, startDay] = startStr.split('-').map(Number);
+  const [endYear, endMonth, endDay] = endStr.split('-').map(Number);
+
+  const startDate = new Date(startYear, startMonth - 1, startDay);
+  const endDate = new Date(endYear, endMonth - 1, endDay);
+
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return `${startStr} - ${endStr}`;
+  }
+
+  // If same month and same year: "September 01 - 07, 2026"
+  if (startYear === endYear && startMonth === endMonth) {
+    const monthName = startDate.toLocaleDateString('en-US', { month: 'long' });
+    const formattedStartDay = String(startDay).padStart(2, '0');
+    const formattedEndDay = String(endDay).padStart(2, '0');
+    return `${monthName} ${formattedStartDay} - ${formattedEndDay}, ${startYear}`;
+  }
+
+  // Fallback to full range if months differ
+  return `${formatDisplayDate(startStr)} - ${formatDisplayDate(endStr)}`;
+};
+
 const getPeriodDates = (period: 'today' | 'week' | 'nextWeek' | 'month' | 'nextMonth') => {
   const d = new Date();
   const year = d.getFullYear();
@@ -125,7 +152,6 @@ const getWeeksForMonth = (year: number, monthIndex: number) => {
     if (currentDay > totalDaysInMonth) break;
 
     const startDay = currentDay;
-    // Each week gets 7 days, or up to the end of the month
     let endDay = currentDay + 6;
     if (endDay > totalDaysInMonth) {
       endDay = totalDaysInMonth;
@@ -437,13 +463,11 @@ export default function AllowanceScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Active Date Range Indicator in Words Format */}
+            {/* Active Date Range Indicator */}
             <View style={styles.dateRangeIndicator}>
               <Ionicons name="calendar-outline" size={14} color={COLORS.inkSoft} />
               <Text style={styles.dateRangeIndicatorText}>
-                {startDate === endDate 
-                  ? formatDisplayDate(startDate) 
-                  : `${formatDisplayDate(startDate)} - ${formatDisplayDate(endDate)}`}
+                {formatDisplayDateRange(startDate, endDate)}
               </Text>
             </View>
           </View>
@@ -622,7 +646,7 @@ export default function AllowanceScreen() {
                           {weekItem.weekLabel}
                         </Text>
                         <Text style={styles.gridMemberEmail}>
-                          {formatDisplayDate(weekItem.start)} - {formatDisplayDate(weekItem.end)}
+                          {formatDisplayDateRange(weekItem.start, weekItem.end)}
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={18} color={theme.text} />
