@@ -3,15 +3,12 @@ import { Tabs, usePathname, useRouter } from "expo-router";
 import type { ComponentProps } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
-  Image,
   Platform,
   Pressable,
   StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+  View
 } from "react-native";
-import Animated, {
+import {
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -152,7 +149,7 @@ export default function SpenderLayout() {
         <Tabs.Screen
           name="home"
           options={{
-            title: "",
+            title: "Home",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -167,7 +164,7 @@ export default function SpenderLayout() {
         <Tabs.Screen
           name="budget"
           options={{
-            title: "",
+            title: "Transactions",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -182,7 +179,7 @@ export default function SpenderLayout() {
         <Tabs.Screen
           name="scan"
           options={{
-            title: "",
+            title: "Scan",
             tabBarLabelStyle: styles.scanLabel,
             tabBarIcon: ({ focused }: any) => (
               <View
@@ -204,7 +201,7 @@ export default function SpenderLayout() {
         <Tabs.Screen
           name="split"
           options={{
-            title: "",
+            title: "Split",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -219,7 +216,7 @@ export default function SpenderLayout() {
         <Tabs.Screen
           name="profile"
           options={{
-            title: "",
+            title: "Profile",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -241,7 +238,7 @@ export default function SpenderLayout() {
       </Tabs>
 
 
-{/* */}
+{/* 
       {!shouldHideAiButton && (
         <View style={styles.aiContainer}>
           <Animated.View style={[styles.speechBubble, animatedBubbleStyle]}>
@@ -265,7 +262,7 @@ export default function SpenderLayout() {
         </View>
       )}
 
-
+*/}
 
     </>
   );

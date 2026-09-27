@@ -399,7 +399,7 @@ export default function SpenderHomeScreen() {
             <View style={styles.balanceLabelIconWrap}>
               <Ionicons name="wallet-outline" size={13} color={COLORS.deepTeal} />
             </View>
-            <Text style={styles.balanceLabel}>Total Remaining Balance</Text>
+            <Text style={styles.balanceLabel}>Total Remaining</Text>
           </View>
 
           <View style={styles.pillTrackOuter}>
