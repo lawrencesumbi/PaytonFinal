@@ -1,8 +1,8 @@
 // app/monitoring.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -114,9 +114,12 @@ export default function MonitoringScreen() {
     }
   };
 
-  useEffect(() => {
-    fetchMonitoringData();
-  }, [spenderId]);
+  // Automatically refresh every time the screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchMonitoringData();
+    }, [spenderId])
+  );
 
   const handleDeleteAllowance = (allowanceId: string) => {
     Alert.alert('Delete Allowance', 'Are you sure you want to remove this allowance item?', [
@@ -125,7 +128,7 @@ export default function MonitoringScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          const { error } = await supabase.from('allowances').delete().eq('id', allowanceId);
+        const { error } = await supabase.from('allowances').delete().eq('id', allowanceId);
           if (error) {
             Alert.alert('Error', 'Failed to delete allowance.');
           } else {
@@ -150,12 +153,43 @@ export default function MonitoringScreen() {
   const formatDateOnly = (dateStr: string) => {
     try {
       if (!dateStr) return '';
-      // Append time or parse safely if it's a pure YYYY-MM-DD date string
       const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     } catch {
       return dateStr;
     }
+  };
+
+  const formatAllowanceDateRange = (startDate: string, endDate: string, receivedAt: string) => {
+    if (startDate && endDate) {
+      try {
+        const startD = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`);
+        const endD = new Date(endDate.includes('T') ? endDate : `${endDate}T00:00:00`);
+
+        const startMonth = startD.toLocaleDateString('en-US', { month: 'short' });
+        const endMonth = endD.toLocaleDateString('en-US', { month: 'short' });
+        const startDay = startD.getDate();
+        const endDay = endD.getDate();
+        const startYear = startD.getFullYear();
+        const endYear = endD.getFullYear();
+
+        // If start and end dates are identical, show single date (e.g., Sept 27, 2026)
+        if (startMonth === endMonth && startDay === endDay && startYear === endYear) {
+          return `${startMonth} ${startDay}, ${startYear}`;
+        }
+
+        // If same month and year: "Sept 20 - 26, 2026"
+        if (startMonth === endMonth && startYear === endYear) {
+          return `${startMonth} ${startDay} - ${endDay}, ${startYear}`;
+        }
+
+        // Different months or years
+        return `${startMonth} ${startDay}, ${startYear} - ${endMonth} ${endDay}, ${endYear}`;
+      } catch {
+        return `${formatDateOnly(startDate)} - ${formatDateOnly(endDate)}`;
+      }
+    }
+    return formatDateOnly(startDate || receivedAt);
   };
 
   return (
@@ -193,9 +227,7 @@ export default function MonitoringScreen() {
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
                     <Text style={styles.receiptItemDate}>
-                      {item.start_date && item.end_date 
-                        ? `${formatDateOnly(item.start_date)} - ${formatDateOnly(item.end_date)}`
-                        : formatDateOnly(item.start_date || item.received_at)}
+                      {formatAllowanceDateRange(item.start_date, item.end_date, item.received_at)}
                     </Text>
                   </View>
                   <View style={styles.receiptRightSection}>

@@ -542,6 +542,9 @@ export default function AllowanceScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Added Line Divider */}
+            <View style={styles.modalDivider} />
+
             <View style={styles.calendarNavRow}>
               <Text style={styles.calendarMonthTitle}>
                 {currentCalendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
@@ -689,7 +692,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 32,
     borderTopRightRadius: 32,
     overflow: 'hidden',
-    marginTop: 40,
+    marginTop: 33,
   },
   content: {
     paddingHorizontal: 24,
@@ -1062,5 +1065,11 @@ const styles = StyleSheet.create({
   },
   dayCellTextSelected: {
     color: COLORS.brand,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: '#E5E7EB', // Adjust color to match your theme (e.g., COLORS.border)
+    width: '100%',
+    marginBottom: 10,
   },
 });
