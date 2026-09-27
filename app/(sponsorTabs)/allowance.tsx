@@ -22,7 +22,7 @@ import { supabase } from '../../lib/supabase';
 /* ---------- Design Tokens — aligned with the rest of the app's teal palette ---------- */
 const COLORS = {
   screenTeal: '#1F4F59',
-  brand: '#173D45',
+  brand: '#1F4F59',
   surface: '#FFFFFF',
   pillBg: '#F1F5F9',
   softTint: '#F3F7F6',
@@ -40,11 +40,6 @@ const CARD_THEMES = [
   { bg: '#EAF6F7', text: '#1F4F59' },
   { bg: '#F4F8E8', text: '#213502' },
   { bg: '#FAFAD8', text: '#213502' },
-];
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
 const getLocalDateString = (year: number, monthIndex: number, day: number) => {
@@ -83,7 +78,6 @@ const formatDisplayDateRange = (startStr: string, endStr: string) => {
     return `${startStr} - ${endStr}`;
   }
 
-  // If same month and same year: "September 01 - 07, 2026"
   if (startYear === endYear && startMonth === endMonth) {
     const monthName = startDate.toLocaleDateString('en-US', { month: 'long' });
     const formattedStartDay = String(startDay).padStart(2, '0');
@@ -91,7 +85,6 @@ const formatDisplayDateRange = (startStr: string, endStr: string) => {
     return `${monthName} ${formattedStartDay} - ${formattedEndDay}, ${startYear}`;
   }
 
-  // Fallback to full range if months differ
   return `${formatDisplayDate(startStr)} - ${formatDisplayDate(endStr)}`;
 };
 
@@ -134,41 +127,9 @@ const getPeriodDates = (period: 'today' | 'week' | 'nextWeek' | 'month' | 'nextM
     return { start: startOfMonth, end: endOfMonth };
   }
 
-  // nextMonth
   const startOfNextMonth = getLocalDateString(year, month + 1, 1);
   const endOfNextMonth = getLocalDateString(year, month + 2, 0);
   return { start: startOfNextMonth, end: endOfNextMonth };
-};
-
-// Helper to generate the 5 weeks for a specific month and year
-const getWeeksForMonth = (year: number, monthIndex: number) => {
-  const weeks = [];
-  const firstDayOfMonth = new Date(year, monthIndex, 1);
-  const lastDayOfMonth = new Date(year, monthIndex + 1, 0);
-  const totalDaysInMonth = lastDayOfMonth.getDate();
-
-  let currentDay = 1;
-  for (let weekNum = 1; weekNum <= 5; weekNum++) {
-    if (currentDay > totalDaysInMonth) break;
-
-    const startDay = currentDay;
-    let endDay = currentDay + 6;
-    if (endDay > totalDaysInMonth) {
-      endDay = totalDaysInMonth;
-    }
-
-    const startStr = getLocalDateString(year, monthIndex, startDay);
-    const endStr = getLocalDateString(year, monthIndex, endDay);
-
-    weeks.push({
-      weekLabel: `Week ${weekNum}`,
-      start: startStr,
-      end: endStr,
-    });
-
-    currentDay = endDay + 1;
-  }
-  return weeks;
 };
 
 interface SelectedSpender {
@@ -208,17 +169,14 @@ export default function AllowanceScreen() {
   const [startDate, setStartDate] = useState(defaultPeriodDates.start);
   const [endDate, setEndDate] = useState(defaultPeriodDates.end);
 
-  // Custom Coverage Period Modal States
+  // Custom Calendar Modal States
   const [customModalVisible, setCustomModalVisible] = useState(false);
-  const [customStep, setCustomStep] = useState<'months' | 'weeks'>('months');
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [selectedMonthIndex, setSelectedMonthIndex] = useState<number | null>(null);
-  const [availableWeeks, setAvailableWeeks] = useState<{ weekLabel: string; start: string; end: string }[]>([]);
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
+  const [tempStartDate, setTempStartDate] = useState<string | null>(null);
+  const [tempEndDate, setTempEndDate] = useState<string | null>(null);
 
-  // Check if there are active inputs to display the cancel button
   const hasInputs = Boolean(selectedSpender || allowanceName.trim().length > 0 || amount.trim().length > 0);
 
-  // Reset state function
   const resetFormState = () => {
     setAllowanceName('');
     setAmount('');
@@ -229,18 +187,17 @@ export default function AllowanceScreen() {
     setEndDate(defaultDates.end);
     setModalVisible(false);
     setCustomModalVisible(false);
-    setCustomStep('months');
-    setSelectedMonthIndex(null);
+    setTempStartDate(null);
+    setTempEndDate(null);
+    setCurrentCalendarDate(new Date());
   };
 
-  // Reset state whenever the screen comes into focus
   useFocusEffect(
     useCallback(() => {
       resetFormState();
     }, [])
   );
 
-  // Fetch connected members for the modal list
   const fetchConnectedMembers = async () => {
     try {
       setLoadingMembers(true);
@@ -334,7 +291,6 @@ export default function AllowanceScreen() {
     <View style={styles.screenBg}>
       <StatusBar style="light" />
 
-      {/* White rounded sheet */}
       <View style={styles.whiteSheet}>
         <ScrollView 
           contentContainerStyle={styles.content}
@@ -343,7 +299,6 @@ export default function AllowanceScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.brand]} tintColor={COLORS.brand} />
           }
         >
-          {/* Page Header with Back Button beside the title */}
           <View style={styles.header}>
             <TouchableOpacity 
               style={styles.inlineBackButton} 
@@ -358,7 +313,6 @@ export default function AllowanceScreen() {
             </View>
           </View>
 
-          {/* Target Member */}
           <Text style={styles.sectionTitle}>Target Member</Text>
           {selectedSpender ? (
             <View style={styles.selectedSpenderCard}>
@@ -386,7 +340,6 @@ export default function AllowanceScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Allowance Details */}
           <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Allowance Details</Text>
 
           <View style={styles.inputGroup}>
@@ -418,7 +371,6 @@ export default function AllowanceScreen() {
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Coverage Period</Text>
             
-            {/* Period Selector Grid/Rows */}
             <View style={styles.periodSelectorContainer}>
               {[
                 { key: 'today', label: 'Today' },
@@ -447,13 +399,13 @@ export default function AllowanceScreen() {
                 );
               })}
 
-              {/* Custom Period Button */}
               <TouchableOpacity
                 style={[styles.periodPill, selectedPeriod === 'custom' && styles.periodPillActive]}
                 activeOpacity={0.8}
                 onPress={() => {
-                  setCustomStep('months');
-                  setSelectedMonthIndex(null);
+                  setTempStartDate(null);
+                  setTempEndDate(null);
+                  setCurrentCalendarDate(new Date());
                   setCustomModalVisible(true);
                 }}
               >
@@ -463,7 +415,6 @@ export default function AllowanceScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Active Date Range Indicator */}
             <View style={styles.dateRangeIndicator}>
               <Ionicons name="calendar-outline" size={14} color={COLORS.inkSoft} />
               <Text style={styles.dateRangeIndicatorText}>
@@ -472,7 +423,6 @@ export default function AllowanceScreen() {
             </View>
           </View>
 
-          {/* Action Buttons Row (Cancel + Confirm) */}
           <View style={styles.actionButtonsRow}>
             {hasInputs && (
               <TouchableOpacity 
@@ -575,7 +525,7 @@ export default function AllowanceScreen() {
         </View>
       </Modal>
 
-      {/* Custom Coverage Period Modal (Months Grid -> Weeks Choice) */}
+      {/* Custom Range Calendar Picker Modal */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -583,78 +533,144 @@ export default function AllowanceScreen() {
         onRequestClose={() => setCustomModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            
             <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                {customStep === 'weeks' && (
-                  <TouchableOpacity 
-                    onPress={() => setCustomStep('months')}
-                    style={styles.modalBackStepButton}
-                  >
-                    <Ionicons name="arrow-back" size={18} color={COLORS.brand} />
-                  </TouchableOpacity>
-                )}
-                <Text style={styles.modalTitle}>
-                  {customStep === 'months' ? 'Select Month' : `${MONTH_NAMES[selectedMonthIndex!]} Weeks`}
-                </Text>
-              </View>
+              <Text style={styles.modalTitle}>Select Date Range</Text>
               <TouchableOpacity onPress={() => setCustomModalVisible(false)} style={styles.modalCloseButton}>
                 <Ionicons name="close" size={20} color={COLORS.brand} />
               </TouchableOpacity>
             </View>
 
-            {customStep === 'months' ? (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.monthsGridContainer}>
-                {MONTH_NAMES.map((monthName, index) => (
-                  <TouchableOpacity
-                    key={monthName}
-                    style={styles.monthGridCell}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setSelectedMonthIndex(index);
-                      const weeks = getWeeksForMonth(selectedYear, index);
-                      setAvailableWeeks(weeks);
-                      setCustomStep('weeks');
-                    }}
-                  >
-                    <Text style={styles.monthCellText}>{monthName}</Text>
-                    <Text style={styles.yearSubText}>{selectedYear}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
-                {availableWeeks.map((weekItem, index) => {
-                  const theme = CARD_THEMES[index % CARD_THEMES.length];
-                  return (
-                    <TouchableOpacity
-                      key={weekItem.weekLabel}
-                      style={[styles.modalCard, { backgroundColor: theme.bg }]}
-                      activeOpacity={0.8}
-                      onPress={() => {
-                        setSelectedPeriod('custom');
-                        setStartDate(weekItem.start);
-                        setEndDate(weekItem.end);
-                        setCustomModalVisible(false);
-                      }}
-                    >
-                      <View style={[styles.gridAvatarCircle, { backgroundColor: COLORS.surface }]}>
-                        <Ionicons name="calendar" size={16} color={theme.text} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.gridMemberName, { color: theme.text }]}>
-                          {weekItem.weekLabel}
+            <View style={styles.calendarNavRow}>
+              <Text style={styles.calendarMonthTitle}>
+                {currentCalendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+              </Text>
+              <View style={styles.calendarArrowsContainer}>
+                <TouchableOpacity 
+                  style={styles.calendarArrowBtn}
+                  onPress={() => {
+                    const prev = new Date(currentCalendarDate);
+                    prev.setMonth(prev.getMonth() - 1);
+                    const today = new Date();
+                    if (prev.getFullYear() > today.getFullYear() || (prev.getFullYear() === today.getFullYear() && prev.getMonth() >= today.getMonth())) {
+                      setCurrentCalendarDate(prev);
+                    }
+                  }}
+                >
+                  <Ionicons name="chevron-back" size={18} color={COLORS.brand} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.calendarArrowBtn}
+                  onPress={() => {
+                    const next = new Date(currentCalendarDate);
+                    next.setMonth(next.getMonth() + 1);
+                    setCurrentCalendarDate(next);
+                  }}
+                >
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.brand} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.weekDaysRow}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
+                <Text key={i} style={styles.weekDayText}>{d}</Text>
+              ))}
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={styles.daysGrid}>
+                {(() => {
+                  const year = currentCalendarDate.getFullYear();
+                  const month = currentCalendarDate.getMonth();
+                  const firstDayIndex = new Date(year, month, 1).getDay();
+                  const totalDays = new Date(year, month + 1, 0).getDate();
+                  const todayStr = getLocalDateString(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+
+                  const cells = [];
+                  for (let i = 0; i < firstDayIndex; i++) {
+                    cells.push(<View key={`empty-${i}`} style={styles.dayCellEmpty} />);
+                  }
+
+                  for (let day = 1; day <= totalDays; day++) {
+                    const dateStr = getLocalDateString(year, month, day);
+                    const isPast = dateStr < todayStr;
+
+                    const isStart = tempStartDate === dateStr;
+                    const isEnd = tempEndDate === dateStr;
+                    const isInRange = tempStartDate && tempEndDate && dateStr > tempStartDate && dateStr < tempEndDate;
+
+                    cells.push(
+                      <TouchableOpacity
+                        key={dateStr}
+                        disabled={isPast}
+                        style={[
+                          styles.dayCell,
+                          isPast && styles.dayCellDisabled,
+                          (isStart || isEnd) && styles.dayCellSelected,
+                          isInRange && styles.dayCellInRange,
+                        ]}
+                        onPress={() => {
+                          if (!tempStartDate || (tempStartDate && tempEndDate)) {
+                            setTempStartDate(dateStr);
+                            setTempEndDate(null);
+                          } else if (tempStartDate && !tempEndDate) {
+                            if (dateStr < tempStartDate) {
+                              setTempStartDate(dateStr);
+                            } else {
+                              setTempEndDate(dateStr);
+                            }
+                          }
+                        }}
+                      >
+                        <Text style={[
+                          styles.dayCellText,
+                          isPast && styles.dayCellTextDisabled,
+                          (isStart || isEnd) && styles.dayCellTextSelected,
+                        ]}>
+                          {day}
                         </Text>
-                        <Text style={styles.gridMemberEmail}>
-                          {formatDisplayDateRange(weekItem.start, weekItem.end)}
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={18} color={theme.text} />
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
+                      </TouchableOpacity>
+                    );
+                  }
+                  return cells;
+                })()}
+              </View>
+            </ScrollView>
+
+            <View style={[styles.actionButtonsRow, { marginTop: 16 }]}>
+              <TouchableOpacity 
+                style={[styles.cancelButton, !tempStartDate && { opacity: 0.5, borderColor: COLORS.muted }]} 
+                activeOpacity={0.85} 
+                disabled={!tempStartDate}
+                onPress={() => {
+                  if (tempStartDate) {
+                    setTempStartDate(null);
+                    setTempEndDate(null);
+                  }
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.saveButton, { opacity: (!tempStartDate || !tempEndDate) ? 0.5 : 1 }]} 
+                activeOpacity={0.85} 
+                disabled={!tempStartDate || !tempEndDate}
+                onPress={() => {
+                  if (tempStartDate && tempEndDate) {
+                    setStartDate(tempStartDate);
+                    setEndDate(tempEndDate);
+                    setSelectedPeriod('custom');
+                    setCustomModalVisible(false);
+                  }
+                }}
+              >
+                <Text style={styles.saveButtonText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
         </View>
       </Modal>
@@ -810,7 +826,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   periodPill: {
-    width: '31%',
+    flexBasis: '31%',
     height: 40,
     borderRadius: 20,
     backgroundColor: COLORS.surface,
@@ -879,7 +895,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.2,
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
     justifyContent: 'center',
@@ -912,14 +927,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.pillBg,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalBackStepButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
     backgroundColor: COLORS.pillBg,
     justifyContent: 'center',
     alignItems: 'center',
@@ -983,31 +990,77 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
-  // Custom Month Grid Styles
-  monthsGridContainer: {
+  calendarNavRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    paddingBottom: 20,
     justifyContent: 'space-between',
-  },
-  monthGridCell: {
-    width: '31%',
-    backgroundColor: COLORS.surface,
-    borderRadius: 20,
-    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
+    marginBottom: 16,
   },
-  monthCellText: {
-    fontSize: 13,
+  calendarMonthTitle: {
+    fontSize: 16,
     fontWeight: '700',
     color: COLORS.brand,
   },
-  yearSubText: {
-    fontSize: 10,
-    color: COLORS.inkSoft,
-    marginTop: 2,
+  calendarArrowsContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.pillBg,
+    borderRadius: 14,
+    padding: 2,
+    gap: 4,
+  },
+  calendarArrowBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+  },
+  weekDaysRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 8,
+  },
+  weekDayText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.muted,
+    width: '14%',
+    textAlign: 'center',
+  },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  dayCellEmpty: {
+    width: '14.28%',
+    height: 40,
+  },
+  dayCell: {
+    width: '14.28%',
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 2,
+  },
+  dayCellDisabled: {
+    opacity: 0.3,
+  },
+  dayCellSelected: {
+    backgroundColor: '#00f7ff',
+  },
+  dayCellInRange: {
+    backgroundColor: '#bafdff',
+  },
+  dayCellText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.brand,
+  },
+  dayCellTextDisabled: {
+    color: COLORS.muted,
+  },
+  dayCellTextSelected: {
+    color: COLORS.brand,
   },
 });
