@@ -1,21 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState, } from 'react';
+import { useCallback, useEffect, useState, } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Animated,
   Dimensions,
-  FlatList,
   Image,
-  Modal,
   Platform,
   RefreshControl,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -46,18 +42,7 @@ const PALETTE_LIGHT_CARDS = [
   '#FAFAD8',
 ];
 
-const CARD_THEMES = [
-  { bg: '#E6F0F2', text: '#1F4F59', iconBg: '#54C9CC', iconColor: '#FFFFFF' },
-  { bg: '#F4F8E8', text: '#213502', iconBg: '#7EA00E', iconColor: '#FFFFFF' },
-  { bg: '#FAFAD8', text: '#213502', iconBg: '#DCD964', iconColor: '#213502' },
-];
-
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SECTION_H_PADDING = 24;
-const CARD_GAP = 14;
-const SLIDE_WIDTH = SCREEN_WIDTH - SECTION_H_PADDING * 2;
-const QUICK_BUDGET_CARD_WIDTH = (SLIDE_WIDTH - CARD_GAP) / 2;
-const COLLAPSE_THRESHOLD = 72;
 
 function extractErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -71,7 +56,7 @@ function getDaysInfo(dueDateStr: string): { text: string; urgent: boolean } {
   const dueDate = new Date(dueDateStr);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  dueDate.setHours(0, 0, 0, 0); // Normalize time to compare calendar days accurately
+  dueDate.setHours(0, 0, 0, 0);
 
   const diffTime = dueDate.getTime() - today.getTime();
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
@@ -95,11 +80,6 @@ function getDaysInfo(dueDateStr: string): { text: string; urgent: boolean } {
   return { text: `${diffDays} days left`, urgent: false };
 }
 
-function formatDueDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
 // ---------------------------------------------------------------------------
 // TYPES
 // ---------------------------------------------------------------------------
@@ -110,30 +90,6 @@ interface DashboardSummary {
   totalSpent: number;
   remaining: number;
   unallocated: number;
-}
-
-interface DynamicCategory {
-  id: string;
-  name: string;
-  icon: string;
-  color?: string;
-  totalSpent: number;
-  allocatedAmount: number;
-  remainingAmount: number;
-  budgetId?: string;
-}
-
-interface BudgetExpense {
-  id: string;
-  amount: number;
-}
-
-interface BudgetQuery {
-  id: string;
-  category_id: string;
-  allocated_amount: number;
-  allowance_id: string;
-  expenses: BudgetExpense[];
 }
 
 interface ReminderItem {
@@ -153,7 +109,7 @@ interface FriendItem {
   full_name: string;
   email?: string;
   avatar_url?: string | null;
-  amount_owed: number; // Added property
+  amount_owed: number;
 }
 
 interface TransactionItem {
@@ -173,105 +129,13 @@ export default function SpenderHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [spenderName, setSpenderName] = useState('Guian Sumbi');
+  const [spenderRole, setSpenderRole] = useState('Member');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [categories, setCategories] = useState<DynamicCategory[]>([]);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
   const [friendsList, setFriendsList] = useState<FriendItem[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<TransactionItem[]>([]);
-
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<DynamicCategory | null>(null);
-  const [allocateAmount, setAllocateAmount] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const [isLinked, setIsLinked] = useState(false);
-
-  // ---- Scroll-driven header collapse ----
-  const scrollY = useRef(new Animated.Value(0)).current;
-
-  const headerPaddingBottom = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [30, 10],
-    extrapolate: 'clamp',
-  });
-  const headerShadowOpacity = scrollY.interpolate({
-    inputRange: [8, 30],
-    outputRange: [0, 0.15],
-    extrapolate: 'clamp',
-  });
-  const headerElevation = scrollY.interpolate({
-    inputRange: [8, 30],
-    outputRange: [0, 10],
-    extrapolate: 'clamp',
-  });
-  const topRowMarginBottom = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [24, 8],
-    extrapolate: 'clamp',
-  });
-  const helloOpacity = scrollY.interpolate({ inputRange: [0, 22], outputRange: [1, 0], extrapolate: 'clamp' });
-  const helloHeight = scrollY.interpolate({ inputRange: [0, 22], outputRange: [26, 0], extrapolate: 'clamp' });
-  const userNameFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [18, 15],
-    extrapolate: 'clamp',
-  });
-  const labelOpacity = scrollY.interpolate({ inputRange: [0, 18], outputRange: [1, 0], extrapolate: 'clamp' });
-  const labelHeight = scrollY.interpolate({ inputRange: [0, 18], outputRange: [26, 0], extrapolate: 'clamp' });
-  const pillOuterHeight = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [54, 16],
-    extrapolate: 'clamp',
-  });
-  const pillOuterRadius = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [30, 8],
-    extrapolate: 'clamp',
-  });
-  const pillInnerHeight = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [46, 8],
-    extrapolate: 'clamp',
-  });
-  const pillInnerRadius = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [26, 4],
-    extrapolate: 'clamp',
-  });
-  const amountMarginTop = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [16, 4],
-    extrapolate: 'clamp',
-  });
-  const amountFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [32, 17],
-    extrapolate: 'clamp',
-  });
-  const dividerFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [22, 11],
-    extrapolate: 'clamp',
-  });
-  const totalFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [15, 11],
-    extrapolate: 'clamp',
-  });
-  const unallocOpacity = scrollY.interpolate({ inputRange: [0, 18], outputRange: [1, 0], extrapolate: 'clamp' });
-  const unallocHeight = scrollY.interpolate({ inputRange: [0, 18], outputRange: [46, 0], extrapolate: 'clamp' });
-  const iconCircleScale = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [1, 0.82],
-    extrapolate: 'clamp',
-  });
-  const avatarScale = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [1, 0.75],
-    extrapolate: 'clamp',
-  });
 
   // ---------------------------------------------------------------------------
   // DATA FETCHING
@@ -281,40 +145,20 @@ export default function SpenderHomeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Fetch Profile
+      // 1. Fetch Profile (including role)
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('full_name, avatar_url')
+        .select('full_name, avatar_url, role')
         .eq('id', user.id)
         .single();
 
       if (profileData?.full_name) setSpenderName(profileData.full_name);
       if (profileData?.avatar_url) setAvatarUrl(profileData.avatar_url);
-
-      // 2. Fetch Categories
-      const { data: allCategoriesData, error: catError } = await supabase
-        .from('categories')
-        .select('id, name, icon, color')
-        .or(`user_id.is.null,user_id.eq.${user.id}`);
-
-      if (catError) throw catError;
-
-      const categoryMap: { [key: string]: DynamicCategory } = {};
-      (allCategoriesData || []).forEach((cat) => {
-        categoryMap[cat.id] = {
-          id: cat.id,
-          name: cat.name,
-          icon: cat.icon || 'folder',
-          color: cat.color || '#E2E8F0',
-          totalSpent: 0,
-          allocatedAmount: 0,
-          remainingAmount: 0,
-        };
-      });
+      if (profileData?.role) setSpenderRole(profileData.role);
 
       const today = new Date().toISOString().split('T')[0];
 
-      // 3. Fetch Allowances
+      // 2. Fetch Allowances
       const { data: allowanceData, error: allowanceError } = await supabase
         .from('allowances')
         .select('id, allowance_name, amount, start_date, end_date')
@@ -349,23 +193,13 @@ export default function SpenderHomeScreen() {
 
         if (budgetsError) throw budgetsError;
 
-        ((budgetsData as unknown as BudgetQuery[]) || []).forEach((budget) => {
-          const catId = budget.category_id;
+        ((budgetsData as any[]) || []).forEach((budget) => {
           const currentAllocation = Number(budget.allocated_amount || 0);
-
           totalAllocatedCounter += currentAllocation;
 
           const expensesList = budget.expenses || [];
-          const categoryTotalSpent = expensesList.reduce((sum: number, exp) => sum + Number(exp.amount || 0), 0);
-
+          const categoryTotalSpent = expensesList.reduce((sum: number, exp: any) => sum + Number(exp.amount || 0), 0);
           totalSpentCounter += categoryTotalSpent;
-
-          if (categoryMap[catId]) {
-            categoryMap[catId].budgetId = budget.id;
-            categoryMap[catId].totalSpent = categoryTotalSpent;
-            categoryMap[catId].allocatedAmount = currentAllocation;
-            categoryMap[catId].remainingAmount = Math.max(0, currentAllocation - categoryTotalSpent);
-          }
         });
 
         const totalAllowanceVal = Number(activeAllowance.amount);
@@ -382,9 +216,7 @@ export default function SpenderHomeScreen() {
         setSummary(null);
       }
 
-      setCategories(Object.values(categoryMap));
-
-      // 4. Fetch Upcoming Dues
+      // 3. Fetch Upcoming Dues
       const { data: duesData, error: duesError } = await supabase
         .from('reminders')
         .select(`
@@ -403,7 +235,7 @@ export default function SpenderHomeScreen() {
       if (duesError) throw duesError;
       setUpcomingDues((duesData as unknown as ReminderItem[]) || []);
 
-// 5. FETCH FRIENDS AND THEIR OWED AMOUNTS
+      // 4. FETCH FRIENDS AND THEIR OWED AMOUNTS
       try {
         const { data: friendsData, error: friendsErr } = await supabase
           .from('friends')
@@ -425,7 +257,6 @@ export default function SpenderHomeScreen() {
 
         if (friendsData && friendsData.length > 0) {
           const mappedFriends: FriendItem[] = friendsData.map((f: any) => {
-            // Sum up the owed amounts from the split_friends table relation
             const totalOwed = (f.split_friends || []).reduce(
               (sum: number, entry: any) => sum + Number(entry.owed_amount || 0),
               0
@@ -448,7 +279,7 @@ export default function SpenderHomeScreen() {
         console.error('Error fetching friends:', friendErr);
       }
 
-      // 6. FETCH RECENT TRANSACTIONS
+      // 5. FETCH RECENT TRANSACTIONS
       try {
         const { data: transactionData, error: transactionErr } = await supabase
           .from('expenses')
@@ -498,102 +329,13 @@ export default function SpenderHomeScreen() {
     }
   };
 
-  const handleSaveBudget = async () => {
-    if (!selectedCategory || !summary) return;
-    const newAllocation = parseFloat(allocateAmount);
-
-    if (isNaN(newAllocation) || newAllocation < 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid amount.');
-      return;
-    }
-
-    const currentAllocation = selectedCategory.allocatedAmount || 0;
-    const additionalAmountNeeded = newAllocation - currentAllocation;
-
-    if (additionalAmountNeeded > (summary?.unallocated ?? 0)) {
-      Alert.alert(
-        'Allocation Exceeded',
-        `Insufficient unallocated balance (₱${(summary?.unallocated ?? 0).toFixed(2)} available).`
-      );
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      if (selectedCategory.budgetId) {
-        await supabase
-          .from('budgets')
-          .update({ allocated_amount: newAllocation })
-          .eq('id', selectedCategory.budgetId);
-      } else {
-        await supabase
-          .from('budgets')
-          .insert({
-            user_id: user.id,
-            category_id: selectedCategory.id,
-            allowance_id: summary.allowanceId,
-            allocated_amount: newAllocation,
-          });
-      }
-
-      setModalVisible(false);
-      setAllocateAmount('');
-      fetchDashboardData();
-    } catch (error: unknown) {
-      Alert.alert('Error', extractErrorMessage(error));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const openAllocateModal = (category: DynamicCategory) => {
-    if (!summary) {
-      Alert.alert('No Active Allowance', 'Please set an active allowance first by your sponsor.');
-      return;
-    }
-    setSelectedCategory(category);
-    setAllocateAmount(category.allocatedAmount > 0 ? String(category.allocatedAmount) : '');
-    setModalVisible(true);
-  };
-
-  const closeAllocateModal = () => {
-    setModalVisible(false);
-    setSelectedCategory(null);
-    setAllocateAmount('');
-  };
-
   useEffect(() => {
     fetchDashboardData();
   }, []);
 
-  const checkLinkStatus = async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from('sponsor_spenders')
-        .select('status')
-        .eq('spender_id', user.id)
-        .eq('status', 'accepted')
-        .maybeSingle();
-
-      if (error) throw error;
-
-      // If data exists, they are linked
-      setIsLinked(!!data);
-    } catch (error) {
-      console.log('Error checking link status:', error);
-    }
-  };
-
-  // Refreshes status every time the user navigates back to Home
   useFocusEffect(
     useCallback(() => {
-      checkLinkStatus();
+      fetchDashboardData();
     }, [])
   );
 
@@ -615,28 +357,17 @@ export default function SpenderHomeScreen() {
     ? Math.max(0, Math.min(((summary.totalAllowance - summary.totalSpent) / summary.totalAllowance) * 100, 100))
     : 0;
 
-
-
   return (
     <View style={styles.mainContainer}>
       <ExpoStatusBar style="light" />
 
-      {/* ========== COLLAPSIBLE HEADER ========== */}
-      <Animated.View
-        style={[
-          styles.headerBackground,
-          {
-            paddingBottom: headerPaddingBottom,
-            shadowOpacity: headerShadowOpacity,
-            elevation: headerElevation,
-          },
-        ]}
-      >
-        <Animated.View style={{ marginBottom: topRowMarginBottom }}>
+      {/* ========== STATIC HEADER (NO ANIMATIONS) ========== */}
+      <View style={styles.headerBackground}>
+        <View style={styles.topRowContainer}>
           <View style={styles.topRow}>
             <View style={styles.userProfileGroup}>
               <TouchableOpacity onPress={() => router.push('/profile')}>
-                <Animated.View style={{ transform: [{ scale: avatarScale }] }}>
+                <View>
                   {avatarUrl ? (
                     <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
                   ) : (
@@ -644,86 +375,53 @@ export default function SpenderHomeScreen() {
                       <Text style={styles.avatarInitial}>{spenderName.charAt(0).toUpperCase()}</Text>
                     </View>
                   )}
-                </Animated.View>
+                </View>
               </TouchableOpacity>
 
               <View>
-                <Animated.View style={{ height: helloHeight, opacity: helloOpacity, overflow: 'hidden', justifyContent: 'flex-end' }}>
-                  <Text style={styles.helloText}>Hello,</Text>
-                </Animated.View>
-                <Animated.Text style={[styles.userNameText, { fontSize: userNameFontSize }]} numberOfLines={1}>
+                <Text style={styles.helloText}>Hello,</Text>
+                <Text style={styles.userNameText} numberOfLines={1}>
                   {spenderName}
-                </Animated.Text>
+                </Text>
               </View>
             </View>
 
-            <View style={styles.topIconsRow}>
-      {/* Conditionally render the invitations button only if NOT linked */}
-      {!isLinked && (
-        <Animated.View style={{ transform: [{ scale: iconCircleScale }] }}>
-          <TouchableOpacity 
-            style={styles.iconCircleModern} 
-            onPress={() => router.push('/invitations')}
-          >
-            <Ionicons name="mail-outline" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-        </Animated.View>
-      )}
-
-      <Animated.View style={{ transform: [{ scale: iconCircleScale }] }}>
-        <TouchableOpacity 
-          style={styles.iconCircleModern} 
-          onPress={() => router.push('/reminders')}
-        >
-          <Text style={styles.dateMonthText}>
-            {new Date().toLocaleString('en-US', { month: 'short' }).toUpperCase()}
-          </Text>
-          <Text style={styles.dateDayText}>{new Date().getDate()}</Text>
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
-          </View>
-        </Animated.View>
-
-        <View style={styles.balanceBlock}>
-          <Animated.View style={{ height: labelHeight, opacity: labelOpacity, overflow: 'hidden' }}>
-            <View style={styles.balanceLabelRow}>
-              <View style={styles.balanceLabelIconWrap}>
-                <Ionicons name="wallet-outline" size={13} color={COLORS.deepTeal} />
-              </View>
-              <Text style={styles.balanceLabel}>Total Remaining Balance</Text>
-            </View>
-          </Animated.View>
-
-          <Animated.View style={[styles.pillTrackOuter, { height: pillOuterHeight, borderRadius: pillOuterRadius }]}>
-            <Animated.View style={[styles.pillTrack, { height: pillInnerHeight, borderRadius: pillInnerRadius }]}>
-              <Animated.View style={[styles.pillFill, { width: `${remainingPercentage}%`, borderRadius: pillInnerRadius }]} />
-            </Animated.View>
-          </Animated.View>
-
-          <Animated.View style={[styles.balanceAmountRow, { marginTop: amountMarginTop }]}>
-            <Animated.Text style={[styles.pillAmountText, { fontSize: amountFontSize }]}>
-              ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
-            </Animated.Text>
-            <Animated.Text style={[styles.pillAmountDivider, { fontSize: dividerFontSize }]}>/</Animated.Text>
-            <Animated.Text style={[styles.pillAmountTotal, { fontSize: totalFontSize }]}>
-              ₱{summary ? summary.totalAllowance.toLocaleString('en-US') : '0'}
-            </Animated.Text>
-          </Animated.View>
-
-          <Animated.View style={{ height: unallocHeight, opacity: unallocOpacity, overflow: 'hidden', justifyContent: 'flex-end' }}>
-            <View style={styles.unallocatedChip}>
-              <View style={styles.unallocatedDot} />
-              <Text style={styles.unallocatedHint} numberOfLines={1}>
-                ₱{summary ? summary.unallocated.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'} unallocated budget
+            <View style={styles.roleBadgeContainer}>
+              <Text style={styles.roleBadgeText} numberOfLines={1}>
+                {spenderRole ? spenderRole.toUpperCase() : ''}
               </Text>
             </View>
-          </Animated.View>
+          </View>
         </View>
-      </Animated.View>
+
+        <View style={styles.balanceBlock}>
+          <View style={styles.balanceLabelRow}>
+            <View style={styles.balanceLabelIconWrap}>
+              <Ionicons name="wallet-outline" size={13} color={COLORS.deepTeal} />
+            </View>
+            <Text style={styles.balanceLabel}>Total Remaining Balance</Text>
+          </View>
+
+          <View style={styles.pillTrackOuter}>
+            <View style={styles.pillTrack}>
+              <View style={[styles.pillFill, { width: `${remainingPercentage}%` }]} />
+            </View>
+          </View>
+
+          <View style={styles.balanceAmountRow}>
+            <Text style={styles.pillAmountText}>
+              ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
+            </Text>
+            <Text style={styles.pillAmountDivider}>/</Text>
+            <Text style={styles.pillAmountTotal}>
+              ₱{summary ? summary.totalAllowance.toLocaleString('en-US') : '0'}
+            </Text>
+          </View>
+        </View>
+      </View>
 
       {/* ========== SCROLLABLE CONTENT ========== */}
-      <Animated.ScrollView
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -731,59 +429,7 @@ export default function SpenderHomeScreen() {
         }
         showsVerticalScrollIndicator={false}
         bounces
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
       >
-        {/* ========== QUICK BUDGET ========== */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Quick Budget</Text>
-            <TouchableOpacity onPress={() => router.push('/budget')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
-          </View>
-
-          {categories.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>No budget folders yet.</Text>
-            </View>
-          ) : (
-            <FlatList
-              // Sort from lowest remainingAmount to highest
-              data={[...categories].sort((a, b) => a.remainingAmount - b.remainingAmount)}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(cat) => `quick-budget-item-${cat.id}`}
-              contentContainerStyle={{ gap: 12, paddingHorizontal: 4 }}
-              renderItem={({ item: cat, index }) => {
-                const theme = CARD_THEMES[index % CARD_THEMES.length];
-                const hasBudget = Boolean(cat.budgetId);
-
-                return (
-                  <TouchableOpacity
-                    key={cat.id}
-                    activeOpacity={0.8}
-                    onPress={() => openAllocateModal(cat)}
-                    style={[styles.quickBudgetCard, { backgroundColor: theme.bg }]}
-                  >
-                    <View style={[styles.quickBudgetIconCircle, { backgroundColor: theme.iconBg }]}>
-                      <Ionicons name={(cat.icon as any) || 'folder-outline'} size={18} color={theme.iconColor} />
-                    </View>
-
-                    <Text style={[styles.quickBudgetName, { color: theme.text }]} numberOfLines={1}>
-                      {cat.name}
-                    </Text>
-
-                    <Text style={[styles.quickBudgetAmount, { color: theme.text }]} numberOfLines={1}>
-                      {hasBudget ? `₱${cat.remainingAmount.toLocaleString()} left` : 'Tap to allocate'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          )}
-        </View>
-
         {/* ========== UPCOMING DUES ========== */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
@@ -820,7 +466,6 @@ export default function SpenderHomeScreen() {
                     onPress={() => router.push('/reminders')}
                     style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
                   >
-                    {/* Calendar Day Icon Box */}
                     <View style={styles.calendarBadgeHome}>
                       <Text style={styles.calendarMonthHome}>{monthStr}</Text>
                       <Text style={styles.calendarDayHome}>{dayStr}</Text>
@@ -867,13 +512,10 @@ export default function SpenderHomeScreen() {
             </View>
           ) : (
             <View style={styles.debtListContainer}>
-              {/* Filter out zero/negative balances and sort from highest to lowest */}
               {[...friendsList]
                 .filter(item => (Number(item.amount_owed) || 0) > 0)
                 .sort((a, b) => (Number(b.amount_owed) || 0) - (Number(a.amount_owed) || 0))
-                .map((item, index) => {
-                  const theme = CARD_THEMES[index % CARD_THEMES.length];
-                  
+                .map((item) => {
                   return (
                     <TouchableOpacity
                       key={`debt-friend-${item.id}`}
@@ -907,8 +549,6 @@ export default function SpenderHomeScreen() {
             </View>
           )}
         </View>
-
-        
 
         {/* ========== RECENT TRANSACTIONS ========== */}
         <View style={styles.sectionBlock}>
@@ -981,65 +621,7 @@ export default function SpenderHomeScreen() {
             </View>
           )}
         </View>
-      </Animated.ScrollView>
-
-      {/* ========== ALLOCATE / UPDATE BUDGET MODAL ========== */}
-      <Modal animationType="fade" transparent visible={modalVisible} onRequestClose={closeAllocateModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalIconWrapper}>
-                <Ionicons name="wallet-outline" size={22} color={COLORS.olive} />
-              </View>
-              <View>
-                <Text style={styles.modalTitle}>
-                  {selectedCategory?.budgetId ? 'Edit Budget' : 'Allocate Budget'}
-                </Text>
-                
-              </View>
-            </View>
-
-            <Text style={styles.modalSubText}>
-              {selectedCategory?.budgetId
-                ? `Update allocation for ${selectedCategory?.name}.`
-                : `Set budget allocation for ${selectedCategory?.name}.`}
-            </Text>
-
-            {summary && (
-              <Text style={styles.modalHintText}>
-                Unallocated available: ₱{summary.unallocated.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </Text>
-            )}
-
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>Amount</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="₱0.00"
-                placeholderTextColor="#94A3B8"
-                keyboardType="numeric"
-                value={allocateAmount}
-                onChangeText={setAllocateAmount}
-                editable={!submitting}
-                selectTextOnFocus
-              />
-            </View>
-
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelBtn]} onPress={closeAllocateModal} disabled={submitting}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.confirmBtn]} onPress={handleSaveBudget} disabled={submitting}>
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.confirmBtnText}>{selectedCategory?.budgetId ? 'Update' : 'Allocate'}</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      </ScrollView>
     </View>
   );
 }
@@ -1058,6 +640,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.headerDark,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 22,
+    paddingBottom: 30,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     shadowColor: '#000000',
@@ -1066,6 +649,7 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 10,
   },
+  topRowContainer: { marginBottom: 24 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   userProfileGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatarImage: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: '#FFFFFF' },
@@ -1081,15 +665,23 @@ const styles = StyleSheet.create({
   },
   avatarInitial: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
   helloText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.3, lineHeight: 26 },
-  userNameText: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 1 },
-  topIconsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  iconCircleModern: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: COLORS.headerDarker,
+  userNameText: { fontSize: 18, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 1 },
+  
+  roleBadgeContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
+    maxWidth: 120,
+  },
+  roleBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+    letterSpacing: 0.5,
   },
 
   balanceBlock: { alignItems: 'center' },
@@ -1100,52 +692,18 @@ const styles = StyleSheet.create({
   },
   balanceLabel: { fontSize: 12, color: COLORS.white, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
   pillTrackOuter: { width: '100%', padding: 4, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' },
-  pillTrack: { width: '100%', borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
+  pillTrack: { width: '100%', height: 46, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
   pillFill: { height: '100%', borderRadius: 26, backgroundColor: COLORS.cyan },
-  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 16 },
   pillAmountText: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6 },
   pillAmountDivider: { fontSize: 22, color: 'rgba(255,255,255,0.3)', fontWeight: '300' },
   pillAmountTotal: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
-  unallocatedChip: {
-    flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 7,
-    marginTop: 10, backgroundColor: 'rgba(255,255,255,0.09)', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
-  },
-  unallocatedDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.yellowGreen },
-  unallocatedHint: { fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: '600' },
 
   // Sections
   sectionBlock: { paddingHorizontal: 24, marginTop: 28 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontSize: 17, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
   seeAllText: { fontSize: 13, color: COLORS.black, fontWeight: '600' },
-
-  // Quick Budget
-  quickBudgetCard: {
-    width: QUICK_BUDGET_CARD_WIDTH,
-    padding: 16,
-    borderRadius: 20,
-    justifyContent: 'space-between',
-    minHeight: 110,
-  },
-  quickBudgetIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  quickBudgetName: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  quickBudgetAmount: {
-    fontSize: 11,
-    opacity: 0.8,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-
 
   debtListContainer: {
     gap: 10,
@@ -1162,7 +720,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
-    
   },
   debtItemLeft: {
     flexDirection: 'row',
@@ -1175,17 +732,6 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-  },
-  friendAvatarFallbackRow: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  friendAvatarInitialRow: {
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   friendNameRowText: {
     fontSize: 15,
@@ -1204,8 +750,9 @@ const styles = StyleSheet.create({
   owesYouAmountText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#7EA00E', // Warm amber/orange tone for owed money, or use COLORS.olive
+    color: '#7EA00E',
   },
+
   // Upcoming Dues
   dueCardsContainer: { gap: 10 },
   reminderCardHome: {
@@ -1254,72 +801,25 @@ const styles = StyleSheet.create({
   },
   emptyText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
 
-  // Modal — same floating-card treatment (scrim tint + shadow spec) as Split
-  modalOverlay: { flex: 1, backgroundColor: COLORS.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  modalContainer: {
-    backgroundColor: '#FFFFFF', width: '100%', padding: 28, borderRadius: 28,
-    shadowColor: COLORS.modalShadow, shadowOpacity: 0.28, shadowRadius: 32, shadowOffset: { width: 0, height: 18 }, elevation: 16,
-  },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
-  modalIconWrapper: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#F0FDF4', justifyContent: 'center', alignItems: 'center' },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
-  modalCategoryName: { fontSize: 13, color: COLORS.textMuted, marginTop: 2, fontWeight: '500' },
-  modalSubText: { fontSize: 14, color: COLORS.textMuted, marginBottom: 12, lineHeight: 20 },
-  modalHintText: { fontSize: 13, color: COLORS.olive, fontWeight: '700', marginBottom: 16 },
-  inputWrapper: { marginBottom: 16 },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: COLORS.darkOlive, marginBottom: 8 },
-  modalInput: {
-    borderWidth: 1.5, borderColor: '#E2E8F0', padding: 16, borderRadius: 16, fontSize: 18, fontWeight: '600',
-    color: COLORS.darkOlive, backgroundColor: COLORS.bg, paddingLeft: 20,
-  },
-  modalButtonsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 8 },
-  modalButton: { paddingVertical: 14, paddingHorizontal: 24, borderRadius: 16, justifyContent: 'center', alignItems: 'center', minWidth: 100 },
-  cancelBtn: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
-  cancelBtnText: { color: '#475569', fontWeight: '600', fontSize: 14 },
-  confirmBtn: {
-    backgroundColor: COLORS.deepTeal, shadowColor: COLORS.deepTeal, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2, shadowRadius: 12, elevation: 4,
-  },
-  confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-
   calendarBadgeHome: {
-  width: 48,
-  height: 48,
-  borderRadius: 10,
-  backgroundColor: 'rgba(255, 255, 255, 0.6)',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginRight: 12,
-},
-calendarMonthHome: {
-  fontSize: 10,
-  fontWeight: '700',
-  color: COLORS.deepTeal,
-  letterSpacing: 0.5,
-},
-calendarDayHome: {
-  fontSize: 16,
-  fontWeight: '800',
-  color: COLORS.deepTeal,
-  lineHeight: 18,
-},
-// Add these to your StyleSheet.create({...})
-
-dateText: {
-  color: '#FFFFFF',
-  fontSize: 16,
-  fontWeight: 'bold',
-},
-dateMonthText: {
-  color: '#FFFFFF',
-  fontSize: 10,
-  fontWeight: '600',
-  lineHeight: 12,
-},
-dateDayText: {
-  color: '#FFFFFF',
-  fontSize: 14,
-  fontWeight: 'bold',
-  lineHeight: 16,
-},
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  calendarMonthHome: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.deepTeal,
+    letterSpacing: 0.5,
+  },
+  calendarDayHome: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.deepTeal,
+    lineHeight: 18,
+  },
 });
