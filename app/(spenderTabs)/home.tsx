@@ -194,7 +194,6 @@ export default function SpenderHomeScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       
-      // Kuhaon ang categories nga gigahin sa user O kaya kay global (NULL ang user_id)
       let query = supabase.from('categories').select('id, name, icon, color');
       
       if (user) {
@@ -333,15 +332,22 @@ export default function SpenderHomeScreen() {
     });
   };
 
+  const resetForm = () => {
+    setNewTitle('');
+    setNewAmount('');
+    setNewDueDate(todayStr);
+    setNewCategoryId(null);
+    setSubmitting(false);
+  };
+
   const handleCreateReminder = async () => {
     if (!newTitle.trim() || !newAmount.trim()) {
       alert('Please fill in both title and amount.');
       return;
     }
 
-    // Bag-ong check: Kinahanglan naay mapili nga category
     if (!newCategoryId) {
-      alert('Please choose a category for your reminder.');
+      alert('Please choose a category for this reminder.');
       return;
     }
 
@@ -362,10 +368,7 @@ export default function SpenderHomeScreen() {
 
       if (error) throw error;
 
-      setNewTitle('');
-      setNewAmount('');
-      setNewDueDate(todayStr);
-      setNewCategoryId(null);
+      resetForm();
       setAddModalVisible(false);
       fetchDashboardData();
     } catch (error: unknown) {
@@ -625,7 +628,10 @@ export default function SpenderHomeScreen() {
         animationType="slide"
         transparent={true}
         visible={addModalVisible}
-        onRequestClose={() => setAddModalVisible(false)}
+        onRequestClose={() => {
+          resetForm();
+          setAddModalVisible(false);
+        }}
         onShow={() => fetchCategories()}
       >
         <View style={styles.modalOverlay}>
@@ -635,7 +641,13 @@ export default function SpenderHomeScreen() {
                 <Text style={styles.modalTitle}>Add New Reminder</Text>
                 <Text style={styles.modalSubtitle}>Fill in reminder details</Text>
               </View>
-              <TouchableOpacity onPress={() => setAddModalVisible(false)} style={styles.modalCloseButton}>
+              <TouchableOpacity 
+                onPress={() => {
+                  resetForm();
+                  setAddModalVisible(false);
+                }} 
+                style={styles.modalCloseButton}
+              >
                 <Ionicons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
