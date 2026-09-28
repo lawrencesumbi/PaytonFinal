@@ -135,6 +135,13 @@ interface ReminderItem {
   } | null;
 }
 
+interface CategoryItem {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+}
+
 export default function SpenderHomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -145,6 +152,7 @@ export default function SpenderHomeScreen() {
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
   
   const dateList = generateDateRange();
   const todayStr = new Date().toISOString().split('T')[0];
@@ -156,6 +164,7 @@ export default function SpenderHomeScreen() {
   const [newTitle, setNewTitle] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newDueDate, setNewDueDate] = useState(todayStr);
+  const [newCategoryId, setNewCategoryId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const centerToday = (animated = false) => {
@@ -180,6 +189,28 @@ export default function SpenderHomeScreen() {
 
     return () => clearTimeout(timer);
   }, []);
+
+  const fetchCategories = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Kuhaon ang categories nga gigahin sa user O kaya kay global (NULL ang user_id)
+      let query = supabase.from('categories').select('id, name, icon, color');
+      
+      if (user) {
+        query = query.or(`user_id.eq.${user.id},user_id.is.null`);
+      } else {
+        query = query.is('user_id', null);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      setCategories(data || []);
+    } catch (error: unknown) {
+      console.error('Error fetching categories:', extractErrorMessage(error));
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -272,6 +303,8 @@ export default function SpenderHomeScreen() {
       if (duesError) throw duesError;
       setUpcomingDues((duesData as unknown as ReminderItem[]) || []);
 
+      await fetchCategories();
+
     } catch (error: unknown) {
       console.error('Spender Dashboard Error:', extractErrorMessage(error));
     } finally {
@@ -306,6 +339,12 @@ export default function SpenderHomeScreen() {
       return;
     }
 
+    // Bag-ong check: Kinahanglan naay mapili nga category
+    if (!newCategoryId) {
+      alert('Please choose a category for your reminder.');
+      return;
+    }
+
     try {
       setSubmitting(true);
       const { data: { user } } = await supabase.auth.getUser();
@@ -318,6 +357,7 @@ export default function SpenderHomeScreen() {
         due_date: newDueDate,
         status: 'pending',
         allowance_id: summary?.allowanceId || null,
+        category_id: newCategoryId,
       });
 
       if (error) throw error;
@@ -325,6 +365,7 @@ export default function SpenderHomeScreen() {
       setNewTitle('');
       setNewAmount('');
       setNewDueDate(todayStr);
+      setNewCategoryId(null);
       setAddModalVisible(false);
       fetchDashboardData();
     } catch (error: unknown) {
@@ -509,8 +550,6 @@ export default function SpenderHomeScreen() {
                   <Text style={styles.modalTitle}>Scheduled Dues</Text>
                   <Text style={styles.modalSubtitle}>{formatReadableDate(selectedDate)}</Text>
                 </View>
-                
-                {/* ILISANI KINI NGA PARTE */}
                 {filteredDues.length > 0 && (
                   <View style={[
                     styles.dueBadgeHome, 
@@ -538,45 +577,45 @@ export default function SpenderHomeScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
-  {filteredDues.length > 0 ? (
-    filteredDues.map((due, index) => {
-      const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
-      const dateObj = new Date(due.due_date);
-      const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-      const dayStr = dateObj.getDate();
+              {filteredDues.length > 0 ? (
+                filteredDues.map((due, index) => {
+                  const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
+                  const dateObj = new Date(due.due_date);
+                  const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+                  const dayStr = dateObj.getDate();
 
-      return (
-        <TouchableOpacity
-          key={due.id}
-          activeOpacity={0.85}
-          onPress={() => {
-            setModalVisible(false);
-            router.push('/reminders');
-          }}
-          style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
-        >
-          <View style={styles.calendarBadgeHome}>
-            <Text style={styles.calendarMonthHome}>{monthStr}</Text>
-            <Text style={styles.calendarDayHome}>{dayStr}</Text>
-          </View>
+                  return (
+                    <TouchableOpacity
+                      key={due.id}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        setModalVisible(false);
+                        router.push('/reminders');
+                      }}
+                      style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
+                    >
+                      <View style={styles.calendarBadgeHome}>
+                        <Text style={styles.calendarMonthHome}>{monthStr}</Text>
+                        <Text style={styles.calendarDayHome}>{dayStr}</Text>
+                      </View>
 
-          <View style={styles.cardContentHome}>
-            <Text style={styles.reminderTitleHome}>{due.title}</Text>
-            <Text style={styles.reminderSubHome}>
-              ₱{Number(due.amount).toFixed(2)}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      );
-    })
-  ) : (
-    <View style={styles.emptyStateContainer}>
-      <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.deepTeal} />
-      <Text style={styles.emptyStateTitle}>All Clear!</Text>
-      <Text style={styles.emptyStateText}>No reminders set for this date.</Text>
-    </View>
-  )}
-</ScrollView>
+                      <View style={styles.cardContentHome}>
+                        <Text style={styles.reminderTitleHome}>{due.title}</Text>
+                        <Text style={styles.reminderSubHome}>
+                          ₱{Number(due.amount).toFixed(2)}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={styles.emptyStateContainer}>
+                  <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.deepTeal} />
+                  <Text style={styles.emptyStateTitle}>All Clear!</Text>
+                  <Text style={styles.emptyStateText}>No reminders set for this date.</Text>
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -587,6 +626,7 @@ export default function SpenderHomeScreen() {
         transparent={true}
         visible={addModalVisible}
         onRequestClose={() => setAddModalVisible(false)}
+        onShow={() => fetchCategories()}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -600,7 +640,7 @@ export default function SpenderHomeScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.formContainer}>
+            <ScrollView contentContainerStyle={styles.formContainer} showsVerticalScrollIndicator={false}>
               <Text style={styles.inputLabel}>Title</Text>
               <TextInput
                 style={styles.textInput}
@@ -619,6 +659,27 @@ export default function SpenderHomeScreen() {
                 value={newAmount}
                 onChangeText={setNewAmount}
               />
+
+              <Text style={styles.inputLabel}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                {categories.map((cat) => {
+                  const isSelected = newCategoryId === cat.id;
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      onPress={() => setNewCategoryId(cat.id)}
+                      style={[
+                        styles.categoryChip,
+                        isSelected && { backgroundColor: COLORS.headerDark, borderColor: COLORS.headerDark }
+                      ]}
+                    >
+                      <Text style={[styles.categoryChipText, isSelected && { color: '#FFFFFF' }]}>
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
 
               <Text style={styles.inputLabel}>Due Date (YYYY-MM-DD)</Text>
               <TextInput
@@ -640,7 +701,7 @@ export default function SpenderHomeScreen() {
                   <Text style={styles.submitButtonText}>Save Reminder</Text>
                 )}
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -918,6 +979,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.black,
   },
+  categoryScroll: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  categoryChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    marginRight: 8,
+  },
+  categoryChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
   submitButton: {
     backgroundColor: COLORS.headerDark,
     borderRadius: 14,
@@ -931,20 +1010,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   emptyStateContainer: {
-  alignItems: 'center',
-  justifyContent: 'center',
-  paddingVertical: 32,
-  gap: 8,
-},
-emptyStateTitle: {
-  fontSize: 16,
-  fontWeight: '700',
-  color: COLORS.darkOlive,
-  marginTop: 4,
-},
-emptyStateText: {
-  fontSize: 13,
-  color: COLORS.textMuted,
-  textAlign: 'center',
-},
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+    marginTop: 4,
+  },
+  emptyStateText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+  },
 });
