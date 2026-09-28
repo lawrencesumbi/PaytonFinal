@@ -227,65 +227,54 @@ export default function SpenderHomeScreen() {
       if (profileData?.avatar_url) setAvatarUrl(profileData.avatar_url);
       if (profileData?.role) setSpenderRole(profileData.role);
 
-      const today = new Date().toISOString().split('T')[0];
-
+      // 1. Kunon ang tanan allowances ni spender base sa received_at
       const { data: allowanceData, error: allowanceError } = await supabase
         .from('allowances')
-        .select('id, allowance_name, amount, start_date, end_date')
+        .select('id, allowance_name, amount, received_at')
         .eq('spender_id', user.id)
-        .lte('start_date', today)
-        .gte('end_date', today)
-        .order('received_at', { ascending: false })
-        .limit(1);
+        .order('received_at', { ascending: false });
 
       if (allowanceError) throw allowanceError;
 
       let totalSpentCounter = 0;
-      let totalAllocatedCounter = 0;
+      let combinedTotalAllowance = 0;
 
       if (allowanceData && allowanceData.length > 0) {
-        const activeAllowance = allowanceData[0];
+        const allowanceIds = allowanceData.map((item) => item.id);
+        
+        // I-kombinar ang tanan allowance amount (e.g., 5000 + 4000 = 9000)
+        combinedTotalAllowance = allowanceData.reduce(
+          (sum, item) => sum + Number(item.amount || 0),
+          0
+        );
 
-        const { data: budgetsData, error: budgetsError } = await supabase
-          .from('budgets')
-          .select(`
-            id,
-            category_id,
-            allocated_amount,
-            allowance_id,
-            expenses (
-              id,
-              amount
-            )
-          `)
-          .eq('user_id', user.id)
-          .eq('allowance_id', activeAllowance.id);
+        // 2. Direktang kunon ang mga expenses gamit ang allowance_id
+        const { data: expensesData, error: expensesError } = await supabase
+          .from('expenses')
+          .select('id, amount, allowance_id')
+          .in('allowance_id', allowanceIds);
 
-        if (budgetsError) throw budgetsError;
+        if (expensesError) throw expensesError;
 
-        ((budgetsData as any[]) || []).forEach((budget) => {
-          const currentAllocation = Number(budget.allocated_amount || 0);
-          totalAllocatedCounter += currentAllocation;
-
-          const expensesList = budget.expenses || [];
-          const categoryTotalSpent = expensesList.reduce((sum: number, exp: any) => sum + Number(exp.amount || 0), 0);
-          totalSpentCounter += categoryTotalSpent;
-        });
-
-        const totalAllowanceVal = Number(activeAllowance.amount);
+        // I-sum up ang tanan ginastos gikan sa mga expenses
+        totalSpentCounter = (expensesData || []).reduce(
+          (sum: number, exp: any) => sum + Number(exp.amount || 0),
+          0
+        );
 
         setSummary({
-          allowanceId: activeAllowance.id,
-          allowanceName: activeAllowance.allowance_name,
-          totalAllowance: totalAllowanceVal,
+          allowanceId: allowanceIds[0], 
+          allowanceName: allowanceData.map(a => a.allowance_name).join(', '),
+          totalAllowance: combinedTotalAllowance,
           totalSpent: totalSpentCounter,
-          remaining: totalAllowanceVal - totalSpentCounter,
-          unallocated: totalAllowanceVal - totalAllocatedCounter,
+          remaining: combinedTotalAllowance - totalSpentCounter,
+          unallocated: 0, // Tinanggal na ang unallocated dahil wala nang budgets table
         });
       } else {
         setSummary(null);
       }
 
+      // Kunon ang mga reminders
       const { data: duesData, error: duesError } = await supabase
         .from('reminders')
         .select(`

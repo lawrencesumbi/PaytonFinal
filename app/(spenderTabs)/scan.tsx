@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { decode } from 'base64-arraybuffer'; // Fast and safe base64 converter for Supabase
 import { CameraView, FlashMode, useCameraPermissions } from 'expo-camera';
 import { Stack, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -14,7 +15,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-
+import { supabase } from '../../lib/supabase';
 
 const { width } = Dimensions.get('window');
 
@@ -26,7 +27,6 @@ export default function ScanReceiptScreen() {
   const pathname = usePathname();
   const { allowanceId } = useLocalSearchParams<{ allowanceId?: string }>();
 
-  // Check if focus is strictly inside Scan screen using pathname (SDK 56 safe)
   const isFocused = pathname === '/scan' || pathname.includes('scan');
 
   const [permission, requestPermission] = useCameraPermissions();
@@ -80,7 +80,7 @@ export default function ScanReceiptScreen() {
         }
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-3.6-flash",
+          model: "gemini-2.5-flash",
           generationConfig: {
             responseMimeType: "application/json",
           }
@@ -128,17 +128,61 @@ export default function ScanReceiptScreen() {
           `Merchant: ${merchantName}\nAmount: ₱${Number(totalAmount).toFixed(2)}\nCategory: ${matchedCategory}`,
           [
             {
-              text: "Populate Form",
-              onPress: () => {  
-                router.push({
-                  pathname: '/budget', 
-                  params: { 
-                    scannedName: merchantName, 
-                    scannedAmount: totalAmount.toString(),
-                    scannedCategory: matchedCategory,
-                    allowanceId: allowanceId || ''
-                  }
-                });
+              text: "Log Expense",
+              onPress: async () => {
+                try {
+                  // 1. Get current logged-in user
+                  const { data: { user }, error: userError } = await supabase.auth.getUser();
+                  if (userError || !user) throw new Error("You must be logged in to log expenses.");
+
+                  // 2. Fetch matching category ID from categories table
+                  const { data: categoryData } = await supabase
+                    .from('categories')
+                    .select('id')
+                    .eq('name', matchedCategory)
+                    .single();
+
+                  const categoryId = categoryData ? categoryData.id : null;
+
+                  // 3. Upload photo directly via base64 arraybuffer (fast and avoids blob performance overhead)
+                  const fileName = `${user.id}/${Date.now()}.jpg`;
+                  const { error: uploadError } = await supabase.storage
+                    .from('receipts')
+                    .upload(fileName, decode(photo.base64), {
+                      contentType: 'image/jpeg',
+                      upsert: false
+                    });
+
+                  if (uploadError) throw uploadError;
+
+                  // 4. Get Public URL for the uploaded photo
+                  const { data: urlData } = supabase.storage
+                    .from('receipts')
+                    .getPublicUrl(fileName);
+
+                  const photoUrl = urlData.publicUrl;
+
+                  // 5. Insert record into expenses table with photo_url included
+                  const { error: insertError } = await supabase.from('expenses').insert([
+                    { 
+                      description: merchantName, 
+                      amount: Number(totalAmount), 
+                      allowance_id: allowanceId || null,
+                      spent_at: new Date().toISOString(),
+                      user_id: user.id,
+                      category_id: categoryId,
+                      photo_url: photoUrl
+                    }
+                  ]);
+                  
+                  if (insertError) throw insertError;
+
+                  Alert.alert("Success", "Expense and receipt logged successfully!");
+                  router.replace('/transaction');
+                } catch (dbError: any) {
+                  console.error("Database/Storage Log Error:", dbError);
+                  Alert.alert("Error", dbError.message || "Could not save the expense or upload the receipt.");
+                }
               }
             },
             { text: "Try Again", style: "cancel" }
@@ -167,7 +211,6 @@ export default function ScanReceiptScreen() {
 
       <StatusBar style="light" />
       
-      {/* Dynamic mounting using StyleSheet.absoluteFill to avoid TS errors */}
       {isFocused ? (
         <CameraView 
           style={StyleSheet.absoluteFill} 
@@ -180,7 +223,6 @@ export default function ScanReceiptScreen() {
         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} />
       )}
 
-      {/* Floating Overlay Controls */}
       <View style={styles.overlayContainer}>
         <View style={styles.topUtilityRow}>
           <TouchableOpacity 

@@ -162,7 +162,7 @@ export default function SpenderLayout() {
         />
 
         <Tabs.Screen
-          name="budget"
+          name="transaction"
           options={{
             title: "Transactions",
             tabBarIcon: ({ color, focused }: any) => (
@@ -230,7 +230,7 @@ export default function SpenderLayout() {
 
         {/* Hidden routes */}
         <Tabs.Screen name="insight" options={{ href: null }} />
-        <Tabs.Screen name="transaction" options={{ href: null }} />
+        <Tabs.Screen name="budget" options={{ href: null }} />
         <Tabs.Screen name="reminders" options={{ href: null }} />
         <Tabs.Screen name="statistics" options={{ href: null }} />
         <Tabs.Screen name="invitations" options={{ href: null }} />
