@@ -354,9 +354,7 @@ export default function SpenderHomeScreen() {
 
   const handleDatePress = (dateStr: string) => {
     setSelectedDate(dateStr);
-    if (hasPendingOnDate(dateStr)) {
-      setModalVisible(true);
-    }
+    setModalVisible(true);
   };
 
   const filteredDues = upcomingDues.filter(due => due.due_date === selectedDate);
@@ -511,17 +509,21 @@ export default function SpenderHomeScreen() {
                   <Text style={styles.modalTitle}>Scheduled Dues</Text>
                   <Text style={styles.modalSubtitle}>{formatReadableDate(selectedDate)}</Text>
                 </View>
-                <View style={[
-                  styles.dueBadgeHome, 
-                  { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
-                ]}>
-                  <Text style={[
-                    styles.dueBadgeTextHome, 
-                    { color: selectedDaysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
+                
+                {/* ILISANI KINI NGA PARTE */}
+                {filteredDues.length > 0 && (
+                  <View style={[
+                    styles.dueBadgeHome, 
+                    { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
                   ]}>
-                    {selectedDaysInfo.text}
-                  </Text>
-                </View>
+                    <Text style={[
+                      styles.dueBadgeTextHome, 
+                      { color: selectedDaysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
+                    ]}>
+                      {selectedDaysInfo.text}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <TouchableOpacity 
@@ -536,37 +538,45 @@ export default function SpenderHomeScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
-              {filteredDues.map((due, index) => {
-                const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
-                const dateObj = new Date(due.due_date);
-                const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-                const dayStr = dateObj.getDate();
+  {filteredDues.length > 0 ? (
+    filteredDues.map((due, index) => {
+      const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
+      const dateObj = new Date(due.due_date);
+      const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+      const dayStr = dateObj.getDate();
 
-                return (
-                  <TouchableOpacity
-                    key={due.id}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      setModalVisible(false);
-                      router.push('/reminders');
-                    }}
-                    style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
-                  >
-                    <View style={styles.calendarBadgeHome}>
-                      <Text style={styles.calendarMonthHome}>{monthStr}</Text>
-                      <Text style={styles.calendarDayHome}>{dayStr}</Text>
-                    </View>
+      return (
+        <TouchableOpacity
+          key={due.id}
+          activeOpacity={0.85}
+          onPress={() => {
+            setModalVisible(false);
+            router.push('/reminders');
+          }}
+          style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
+        >
+          <View style={styles.calendarBadgeHome}>
+            <Text style={styles.calendarMonthHome}>{monthStr}</Text>
+            <Text style={styles.calendarDayHome}>{dayStr}</Text>
+          </View>
 
-                    <View style={styles.cardContentHome}>
-                      <Text style={styles.reminderTitleHome}>{due.title}</Text>
-                      <Text style={styles.reminderSubHome}>
-                        ₱{Number(due.amount).toFixed(2)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+          <View style={styles.cardContentHome}>
+            <Text style={styles.reminderTitleHome}>{due.title}</Text>
+            <Text style={styles.reminderSubHome}>
+              ₱{Number(due.amount).toFixed(2)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    })
+  ) : (
+    <View style={styles.emptyStateContainer}>
+      <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.deepTeal} />
+      <Text style={styles.emptyStateTitle}>All Clear!</Text>
+      <Text style={styles.emptyStateText}>No reminders set for this date.</Text>
+    </View>
+  )}
+</ScrollView>
           </View>
         </View>
       </Modal>
@@ -920,4 +930,21 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  emptyStateContainer: {
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingVertical: 32,
+  gap: 8,
+},
+emptyStateTitle: {
+  fontSize: 16,
+  fontWeight: '700',
+  color: COLORS.darkOlive,
+  marginTop: 4,
+},
+emptyStateText: {
+  fontSize: 13,
+  color: COLORS.textMuted,
+  textAlign: 'center',
+},
 });
