@@ -499,7 +499,13 @@ export default function SpenderHomeScreen() {
                 <Text style={styles.modalTitle}>Scheduled Dues</Text>
                 <Text style={styles.modalSubtitle}>{selectedDate}</Text>
               </View>
-              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseButton}>
+              <TouchableOpacity 
+                onPress={() => {
+                  setModalVisible(false);
+                  setSelectedDate(todayStr); // Reset sa highlight border pabalik sa karwa/today o i-clear
+                }} 
+                style={styles.modalCloseButton}
+              >
                 <Ionicons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
