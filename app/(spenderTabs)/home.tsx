@@ -82,11 +82,24 @@ function getDaysInfo(dueDateStr: string): { text: string; urgent: boolean } {
   return { text: `${diffDays} days left`, urgent: false };
 }
 
+function formatReadableDate(dateStr: string): string {
+  try {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
 function generateDateRange() {
   const dates = [];
   const today = new Date();
   
-  // Loop from -30 to +30 (61 days total)
   for (let i = -30; i <= 30; i++) {
     const d = new Date();
     d.setDate(today.getDate() + i);
@@ -133,14 +146,12 @@ export default function SpenderHomeScreen() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
   
-  // Date strip & Modal states
   const dateList = generateDateRange();
   const todayStr = new Date().toISOString().split('T')[0];
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [modalVisible, setModalVisible] = useState(false);
   const horizontalScrollRef = useRef<ScrollView>(null);
 
-  // Add Reminder Form Modal States
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newAmount, setNewAmount] = useState('');
@@ -148,7 +159,6 @@ export default function SpenderHomeScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const centerToday = (animated = false) => {
-    // Find the exact index where isToday is true
     const todayIndex = dateList.findIndex(item => item.isToday);
     const dateBoxWidth = 54; 
     const dateBoxGap = 8;         
@@ -350,6 +360,7 @@ export default function SpenderHomeScreen() {
   };
 
   const filteredDues = upcomingDues.filter(due => due.due_date === selectedDate);
+  const selectedDaysInfo = getDaysInfo(selectedDate);
 
   return (
     <View style={styles.mainContainer}>
@@ -495,14 +506,28 @@ export default function SpenderHomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>Scheduled Dues</Text>
-                <Text style={styles.modalSubtitle}>{selectedDate}</Text>
+              <View style={styles.modalHeaderLeft}>
+                <View>
+                  <Text style={styles.modalTitle}>Scheduled Dues</Text>
+                  <Text style={styles.modalSubtitle}>{formatReadableDate(selectedDate)}</Text>
+                </View>
+                <View style={[
+                  styles.dueBadgeHome, 
+                  { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
+                ]}>
+                  <Text style={[
+                    styles.dueBadgeTextHome, 
+                    { color: selectedDaysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
+                  ]}>
+                    {selectedDaysInfo.text}
+                  </Text>
+                </View>
               </View>
+
               <TouchableOpacity 
                 onPress={() => {
                   setModalVisible(false);
-                  setSelectedDate(todayStr); // Reset sa highlight border pabalik sa karwa/today o i-clear
+                  setSelectedDate(todayStr);
                 }} 
                 style={styles.modalCloseButton}
               >
@@ -513,7 +538,6 @@ export default function SpenderHomeScreen() {
             <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
               {filteredDues.map((due, index) => {
                 const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
-                const daysInfo = getDaysInfo(due.due_date);
                 const dateObj = new Date(due.due_date);
                 const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
                 const dayStr = dateObj.getDate();
@@ -537,18 +561,6 @@ export default function SpenderHomeScreen() {
                       <Text style={styles.reminderTitleHome}>{due.title}</Text>
                       <Text style={styles.reminderSubHome}>
                         ₱{Number(due.amount).toFixed(2)}
-                      </Text>
-                    </View>
-
-                    <View style={[
-                      styles.dueBadgeHome, 
-                      { backgroundColor: daysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
-                    ]}>
-                      <Text style={[
-                        styles.dueBadgeTextHome, 
-                        { color: daysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
-                      ]}>
-                        {daysInfo.text}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -793,6 +805,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
   },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+    marginRight: 10,
+  },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -819,7 +838,6 @@ const styles = StyleSheet.create({
 
   reminderCardHome: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 16,
