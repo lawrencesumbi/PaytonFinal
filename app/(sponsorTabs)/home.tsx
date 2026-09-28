@@ -8,6 +8,7 @@ import {
   Alert,
   FlatList,
   Image,
+  KeyboardAvoidingView,
   Modal,
   StatusBar as NativeStatusBar,
   Platform,
@@ -26,8 +27,6 @@ interface AllowanceGroupItem {
   id: string;
   allowance_name: string;
   amount: number;
-  start_date: string;
-  end_date: string;
 }
 
 interface SpenderAllowanceCardData {
@@ -97,16 +96,20 @@ export default function HomeScreen() {
         .single();
       setSponsorProfile(profile);
 
-      // 1. Fetch ALL allowances
+      // 1. Fetch ALL allowances (without start_date and end_date)
       const { data: allowancesData, error: allowancesError } = await supabase
-        .from('allowances')
-        .select(`
-          id, allowance_name, amount, start_date, end_date, spender_id, received_at,
-          profiles!allowances_spender_id_fkey (id, full_name, avatar_url),
-          expenses (amount)
-        `)
-        .eq('sponsor_id', user.id)
-        .order('received_at', { ascending: false });
+  .from('allowances')
+  .select(`
+    id, 
+    allowance_name, 
+    amount, 
+    spender_id, 
+    received_at,
+    profiles!allowances_spender_id_fkey (id, full_name, avatar_url),
+    expenses!expenses_allowance_id_fkey (amount)
+  `)
+  .eq('sponsor_id', user.id)
+  .order('received_at', { ascending: false });
 
       if (allowancesError) throw allowancesError;
 
@@ -141,6 +144,7 @@ export default function HomeScreen() {
       const spenderCardMap = new Map<string, SpenderAllowanceCardData>();
 
       (allowancesData || []).forEach((item: any) => {
+        console.log("Allowance ID:", item.id, "Expenses found:", item.expenses);
         const allowanceAmount = Number(item.amount);
         const spentForAllowance = (item.expenses || []).reduce(
           (sum: number, exp: { amount: number }) => sum + Number(exp.amount),
@@ -173,8 +177,6 @@ export default function HomeScreen() {
           id: item.id,
           allowance_name: item.allowance_name,
           amount: allowanceAmount,
-          start_date: item.start_date,
-          end_date: item.end_date,
         });
       });
 
@@ -219,7 +221,6 @@ export default function HomeScreen() {
     setIsAddModalVisible(false);
   };
 
-  // Handle adding a new spender via modal submission
   const handleAddSpenderSubmit = async () => {
     if (!spenderEmail.trim()) {
       Alert.alert('Error', 'Please enter a valid email address.');
@@ -247,13 +248,10 @@ export default function HomeScreen() {
         return;
       }
 
-      // Ensure the user account actually has the spender role
       if (targetProfile.role !== 'spender') {
         Alert.alert('Invalid Role', 'This account is not registered as a spender.');
         return;
       }
-
-      
 
       const { data: existingConnection, error: checkError } = await supabase
         .from('sponsor_spenders')
@@ -296,7 +294,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Handle deleting a connected spender
   const handleDeleteSpenderConfirm = async () => {
     if (!spenderToDelete) return;
 
@@ -589,7 +586,10 @@ export default function HomeScreen() {
         visible={isAddModalVisible}
         onRequestClose={handleCloseAddModal}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={styles.modalOverlay}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Connect New Spender</Text>
@@ -633,7 +633,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* DELETE SPENDER CONFIRMATION MODAL */}
@@ -643,7 +643,10 @@ export default function HomeScreen() {
         visible={isDeleteModalVisible}
         onRequestClose={() => setIsDeleteModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={styles.modalOverlay}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Disconnect Spender</Text>
@@ -677,7 +680,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
