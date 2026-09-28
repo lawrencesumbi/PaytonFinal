@@ -86,7 +86,8 @@ function generateDateRange() {
   const dates = [];
   const today = new Date();
   
-  for (let i = -7; i <= 7; i++) {
+  // Loop from -30 to +30 (61 days total)
+  for (let i = -30; i <= 30; i++) {
     const d = new Date();
     d.setDate(today.getDate() + i);
     dates.push({
@@ -147,9 +148,10 @@ export default function SpenderHomeScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const centerToday = (animated = false) => {
-    const todayIndex = 7;
+    // Find the exact index where isToday is true
+    const todayIndex = dateList.findIndex(item => item.isToday);
     const dateBoxWidth = 54; 
-    const dateBoxGap = 8;    
+    const dateBoxGap = 8;         
     const containerPadding = 24; 
 
     const totalItemWidth = dateBoxWidth + dateBoxGap;
@@ -449,19 +451,31 @@ export default function SpenderHomeScreen() {
                   onPress={() => handleDatePress(item.dateString)}
                   style={[
                     styles.dateBox,
-                    isSelected && styles.dateBoxSelected
+                    item.isToday ? styles.dateBoxToday : (isSelected && styles.dateBoxBorderSelected)
                   ]}
                 >
-                  <Text style={[styles.dateDayName, isSelected && styles.dateTextSelected]}>
+                  <Text style={[
+                    styles.dateDayName, 
+                    item.isToday && styles.dateTextToday,
+                    !item.isToday && isSelected && styles.dateTextBorderSelected
+                  ]}>
                     {item.dayName}
                   </Text>
-                  <Text style={[styles.dateDayNumber, isSelected && styles.dateTextSelected]}>
+                  <Text style={[
+                    styles.dateDayNumber, 
+                    item.isToday && styles.dateTextToday,
+                    !item.isToday && isSelected && styles.dateTextBorderSelected
+                  ]}>
                     {item.dayNumber}
                   </Text>
                   
                   <View style={styles.dotContainer}>
                     {hasPending && (
-                      <View style={[styles.pendingDot, isSelected && styles.pendingDotSelected]} />
+                      <View style={[
+                        styles.pendingDot, 
+                        item.isToday && styles.pendingDotToday,
+                        !item.isToday && isSelected && styles.pendingDotBorderSelected
+                      ]} />
                     )}
                   </View>
                 </TouchableOpacity>
@@ -697,12 +711,16 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 6,
     elevation: 2,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#E2E8F0',
   },
-  dateBoxSelected: {
+  dateBoxToday: {
     backgroundColor: COLORS.headerDark,
     borderColor: COLORS.headerDark,
+  },
+  dateBoxBorderSelected: {
+    borderColor: COLORS.headerDark,
+    backgroundColor: COLORS.card,
   },
   dateDayName: {
     fontSize: 10,
@@ -715,8 +733,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.darkOlive,
   },
-  dateTextSelected: {
+  dateTextToday: {
     color: '#FFFFFF',
+  },
+  dateTextBorderSelected: {
+    color: COLORS.headerDark,
   },
   dotContainer: {
     height: 10,
@@ -730,8 +751,11 @@ const styles = StyleSheet.create({
     borderRadius: 2.5,
     backgroundColor: COLORS.olive,
   },
-  pendingDotSelected: {
+  pendingDotToday: {
     backgroundColor: COLORS.yellowGreen,
+  },
+  pendingDotBorderSelected: {
+    backgroundColor: COLORS.deepTeal,
   },
 
   // Modal Styles
