@@ -4,6 +4,7 @@ import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   Image,
   Modal,
@@ -379,6 +380,39 @@ export default function SpenderHomeScreen() {
     }
   };
 
+  const handleDeleteReminder = (reminderId: string, reminderTitle: string) => {
+    Alert.alert(
+      'Delete Reminder',
+      `Are you sure you want to delete "${reminderTitle}"?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('reminders')
+                .delete()
+                .eq('id', reminderId);
+
+              if (error) throw error;
+
+              fetchDashboardData();
+            } catch (error: unknown) {
+              console.error('Error deleting reminder:', extractErrorMessage(error));
+              alert('Failed to delete reminder.');
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: COLORS.bg }]}>
@@ -583,8 +617,6 @@ export default function SpenderHomeScreen() {
               {filteredDues.length > 0 ? (
                 filteredDues.map((due, index) => {
                   const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
-                  
-                  // Kuhaon nato ang icon gikan sa categories relation, kung wala, magbutang tag default
                   const categoryIcon = due.categories?.icon || 'pricetag-outline';
 
                   return (
@@ -602,6 +634,14 @@ export default function SpenderHomeScreen() {
                           ₱{Number(due.amount).toFixed(2)}
                         </Text>
                       </View>
+
+                      <TouchableOpacity 
+                        style={styles.deleteButtonHome} 
+                        onPress={() => handleDeleteReminder(due.id, due.title)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                      </TouchableOpacity>
                     </View>
                   );
                 })
@@ -964,6 +1004,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.deepTeal,
     lineHeight: 18,
+  },
+  deleteButtonHome: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
   },
 
   // Form Styles for Add Reminder
