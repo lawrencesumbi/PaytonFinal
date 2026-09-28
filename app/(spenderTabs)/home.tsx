@@ -1,17 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState, } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
   Image,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -42,7 +44,7 @@ const PALETTE_LIGHT_CARDS = [
   '#FAFAD8',
 ];
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 function extractErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -80,9 +82,24 @@ function getDaysInfo(dueDateStr: string): { text: string; urgent: boolean } {
   return { text: `${diffDays} days left`, urgent: false };
 }
 
-// ---------------------------------------------------------------------------
-// TYPES
-// ---------------------------------------------------------------------------
+function generateDateRange() {
+  const dates = [];
+  const today = new Date();
+  
+  for (let i = -7; i <= 7; i++) {
+    const d = new Date();
+    d.setDate(today.getDate() + i);
+    dates.push({
+      dateString: d.toISOString().split('T')[0],
+      dayName: d.toLocaleString('en-US', { weekday: 'short' }).toUpperCase(),
+      dayNumber: d.getDate(),
+      monthStr: d.toLocaleString('en-US', { month: 'short' }).toUpperCase(),
+      isToday: i === 0,
+    });
+  }
+  return dates;
+}
+
 interface DashboardSummary {
   allowanceId: string;
   allowanceName: string;
@@ -104,26 +121,6 @@ interface ReminderItem {
   } | null;
 }
 
-interface FriendItem {
-  id: string;
-  full_name: string;
-  email?: string;
-  avatar_url?: string | null;
-  amount_owed: number;
-}
-
-interface TransactionItem {
-  id: string;
-  amount: number;
-  created_at: string;
-  description?: string;
-  categories?: {
-    name?: string;
-    icon?: string;
-    color?: string;
-  } | null;
-}
-
 export default function SpenderHomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -134,18 +131,49 @@ export default function SpenderHomeScreen() {
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
-  const [friendsList, setFriendsList] = useState<FriendItem[]>([]);
-  const [recentTransactions, setRecentTransactions] = useState<TransactionItem[]>([]);
+  
+  // Date strip & Modal states
+  const dateList = generateDateRange();
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const [modalVisible, setModalVisible] = useState(false);
+  const horizontalScrollRef = useRef<ScrollView>(null);
 
-  // ---------------------------------------------------------------------------
-  // DATA FETCHING
-  // ---------------------------------------------------------------------------
+  // Add Reminder Form Modal States
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newAmount, setNewAmount] = useState('');
+  const [newDueDate, setNewDueDate] = useState(todayStr);
+  const [submitting, setSubmitting] = useState(false);
+
+  const centerToday = (animated = false) => {
+    const todayIndex = 7;
+    const dateBoxWidth = 54; 
+    const dateBoxGap = 8;    
+    const containerPadding = 24; 
+
+    const totalItemWidth = dateBoxWidth + dateBoxGap;
+    const computedX = (todayIndex * totalItemWidth) - (SCREEN_WIDTH / 2 - containerPadding - (dateBoxWidth / 2));
+
+    horizontalScrollRef.current?.scrollTo({
+      x: Math.max(0, computedX),
+      animated: animated,
+    });
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      centerToday(false);
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   const fetchDashboardData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Fetch Profile (including role)
       const { data: profileData } = await supabase
         .from('profiles')
         .select('full_name, avatar_url, role')
@@ -158,7 +186,6 @@ export default function SpenderHomeScreen() {
 
       const today = new Date().toISOString().split('T')[0];
 
-      // 2. Fetch Allowances
       const { data: allowanceData, error: allowanceError } = await supabase
         .from('allowances')
         .select('id, allowance_name, amount, start_date, end_date')
@@ -216,7 +243,6 @@ export default function SpenderHomeScreen() {
         setSummary(null);
       }
 
-      // 3. Fetch Upcoming Dues
       const { data: duesData, error: duesError } = await supabase
         .from('reminders')
         .select(`
@@ -229,97 +255,10 @@ export default function SpenderHomeScreen() {
         `)
         .eq('user_id', user.id)
         .eq('status', 'pending')
-        .order('due_date', { ascending: true })
-        .limit(5);
+        .order('due_date', { ascending: true });
 
       if (duesError) throw duesError;
       setUpcomingDues((duesData as unknown as ReminderItem[]) || []);
-
-      // 4. FETCH FRIENDS AND THEIR OWED AMOUNTS
-      try {
-        const { data: friendsData, error: friendsErr } = await supabase
-          .from('friends')
-          .select(`
-            id,
-            full_name,
-            email,
-            avatar_url,
-            split_friends (
-              owed_amount
-            )
-          `)
-          .eq('user_id', user.id)
-          .order('full_name', { ascending: true });
-
-        if (friendsErr) {
-          console.error('Error fetching friends:', friendsErr.message);
-        }
-
-        if (friendsData && friendsData.length > 0) {
-          const mappedFriends: FriendItem[] = friendsData.map((f: any) => {
-            const totalOwed = (f.split_friends || []).reduce(
-              (sum: number, entry: any) => sum + Number(entry.owed_amount || 0),
-              0
-            );
-
-            return {
-              id: f.id,
-              full_name: f.full_name || 'Friend',
-              email: f.email,
-              avatar_url: f.avatar_url || null,
-              amount_owed: totalOwed,
-            };
-          });
-
-          setFriendsList(mappedFriends);
-        } else {
-          setFriendsList([]);
-        }
-      } catch (friendErr) {
-        console.error('Error fetching friends:', friendErr);
-      }
-
-      // 5. FETCH RECENT TRANSACTIONS
-      try {
-        const { data: transactionData, error: transactionErr } = await supabase
-          .from('expenses')
-          .select(`
-            id,
-            amount,
-            spent_at,
-            description,
-            budgets (
-              categories (
-                name,
-                icon,
-                color
-              )
-            )
-          `)
-          .eq('budgets.user_id', user.id)
-          .order('spent_at', { ascending: false })
-          .limit(5);
-
-        if (transactionErr) {
-          console.error('Error fetching transactions:', transactionErr.message);
-        }
-
-        if (transactionData && transactionData.length > 0) {
-          const mappedTransactions: TransactionItem[] = (transactionData as any[]).map((t: any) => ({
-            id: t.id,
-            amount: t.amount,
-            created_at: t.spent_at,
-            description: t.description,
-            categories: t.budgets?.categories || null,
-          }));
-
-          setRecentTransactions(mappedTransactions);
-        } else {
-          setRecentTransactions([]);
-        }
-      } catch (transactionErr) {
-        console.error('Error fetching transactions:', transactionErr);
-      }
 
     } catch (error: unknown) {
       console.error('Spender Dashboard Error:', extractErrorMessage(error));
@@ -336,12 +275,52 @@ export default function SpenderHomeScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchDashboardData();
+      setSelectedDate(todayStr);
+      centerToday(true);
     }, [])
   );
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchDashboardData();
+    setSelectedDate(todayStr);
+    fetchDashboardData().then(() => {
+      setTimeout(() => centerToday(true), 100);
+    });
+  };
+
+  const handleCreateReminder = async () => {
+    if (!newTitle.trim() || !newAmount.trim()) {
+      alert('Please fill in both title and amount.');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase.from('reminders').insert({
+        user_id: user.id,
+        title: newTitle.trim(),
+        amount: parseFloat(newAmount),
+        due_date: newDueDate,
+        status: 'pending',
+        allowance_id: summary?.allowanceId || null,
+      });
+
+      if (error) throw error;
+
+      setNewTitle('');
+      setNewAmount('');
+      setNewDueDate(todayStr);
+      setAddModalVisible(false);
+      fetchDashboardData();
+    } catch (error: unknown) {
+      console.error('Error adding reminder:', extractErrorMessage(error));
+      alert('Failed to save reminder.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -357,11 +336,24 @@ export default function SpenderHomeScreen() {
     ? Math.max(0, Math.min(((summary.totalAllowance - summary.totalSpent) / summary.totalAllowance) * 100, 100))
     : 0;
 
+  const hasPendingOnDate = (dateStr: string) => {
+    return upcomingDues.some(due => due.due_date === dateStr);
+  };
+
+  const handleDatePress = (dateStr: string) => {
+    setSelectedDate(dateStr);
+    if (hasPendingOnDate(dateStr)) {
+      setModalVisible(true);
+    }
+  };
+
+  const filteredDues = upcomingDues.filter(due => due.due_date === selectedDate);
+
   return (
     <View style={styles.mainContainer}>
       <ExpoStatusBar style="light" />
 
-      {/* ========== STATIC HEADER (NO ANIMATIONS) ========== */}
+      {/* HEADER */}
       <View style={styles.headerBackground}>
         <View style={styles.topRowContainer}>
           <View style={styles.topRow}>
@@ -420,7 +412,7 @@ export default function SpenderHomeScreen() {
         </View>
       </View>
 
-      {/* ========== SCROLLABLE CONTENT ========== */}
+      {/* SCROLLABLE CONTENT */}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -430,29 +422,76 @@ export default function SpenderHomeScreen() {
         showsVerticalScrollIndicator={false}
         bounces
       >
-        {/* ========== UPCOMING DUES ========== */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Upcoming Dues</Text>
-            <TouchableOpacity onPress={() => router.push('/reminders')}>
-              <Text style={styles.seeAllText}>See all</Text>
+            <TouchableOpacity onPress={() => setAddModalVisible(true)}>
+              <Text style={styles.seeAllText}>+ Add Reminders</Text>
             </TouchableOpacity>
           </View>
 
-          {upcomingDues.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <View style={styles.emptyIconWrapper}>
-                <Ionicons name="checkmark-done-circle-outline" size={40} color={COLORS.cyan} />
+          {/* Horizontal Date Strip */}
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.dateStripContainer}
+            ref={horizontalScrollRef}
+            onLayout={() => centerToday(false)}
+          >
+            {dateList.map((item) => {
+              const isSelected = selectedDate === item.dateString;
+              const hasPending = hasPendingOnDate(item.dateString);
+
+              return (
+                <TouchableOpacity
+                  key={item.dateString}
+                  activeOpacity={hasPending ? 0.8 : 1}
+                  onPress={() => handleDatePress(item.dateString)}
+                  style={[
+                    styles.dateBox,
+                    isSelected && styles.dateBoxSelected
+                  ]}
+                >
+                  <Text style={[styles.dateDayName, isSelected && styles.dateTextSelected]}>
+                    {item.dayName}
+                  </Text>
+                  <Text style={[styles.dateDayNumber, isSelected && styles.dateTextSelected]}>
+                    {item.dayNumber}
+                  </Text>
+                  
+                  <View style={styles.dotContainer}>
+                    {hasPending && (
+                      <View style={[styles.pendingDot, isSelected && styles.pendingDotSelected]} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </ScrollView>
+
+      {/* MODAL FOR PENDING DUES */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Scheduled Dues</Text>
+                <Text style={styles.modalSubtitle}>{selectedDate}</Text>
               </View>
-              <Text style={styles.emptyText}>All clear! No upcoming dues.</Text>
-              <TouchableOpacity style={styles.addDueButton} onPress={() => router.push('/reminders')}>
-                <Ionicons name="add-circle-outline" size={16} color={COLORS.olive} />
-                <Text style={styles.addDueButtonText}>Add a reminder</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseButton}>
+                <Ionicons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
-          ) : (
-            <View style={styles.dueCardsContainer}>
-              {upcomingDues.map((due, index) => {
+
+            <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {filteredDues.map((due, index) => {
                 const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
                 const daysInfo = getDaysInfo(due.due_date);
                 const dateObj = new Date(due.due_date);
@@ -463,7 +502,10 @@ export default function SpenderHomeScreen() {
                   <TouchableOpacity
                     key={due.id}
                     activeOpacity={0.85}
-                    onPress={() => router.push('/reminders')}
+                    onPress={() => {
+                      setModalVisible(false);
+                      router.push('/reminders');
+                    }}
                     style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
                   >
                     <View style={styles.calendarBadgeHome}>
@@ -492,150 +534,84 @@ export default function SpenderHomeScreen() {
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          )}
-        </View>
-
-        {/* ========== WHO OWES YOU ========== */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Who Owes You</Text>
-            <TouchableOpacity onPress={() => router.push('/split')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
+            </ScrollView>
           </View>
-
-          {friendsList.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Ionicons name="people-outline" size={32} color={COLORS.textMuted} style={{ marginBottom: 6 }} />
-              <Text style={styles.emptyText}>No debts recorded yet.</Text>
-            </View>
-          ) : (
-            <View style={styles.debtListContainer}>
-              {[...friendsList]
-                .filter(item => (Number(item.amount_owed) || 0) > 0)
-                .sort((a, b) => (Number(b.amount_owed) || 0) - (Number(a.amount_owed) || 0))
-                .map((item) => {
-                  return (
-                    <TouchableOpacity
-                      key={`debt-friend-${item.id}`}
-                      style={styles.debtCardItem}
-                      onPress={() => router.push('/split')}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.debtItemLeft}>
-                        {item.avatar_url ? (
-                          <Image source={{ uri: item.avatar_url }} style={styles.friendAvatarImageRow} />
-                        ) : (
-                          <Image 
-                            source={require('../../assets/images/default.png')} 
-                            style={styles.friendAvatarImageRow} 
-                          />
-                        )}
-                        <Text style={styles.friendNameRowText} numberOfLines={1}>
-                          {item.full_name}
-                        </Text>
-                      </View>
-
-                      <View style={styles.debtItemRight}>
-                        <Text style={styles.owesYouLabel}>owes you</Text>
-                        <Text style={styles.owesYouAmountText}>
-                          ₱{(Number(item.amount_owed) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-            </View>
-          )}
         </View>
+      </Modal>
 
-        {/* ========== RECENT TRANSACTIONS ========== */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Recent Transactions</Text>
-            <TouchableOpacity onPress={() => router.push('/transaction')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
+      {/* MODAL FOR ADDING A NEW REMINDER */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={addModalVisible}
+        onRequestClose={() => setAddModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Add New Reminder</Text>
+                <Text style={styles.modalSubtitle}>Fill in reminder details</Text>
+              </View>
+              <TouchableOpacity onPress={() => setAddModalVisible(false)} style={styles.modalCloseButton}>
+                <Ionicons name="close" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.formContainer}>
+              <Text style={styles.inputLabel}>Title</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g., Electricity Bill"
+                placeholderTextColor={COLORS.textMuted}
+                value={newTitle}
+                onChangeText={setNewTitle}
+              />
+
+              <Text style={styles.inputLabel}>Amount (₱)</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="0.00"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="numeric"
+                value={newAmount}
+                onChangeText={setNewAmount}
+              />
+
+              <Text style={styles.inputLabel}>Due Date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+                value={newDueDate}
+                onChangeText={setNewDueDate}
+              />
+
+              <TouchableOpacity 
+                style={styles.submitButton} 
+                onPress={handleCreateReminder}
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Save Reminder</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-
-          {recentTransactions.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Ionicons name="receipt-outline" size={32} color={COLORS.textMuted} style={{ marginBottom: 6 }} />
-              <Text style={styles.emptyText}>No transactions yet.</Text>
-            </View>
-          ) : (
-            <View style={styles.transactionCardsContainer}>
-              {recentTransactions.map((transaction) => {
-                const transactionDate = new Date(transaction.created_at);
-                const today = new Date();
-                const yesterday = new Date(today);
-                yesterday.setDate(yesterday.getDate() - 1);
-
-                let dateLabel: string;
-                const timeString = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-                if (transactionDate.toDateString() === today.toDateString()) {
-                  dateLabel = `Today at ${timeString}`;
-                } else if (transactionDate.toDateString() === yesterday.toDateString()) {
-                  dateLabel = `Yesterday at ${timeString}`;
-                } else {
-                  dateLabel = transactionDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                }
-
-                const iconName = (transaction.categories?.icon as any) || 'receipt-outline';
-                const iconColor = transaction.categories?.color || '#1F4F59';
-
-                return (
-                  <View
-                    key={transaction.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingVertical: 14,
-                      paddingHorizontal: 16,
-                      backgroundColor: '#ffffff',
-                      borderRadius: 15,
-                      gap: 10,
-                    }}
-                  >
-                    <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#EFF4F6', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                      <Ionicons name={iconName} size={18} color={iconColor} />
-                    </View>
-
-                    <View style={{ flex: 1, justifyContent: 'center', marginRight: 8 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }} numberOfLines={1} ellipsizeMode="tail">
-                        {transaction.description || transaction.categories?.name || 'Transaction'}
-                      </Text>
-                      <Text style={{ fontSize: 11, fontWeight: '500', color: '#64748B', marginTop: 2 }}>
-                        {dateLabel}
-                      </Text>
-                    </View>
-
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#1F4F59', flexShrink: 0 }}>
-                      -₱{Number(transaction.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
         </View>
-      </ScrollView>
+      </Modal>
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// STYLES
-// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: COLORS.bg },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollView: { flex: 1 },
   scrollContent: { backgroundColor: COLORS.bg, paddingBottom: 100 },
 
-  // Header
   headerBackground: {
     backgroundColor: COLORS.headerDark,
     paddingHorizontal: 24,
@@ -699,62 +675,118 @@ const styles = StyleSheet.create({
   pillAmountDivider: { fontSize: 22, color: 'rgba(255,255,255,0.3)', fontWeight: '300' },
   pillAmountTotal: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
 
-  // Sections
   sectionBlock: { paddingHorizontal: 24, marginTop: 28 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontSize: 17, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
-  seeAllText: { fontSize: 13, color: COLORS.black, fontWeight: '600' },
+  seeAllText: { fontSize: 13, color: COLORS.deepTeal, fontWeight: '700' },
 
-  debtListContainer: {
-    gap: 10,
+  dateStripContainer: {
+    gap: 8,
+    marginBottom: 16,
+    paddingVertical: 4,
   },
-  debtCardItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.card,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  dateBox: {
+    width: 54,
+    height: 72,
     borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  debtItemLeft: {
-    flexDirection: 'row',
+    backgroundColor: COLORS.card,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
-    flex: 1,
-    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  friendAvatarImageRow: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+  dateBoxSelected: {
+    backgroundColor: COLORS.headerDark,
+    borderColor: COLORS.headerDark,
   },
-  friendNameRowText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.black,
-    flex: 1,
-  },
-  debtItemRight: {
-    alignItems: 'flex-end',
-  },
-  owesYouLabel: {
-    fontSize: 11,
+  dateDayName: {
+    fontSize: 10,
+    fontWeight: '700',
     color: COLORS.textMuted,
     marginBottom: 2,
   },
-  owesYouAmountText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#7EA00E',
+  dateDayNumber: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.darkOlive,
+  },
+  dateTextSelected: {
+    color: '#FFFFFF',
+  },
+  dotContainer: {
+    height: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  pendingDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: COLORS.olive,
+  },
+  pendingDotSelected: {
+    backgroundColor: COLORS.yellowGreen,
   },
 
-  // Upcoming Dues
-  dueCardsContainer: { gap: 10 },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: COLORS.overlay,
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: COLORS.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 40,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+    shadowColor: COLORS.modalShadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBody: {
+    gap: 10,
+    paddingBottom: 20,
+  },
+
   reminderCardHome: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -787,20 +819,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  transactionCardsContainer: { gap: 10 },
-
-  emptyIconWrapper: { marginBottom: 10 },
-  addDueButton: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, paddingVertical: 10, paddingHorizontal: 20,
-    borderRadius: 24, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7',
-  },
-  addDueButtonText: { fontSize: 13, color: COLORS.olive, fontWeight: '600' },
-  emptyBox: {
-    padding: 28, backgroundColor: COLORS.card, borderRadius: 22, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12
-  },
-  emptyText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
-
   calendarBadgeHome: {
     width: 48,
     height: 48,
@@ -821,5 +839,37 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.deepTeal,
     lineHeight: 18,
+  },
+
+  // Form Styles for Add Reminder
+  formContainer: {
+    gap: 12,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+  },
+  textInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: COLORS.black,
+  },
+  submitButton: {
+    backgroundColor: COLORS.headerDark,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  submitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
