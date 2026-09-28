@@ -583,23 +583,17 @@ export default function SpenderHomeScreen() {
               {filteredDues.length > 0 ? (
                 filteredDues.map((due, index) => {
                   const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
-                  const dateObj = new Date(due.due_date);
-                  const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-                  const dayStr = dateObj.getDate();
+                  
+                  // Kuhaon nato ang icon gikan sa categories relation, kung wala, magbutang tag default
+                  const categoryIcon = due.categories?.icon || 'pricetag-outline';
 
                   return (
-                    <TouchableOpacity
+                    <View
                       key={due.id}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        setModalVisible(false);
-                        router.push('/reminders');
-                      }}
                       style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
                     >
                       <View style={styles.calendarBadgeHome}>
-                        <Text style={styles.calendarMonthHome}>{monthStr}</Text>
-                        <Text style={styles.calendarDayHome}>{dayStr}</Text>
+                        <Ionicons name={categoryIcon as any} size={22} color={COLORS.deepTeal} />
                       </View>
 
                       <View style={styles.cardContentHome}>
@@ -608,7 +602,7 @@ export default function SpenderHomeScreen() {
                           ₱{Number(due.amount).toFixed(2)}
                         </Text>
                       </View>
-                    </TouchableOpacity>
+                    </View>
                   );
                 })
               ) : (
