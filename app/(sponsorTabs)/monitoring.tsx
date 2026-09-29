@@ -222,95 +222,104 @@ export default function MonitoringScreen() {
       {loading ? (
         <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.contentContainer}>
           
-          {/* RECEIPT STYLE CONTAINER FOR ALLOWANCES */}
-          <View style={styles.receiptCard}>
-            <View style={styles.receiptHeaderRow}>
-              <Ionicons name="receipt-outline" size={16} color={COLORS.deepTeal} />
-              <Text style={styles.receiptTitle}>Allocated Allowances</Text>
+          {/* FIXED TOP SECTION (Allowances, Header, Search Bar) */}
+          <View>
+            {/* RECEIPT STYLE CONTAINER FOR ALLOWANCES */}
+            <View style={styles.receiptCard}>
+              <View style={styles.receiptHeaderRow}>
+                <Ionicons name="receipt-outline" size={16} color={COLORS.deepTeal} />
+                <Text style={styles.receiptTitle}>Allocated Allowances</Text>
+              </View>
+
+              <View style={styles.receiptDividerDashed} />
+
+              {allowances.length === 0 ? (
+                <Text style={styles.emptyReceiptText}>No allowances assigned yet.</Text>
+              ) : (
+                <ScrollView 
+                  style={styles.allowancesScrollContainer} 
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                >
+                  {allowances.map((item) => (
+                    <View key={item.id} style={styles.receiptItemRow}>
+                      <View style={{ flex: 1, marginRight: 8 }}>
+                        <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
+                        <Text style={styles.receiptItemDate}>
+                          {formatAllowanceDateRange(item.start_date, item.end_date, item.received_at)}
+                        </Text>
+                      </View>
+                      <View style={styles.receiptRightSection}>
+                        <Text style={styles.receiptItemAmount}>+₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                        <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.deleteAllowanceBtn}>
+                          <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
             </View>
 
-            <View style={styles.receiptDividerDashed} />
+            {/* EXPENSES LOG LIST HEADER */}
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionHeading}>Logged Expenses</Text>
+              <Text style={styles.expenseCountText}>{filteredExpenses.length} entries</Text>
+            </View>
 
-            {allowances.length === 0 ? (
-              <Text style={styles.emptyReceiptText}>No allowances assigned yet.</Text>
-            ) : (
-              <ScrollView 
-                style={styles.allowancesScrollContainer} 
-                showsVerticalScrollIndicator={true}
-                nestedScrollEnabled={true}
-              >
-                {allowances.map((item) => (
-                  <View key={item.id} style={styles.receiptItemRow}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                      <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
-                      <Text style={styles.receiptItemDate}>
-                        {formatAllowanceDateRange(item.start_date, item.end_date, item.received_at)}
-                      </Text>
-                    </View>
-                    <View style={styles.receiptRightSection}>
-                      <Text style={styles.receiptItemAmount}>+₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                      <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.deleteAllowanceBtn}>
-                        <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
+            {/* SEARCH BAR */}
+            {expenses.length > 0 && (
+              <View style={styles.searchContainer}>
+                <Ionicons name="search-outline" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search by description or category..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+                    <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
 
-          {/* EXPENSES LOG LIST HEADER */}
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionHeading}>Logged Expenses</Text>
-            <Text style={styles.expenseCountText}>{filteredExpenses.length} entries</Text>
-          </View>
-
-          {/* SEARCH BAR */}
-          {expenses.length > 0 && (
-            <View style={styles.searchContainer}>
-              <Ionicons name="search-outline" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search by description or category..."
-                placeholderTextColor={COLORS.textMuted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
-                  <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {expenses.length === 0 ? (
-            <View style={styles.emptyExpensesBox}>
-              <Ionicons name="wallet-outline" size={24} color={COLORS.textMuted} />
-              <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
-            </View>
-          ) : filteredExpenses.length === 0 ? (
-            <View style={styles.emptyExpensesBox}>
-              <Ionicons name="search-outline" size={24} color={COLORS.textMuted} />
-              <Text style={styles.emptyExpensesText}>No expenses match your search.</Text>
-            </View>
-          ) : (
-            <View style={styles.expensesListContainer}>
-              {filteredExpenses.map((exp) => (
-                <View key={exp.id} style={styles.expenseCard}>
-                  <View style={styles.expenseCategoryIconCircle}>
-                    <Ionicons 
-                      name={(exp.categories?.icon as any) || 'pricetag-outline'} 
-                      size={18} 
-                      color={COLORS.deepTeal} 
-                    />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
-                      {/* Photo Indicator Icon */}
+          {/* SCROLLABLE EXPENSES LIST ONLY */}
+          <ScrollView 
+            contentContainerStyle={styles.expensesScrollContent} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {expenses.length === 0 ? (
+              <View style={styles.emptyExpensesBox}>
+                <Ionicons name="wallet-outline" size={24} color={COLORS.textMuted} />
+                <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
+              </View>
+            ) : filteredExpenses.length === 0 ? (
+              <View style={styles.emptyExpensesBox}>
+                <Ionicons name="search-outline" size={24} color={COLORS.textMuted} />
+                <Text style={styles.emptyExpensesText}>No expenses match your search.</Text>
+              </View>
+            ) : (
+              <View style={styles.expensesListContainer}>
+                {filteredExpenses.map((exp) => (
+                  <View key={exp.id} style={styles.expenseCard}>
+                    <View style={styles.expenseCategoryIconCircle}>
+                      <Ionicons 
+                        name={(exp.categories?.icon as any) || 'pricetag-outline'} 
+                        size={18} 
+                        color={COLORS.deepTeal} 
+                      />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
+                        {/* Photo Indicator Icon */}
                         {exp.photo_url ? (
                           <TouchableOpacity 
                             onPress={() => setSelectedImageUri(exp.photo_url!)}
@@ -319,42 +328,43 @@ export default function MonitoringScreen() {
                             <Ionicons name="image-outline" size={14} color="#1F4F59" />
                           </TouchableOpacity>
                         ) : null}
+                      </View>
+                      <Text style={styles.expenseTime}>
+                        {exp.categories?.name ? `${exp.categories.name} • ` : ''}{formatDateTime(exp.spent_at)}
+                      </Text>
                     </View>
-                    <Text style={styles.expenseTime}>
-                      {exp.categories?.name ? `${exp.categories.name} • ` : ''}{formatDateTime(exp.spent_at)}
-                    </Text>
+                    <Text style={styles.expenseAmount}>-₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                   </View>
-                  <Text style={styles.expenseAmount}>-₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                </View>
-              ))}
-            </View>
-          )}
+                ))}
+              </View>
+            )}
+          </ScrollView>
 
           {/* FULL-SCREEN IMAGE VIEWER MODAL */}
-                <Modal
-                  visible={!!selectedImageUri}
-                  transparent={true}
-                  animationType="fade"
-                  onRequestClose={() => setSelectedImageUri(null)}
-                >
-                  <View style={styles.imageModalOverlay}>
-                    <TouchableOpacity 
-                      style={styles.closeImageButton} 
-                      onPress={() => setSelectedImageUri(null)}
-                    >
-                      <Ionicons name="close" size={28} color="#FFFFFF" />
-                    </TouchableOpacity>
-                    {selectedImageUri ? (
-                      <Image 
-                        source={{ uri: selectedImageUri }} 
-                        style={styles.fullScreenImage} 
-                        resizeMode="contain" 
-                      />
-                    ) : null}
-                  </View>
-                </Modal>
+          <Modal
+            visible={!!selectedImageUri}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setSelectedImageUri(null)}
+          >
+            <View style={styles.imageModalOverlay}>
+              <TouchableOpacity 
+                style={styles.closeImageButton} 
+                onPress={() => setSelectedImageUri(null)}
+              >
+                <Ionicons name="close" size={28} color="#FFFFFF" />
+              </TouchableOpacity>
+              {selectedImageUri ? (
+                <Image 
+                  source={{ uri: selectedImageUri }} 
+                  style={styles.fullScreenImage} 
+                  resizeMode="contain" 
+                />
+              ) : null}
+            </View>
+          </Modal>
 
-        </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -391,9 +401,9 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
   },
-  scrollContent: {
+  contentContainer: {
+    flex: 1,
     padding: 20,
-    paddingBottom: 40,
   },
   receiptCard: {
     backgroundColor: COLORS.card,
@@ -405,7 +415,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   receiptHeaderRow: {
     flexDirection: 'row',
@@ -426,7 +436,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   allowancesScrollContainer: {
-    maxHeight: 185, // Limits height to show approximately 3 items at a time
+    maxHeight: 185,
   },
   emptyReceiptText: {
     fontSize: 12,
@@ -504,6 +514,9 @@ const styles = StyleSheet.create({
   },
   clearSearchBtn: {
     padding: 2,
+  },
+  expensesScrollContent: {
+    paddingBottom: 40,
   },
   emptyExpensesBox: {
     backgroundColor: COLORS.card,
