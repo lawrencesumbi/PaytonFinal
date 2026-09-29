@@ -1,6 +1,7 @@
+// app/scan.tsx
 import { Ionicons } from '@expo/vector-icons';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { decode } from 'base64-arraybuffer'; // Fast and safe base64 converter for Supabase
+import { decode } from 'base64-arraybuffer';
 import { CameraView, FlashMode, useCameraPermissions } from 'expo-camera';
 import { Stack, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -25,7 +26,7 @@ const genAI = new GoogleGenerativeAI(apiKey);
 export default function ScanReceiptScreen() {
   const router = useRouter();
   const pathname = usePathname();
-  const { allowanceId } = useLocalSearchParams<{ allowanceId?: string }>();
+  const { allowanceId: paramAllowanceId } = useLocalSearchParams<{ allowanceId?: string }>();
 
   const isFocused = pathname === '/scan' || pathname.includes('scan');
 
@@ -135,7 +136,23 @@ export default function ScanReceiptScreen() {
                   const { data: { user }, error: userError } = await supabase.auth.getUser();
                   if (userError || !user) throw new Error("You must be logged in to log expenses.");
 
-                  // 2. Fetch matching category ID from categories table
+                  // 2. Kuhaon ang allowance ID (Gamiton ang gikan sa params kung naa, kung wala, pangitaon ang pinakabag-o)
+                  let targetAllowanceId = paramAllowanceId;
+                  if (!targetAllowanceId) {
+                    const { data: latestAllowance } = await supabase
+                      .from('allowances')
+                      .select('id')
+                      .eq('spender_id', user.id)
+                      .order('received_at', { ascending: false })
+                      .limit(1)
+                      .single();
+
+                    if (latestAllowance) {
+                      targetAllowanceId = latestAllowance.id;
+                    }
+                  }
+
+                  // 3. Fetch matching category ID from categories table
                   const { data: categoryData } = await supabase
                     .from('categories')
                     .select('id')
@@ -144,7 +161,7 @@ export default function ScanReceiptScreen() {
 
                   const categoryId = categoryData ? categoryData.id : null;
 
-                  // 3. Upload photo directly via base64 arraybuffer (fast and avoids blob performance overhead)
+                  // 4. Upload photo directly via base64 arraybuffer
                   const fileName = `${user.id}/${Date.now()}.jpg`;
                   const { error: uploadError } = await supabase.storage
                     .from('receipts')
@@ -155,19 +172,19 @@ export default function ScanReceiptScreen() {
 
                   if (uploadError) throw uploadError;
 
-                  // 4. Get Public URL for the uploaded photo
+                  // 5. Get Public URL for the uploaded photo
                   const { data: urlData } = supabase.storage
                     .from('receipts')
                     .getPublicUrl(fileName);
 
                   const photoUrl = urlData.publicUrl;
 
-                  // 5. Insert record into expenses table with photo_url included
+                  // 6. Insert record into expenses table using targetAllowanceId
                   const { error: insertError } = await supabase.from('expenses').insert([
                     { 
                       description: merchantName, 
                       amount: Number(totalAmount), 
-                      allowance_id: allowanceId || null,
+                      allowance_id: targetAllowanceId || null, 
                       spent_at: new Date().toISOString(),
                       user_id: user.id,
                       category_id: categoryId,
@@ -203,12 +220,7 @@ export default function ScanReceiptScreen() {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen 
-        options={{
-          headerShown: false,
-        }} 
-      />
-
+      <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="light" />
       
       {isFocused ? (

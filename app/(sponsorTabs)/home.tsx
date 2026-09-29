@@ -144,7 +144,7 @@ export default function HomeScreen() {
       const spenderCardMap = new Map<string, SpenderAllowanceCardData>();
 
       (allowancesData || []).forEach((item: any) => {
-        console.log("Allowance ID:", item.id, "Expenses found:", item.expenses);
+        
         const allowanceAmount = Number(item.amount);
         const spentForAllowance = (item.expenses || []).reduce(
           (sum: number, exp: { amount: number }) => sum + Number(exp.amount),
