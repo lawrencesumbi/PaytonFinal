@@ -214,22 +214,22 @@ export default function SpenderLayout() {
         />
 
         <Tabs.Screen
-          name="profile"
+          name="insight"
           options={{
-            title: "Profile",
+            title: "Coach",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
                 focused={focused}
-                activeIcon="person"
-                inactiveIcon="person-outline"
+                activeIcon="bulb"
+                inactiveIcon="bulb-outline"
               />
             ),
           }}
         />
 
         {/* Hidden routes */}
-        <Tabs.Screen name="insight" options={{ href: null }} />
+        <Tabs.Screen name="profile" options={{ href: null }} />
         <Tabs.Screen name="budget" options={{ href: null }} />
         <Tabs.Screen name="reminders" options={{ href: null }} />
         <Tabs.Screen name="statistics" options={{ href: null }} />

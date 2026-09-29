@@ -509,8 +509,8 @@ export default function SpenderHomeScreen() {
   const selectedDaysInfo = getDaysInfo(selectedDate);
 
   // SVG Donut Chart Calculation variables
-  const size = 170;
-  const strokeWidth = 20;
+  const size = 200;
+  const strokeWidth = 23;
   const center = size / 2;
   const radius = center - strokeWidth;
   const circumference = 2 * Math.PI * radius;
@@ -1009,7 +1009,7 @@ const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: COLORS.bg },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollView: { flex: 1 },
-  scrollContent: { backgroundColor: COLORS.bg, paddingBottom: 100 },
+  scrollContent: { backgroundColor: COLORS.bg, paddingBottom: 50 },
 
   headerBackground: {
     backgroundColor: COLORS.headerDark,
