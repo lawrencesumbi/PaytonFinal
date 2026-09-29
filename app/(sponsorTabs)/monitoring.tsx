@@ -6,9 +6,12 @@ import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -29,6 +32,7 @@ interface ExpenseItem {
   description: string;
   amount: number;
   spent_at: string;
+  photo_url?: string | null;
   category_id?: string;
   categories?: {
     name?: string;
@@ -59,6 +63,11 @@ export default function MonitoringScreen() {
   const [spenderName, setSpenderName] = useState('Spender Log');
   const [allowances, setAllowances] = useState<AllowanceItem[]>([]);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  
+  // Search query state for filtered expenses
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
   const fetchMonitoringData = async () => {
     if (!spenderId) return;
@@ -90,7 +99,7 @@ export default function MonitoringScreen() {
       const { data: expenseData, error: expenseError } = await supabase
         .from('expenses')
         .select(`
-          id, description, amount, spent_at, category_id,
+          id, description, amount, spent_at, category_id, photo_url,
           allowances!inner (spender_id),
           categories (name, icon)
         `)
@@ -173,17 +182,14 @@ export default function MonitoringScreen() {
         const startYear = startD.getFullYear();
         const endYear = endD.getFullYear();
 
-        // If start and end dates are identical, show single date (e.g., Sept 27, 2026)
         if (startMonth === endMonth && startDay === endDay && startYear === endYear) {
           return `${startMonth} ${startDay}, ${startYear}`;
         }
 
-        // If same month and year: "Sept 20 - 26, 2026"
         if (startMonth === endMonth && startYear === endYear) {
           return `${startMonth} ${startDay} - ${endDay}, ${startYear}`;
         }
 
-        // Different months or years
         return `${startMonth} ${startDay}, ${startYear} - ${endMonth} ${endDay}, ${endYear}`;
       } catch {
         return `${formatDateOnly(startDate)} - ${formatDateOnly(endDate)}`;
@@ -191,6 +197,14 @@ export default function MonitoringScreen() {
     }
     return formatDateOnly(startDate || receivedAt);
   };
+
+  // Filter expenses matching the search input (checks description or category name)
+  const filteredExpenses = expenses.filter((exp) => {
+    const query = searchQuery.toLowerCase();
+    const descriptionMatch = exp.description?.toLowerCase().includes(query);
+    const categoryMatch = exp.categories?.name?.toLowerCase().includes(query);
+    return descriptionMatch || categoryMatch;
+  });
 
   return (
     <View style={styles.container}>
@@ -222,39 +236,69 @@ export default function MonitoringScreen() {
             {allowances.length === 0 ? (
               <Text style={styles.emptyReceiptText}>No allowances assigned yet.</Text>
             ) : (
-              allowances.map((item) => (
-                <View key={item.id} style={styles.receiptItemRow}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
-                    <Text style={styles.receiptItemDate}>
-                      {formatAllowanceDateRange(item.start_date, item.end_date, item.received_at)}
-                    </Text>
+              <ScrollView 
+                style={styles.allowancesScrollContainer} 
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+              >
+                {allowances.map((item) => (
+                  <View key={item.id} style={styles.receiptItemRow}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
+                      <Text style={styles.receiptItemDate}>
+                        {formatAllowanceDateRange(item.start_date, item.end_date, item.received_at)}
+                      </Text>
+                    </View>
+                    <View style={styles.receiptRightSection}>
+                      <Text style={styles.receiptItemAmount}>+₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.deleteAllowanceBtn}>
+                        <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <View style={styles.receiptRightSection}>
-                    <Text style={styles.receiptItemAmount}>+₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                    <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.deleteAllowanceBtn}>
-                      <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
+                ))}
+              </ScrollView>
             )}
           </View>
 
-          {/* EXPENSES LOG LIST */}
+          {/* EXPENSES LOG LIST HEADER */}
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionHeading}>Logged Expenses</Text>
-            <Text style={styles.expenseCountText}>{expenses.length} entries</Text>
+            <Text style={styles.expenseCountText}>{filteredExpenses.length} entries</Text>
           </View>
+
+          {/* SEARCH BAR */}
+          {expenses.length > 0 && (
+            <View style={styles.searchContainer}>
+              <Ionicons name="search-outline" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by description or category..."
+                placeholderTextColor={COLORS.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+                  <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           {expenses.length === 0 ? (
             <View style={styles.emptyExpensesBox}>
               <Ionicons name="wallet-outline" size={24} color={COLORS.textMuted} />
               <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
             </View>
+          ) : filteredExpenses.length === 0 ? (
+            <View style={styles.emptyExpensesBox}>
+              <Ionicons name="search-outline" size={24} color={COLORS.textMuted} />
+              <Text style={styles.emptyExpensesText}>No expenses match your search.</Text>
+            </View>
           ) : (
             <View style={styles.expensesListContainer}>
-              {expenses.map((exp) => (
+              {filteredExpenses.map((exp) => (
                 <View key={exp.id} style={styles.expenseCard}>
                   <View style={styles.expenseCategoryIconCircle}>
                     <Ionicons 
@@ -264,14 +308,51 @@ export default function MonitoringScreen() {
                     />
                   </View>
                   <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
-                    <Text style={styles.expenseTime}>{formatDateTime(exp.spent_at)}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
+                      {/* Photo Indicator Icon */}
+                        {exp.photo_url ? (
+                          <TouchableOpacity 
+                            onPress={() => setSelectedImageUri(exp.photo_url!)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Ionicons name="image-outline" size={14} color="#1F4F59" />
+                          </TouchableOpacity>
+                        ) : null}
+                    </View>
+                    <Text style={styles.expenseTime}>
+                      {exp.categories?.name ? `${exp.categories.name} • ` : ''}{formatDateTime(exp.spent_at)}
+                    </Text>
                   </View>
                   <Text style={styles.expenseAmount}>-₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
                 </View>
               ))}
             </View>
           )}
+
+          {/* FULL-SCREEN IMAGE VIEWER MODAL */}
+                <Modal
+                  visible={!!selectedImageUri}
+                  transparent={true}
+                  animationType="fade"
+                  onRequestClose={() => setSelectedImageUri(null)}
+                >
+                  <View style={styles.imageModalOverlay}>
+                    <TouchableOpacity 
+                      style={styles.closeImageButton} 
+                      onPress={() => setSelectedImageUri(null)}
+                    >
+                      <Ionicons name="close" size={28} color="#FFFFFF" />
+                    </TouchableOpacity>
+                    {selectedImageUri ? (
+                      <Image 
+                        source={{ uri: selectedImageUri }} 
+                        style={styles.fullScreenImage} 
+                        resizeMode="contain" 
+                      />
+                    ) : null}
+                  </View>
+                </Modal>
 
         </ScrollView>
       )}
@@ -344,6 +425,9 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     marginBottom: 12,
   },
+  allowancesScrollContainer: {
+    maxHeight: 185, // Limits height to show approximately 3 items at a time
+  },
   emptyReceiptText: {
     fontSize: 12,
     color: COLORS.textMuted,
@@ -398,6 +482,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textMuted,
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 14,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: COLORS.darkOlive,
+    paddingVertical: 0,
+  },
+  clearSearchBtn: {
+    padding: 2,
+  },
   emptyExpensesBox: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
@@ -410,9 +517,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 8,
+    textAlign: 'center',
   },
   expensesListContainer: {
-    gap: 10,
+    gap: 7,
   },
   expenseCard: {
     flexDirection: 'row',
@@ -446,4 +554,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.danger,
   },
+  imageModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.9)', justifyContent: 'center', alignItems: 'center' },
+  fullScreenImage: { width: '90%', height: '80%' },
+  closeImageButton: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10 }
 });
