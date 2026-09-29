@@ -18,6 +18,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import Svg, { Circle, G, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { supabase } from '../../lib/supabase';
 
@@ -38,6 +39,14 @@ const COLORS = {
   overlay: 'rgba(9, 20, 19, 0.5)',
   modalShadow: '#04201C',
 };
+
+const CATEGORY_COLORS = [
+  '#54C9CC', // Cyan
+  '#1F4F59', // Dark Teal
+  '#7EA00E', // Olive Green
+  '#DCD964', // Light Yellow-Green
+  '#213502', // Deep Forest Green
+];
 
 const PALETTE_LIGHT_CARDS = [
   '#E6F0F2',
@@ -143,6 +152,21 @@ interface CategoryItem {
   color?: string;
 }
 
+interface CategoryStat {
+  categoryId: string;
+  categoryName: string;
+  icon?: string;
+  total: number;
+  percentage: number;
+  color: string;
+}
+
+interface DailyTrendItem {
+  dateStr: string;
+  displayDay: string;
+  amount: number;
+}
+
 export default function SpenderHomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -154,6 +178,11 @@ export default function SpenderHomeScreen() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
+  
+  // Statistics State
+  const [categoryStats, setCategoryStats] = useState<CategoryStat[]>([]);
+  const [overallTotalExpenses, setOverallTotalExpenses] = useState<number>(0);
+  const [dailyTrends, setDailyTrends] = useState<DailyTrendItem[]>([]);
   
   const dateList = generateDateRange();
   const todayStr = new Date().toISOString().split('T')[0];
@@ -227,7 +256,6 @@ export default function SpenderHomeScreen() {
       if (profileData?.avatar_url) setAvatarUrl(profileData.avatar_url);
       if (profileData?.role) setSpenderRole(profileData.role);
 
-      // 1. Kunon ang tanan allowances ni spender base sa received_at
       const { data: allowanceData, error: allowanceError } = await supabase
         .from('allowances')
         .select('id, allowance_name, amount, received_at')
@@ -242,25 +270,80 @@ export default function SpenderHomeScreen() {
       if (allowanceData && allowanceData.length > 0) {
         const allowanceIds = allowanceData.map((item) => item.id);
         
-        // I-kombinar ang tanan allowance amount (e.g., 5000 + 4000 = 9000)
         combinedTotalAllowance = allowanceData.reduce(
           (sum, item) => sum + Number(item.amount || 0),
           0
         );
 
-        // 2. Direktang kunon ang mga expenses gamit ang allowance_id
         const { data: expensesData, error: expensesError } = await supabase
           .from('expenses')
-          .select('id, amount, allowance_id')
+          .select(`
+            id, 
+            amount, 
+            allowance_id,
+            category_id,
+            spent_at,
+            categories ( id, name, icon )
+          `)
           .in('allowance_id', allowanceIds);
 
         if (expensesError) throw expensesError;
 
-        // I-sum up ang tanan ginastos gikan sa mga expenses
         totalSpentCounter = (expensesData || []).reduce(
           (sum: number, exp: any) => sum + Number(exp.amount || 0),
           0
         );
+
+        setOverallTotalExpenses(totalSpentCounter);
+
+        const categoryMap: { [key: string]: { name: string; icon?: string; total: number } } = {};
+        (expensesData || []).forEach((exp: any) => {
+          const catId = exp.category_id || 'uncategorized';
+          const catName = exp.categories?.name || 'Uncategorized';
+          const catIcon = exp.categories?.icon;
+          const amt = Number(exp.amount || 0);
+
+          if (!categoryMap[catId]) {
+            categoryMap[catId] = { name: catName, icon: catIcon, total: 0 };
+          }
+          categoryMap[catId].total += amt;
+        });
+
+        const statsArray: CategoryStat[] = Object.keys(categoryMap).map((catId, index) => {
+          const item = categoryMap[catId];
+          const percentage = totalSpentCounter > 0 ? (item.total / totalSpentCounter) * 100 : 0;
+          return {
+            categoryId: catId,
+            categoryName: item.name,
+            icon: item.icon,
+            total: item.total,
+            percentage,
+            color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+          };
+        });
+
+        setCategoryStats(statsArray);
+
+        // Compute past 7 days trend data for the Line Graph
+        const todayObj = new Date();
+        const trendData: DailyTrendItem[] = [];
+        
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(todayObj.getDate() - i);
+          const yyyyMmDd = d.toISOString().split('T')[0];
+          const displayLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+          const dayExpenses = (expensesData || []).filter((exp: any) => exp.spent_at?.startsWith(yyyyMmDd));
+          const dayTotal = dayExpenses.reduce((sum: number, exp: any) => sum + Number(exp.amount || 0), 0);
+
+          trendData.push({
+            dateStr: yyyyMmDd,
+            displayDay: displayLabel,
+            amount: dayTotal,
+          });
+        }
+        setDailyTrends(trendData);
 
         setSummary({
           allowanceId: allowanceIds[0], 
@@ -268,13 +351,15 @@ export default function SpenderHomeScreen() {
           totalAllowance: combinedTotalAllowance,
           totalSpent: totalSpentCounter,
           remaining: combinedTotalAllowance - totalSpentCounter,
-          unallocated: 0, // Tinanggal na ang unallocated dahil wala nang budgets table
+          unallocated: 0,
         });
       } else {
         setSummary(null);
+        setOverallTotalExpenses(0);
+        setCategoryStats([]);
+        setDailyTrends([]);
       }
 
-      // Kunon ang mga reminders
       const { data: duesData, error: duesError } = await supabase
         .from('reminders')
         .select(`
@@ -374,10 +459,7 @@ export default function SpenderHomeScreen() {
       'Delete Reminder',
       `Are you sure you want to delete "${reminderTitle}"?`,
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
@@ -389,7 +471,6 @@ export default function SpenderHomeScreen() {
                 .eq('id', reminderId);
 
               if (error) throw error;
-
               fetchDashboardData();
             } catch (error: unknown) {
               console.error('Error deleting reminder:', extractErrorMessage(error));
@@ -426,6 +507,15 @@ export default function SpenderHomeScreen() {
 
   const filteredDues = upcomingDues.filter(due => due.due_date === selectedDate);
   const selectedDaysInfo = getDaysInfo(selectedDate);
+
+  // SVG Donut Chart Calculation variables
+  const size = 170;
+  const strokeWidth = 20;
+  const center = size / 2;
+  const radius = center - strokeWidth;
+  const circumference = 2 * Math.PI * radius;
+
+  let accumulatedPercent = 0;
 
   return (
     <View style={styles.mainContainer}>
@@ -558,6 +648,177 @@ export default function SpenderHomeScreen() {
               );
             })}
           </ScrollView>
+        </View>
+
+        {/* STATISTICS SECTION */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Expenses per Category</Text>
+          </View>
+
+          <View style={styles.statsCard}>
+            {/* Multi-Segment Donut Chart Display */}
+            <View style={styles.circleContainer}>
+              <Svg width={size} height={size}>
+                {/* Background Track Circle */}
+                <Circle
+                  cx={center}
+                  cy={center}
+                  r={radius}
+                  stroke="#E2E8F0"
+                  strokeWidth={strokeWidth}
+                  fill="none"
+                />
+                
+                {/* Dynamic Category Segments */}
+                {categoryStats.map((stat) => {
+                  const strokeDashoffset = circumference - (circumference * stat.percentage) / 100;
+                  const currentRotation = (accumulatedPercent / 100) * 360 - 90;
+                  accumulatedPercent += stat.percentage;
+
+                  return (
+                    <Circle
+                      key={stat.categoryId}
+                      cx={center}
+                      cy={center}
+                      r={radius}
+                      stroke={stat.color}
+                      strokeWidth={strokeWidth}
+                      strokeDasharray={circumference}
+                      strokeDashoffset={strokeDashoffset}
+                      strokeLinecap="round"
+                      fill="none"
+                      rotation={currentRotation}
+                      origin={`${center}, ${center}`}
+                    />
+                  );
+                })}
+              </Svg>
+
+              <View style={styles.innerCircle}>
+                <Text style={styles.statsLabel}>Total Expenses</Text>
+                <Text style={styles.statsAmount}>
+                  ₱{overallTotalExpenses.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                </Text>
+              </View>
+            </View>
+
+            {/* Category Breakdown Legend List */}
+            <View style={styles.legendContainer}>
+              {categoryStats.map((stat) => (
+                <View key={stat.categoryId} style={styles.legendRow}>
+                  <View style={styles.legendLeft}>
+                    <View style={[styles.legendColorDot, { backgroundColor: stat.color }]} />
+                    <Text style={styles.legendCategoryName} numberOfLines={1}>{stat.categoryName}</Text>
+                  </View>
+                  <View style={styles.legendRight}>
+                    <Text style={styles.legendAmount}>₱{stat.total.toLocaleString('en-US')}</Text>
+                    <Text style={styles.legendPercentage}>({stat.percentage.toFixed(1)}%)</Text>
+                  </View>
+                </View>
+              ))}
+              {categoryStats.length === 0 && (
+                <Text style={styles.emptyLegendText}>No expense records found.</Text>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* DAILY SPENDING TREND LINE GRAPH */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Daily Spending Trend</Text>
+          </View>
+
+          <View style={styles.statsCard}>
+            <Text style={styles.lineGraphSubtitle}>Expenses incurred per day (Past 7 Days)</Text>
+            
+            <View style={styles.graphWrapper}>
+              {(() => {
+                const chartWidth = SCREEN_WIDTH - 88;
+                const chartHeight = 160;
+                const paddingLeft = 35;
+                const paddingRight = 15;
+                const paddingTop = 20;
+                const paddingBottom = 35;
+
+                const usableWidth = chartWidth - paddingLeft - paddingRight;
+                const usableHeight = chartHeight - paddingTop - paddingBottom;
+
+                const maxAmount = Math.max(...dailyTrends.map(d => d.amount), 100);
+
+                const points = dailyTrends.map((item, index) => {
+                  const x = paddingLeft + (index / (dailyTrends.length - 1 || 1)) * usableWidth;
+                  const y = paddingTop + usableHeight - (item.amount / maxAmount) * usableHeight;
+                  return { x, y, ...item };
+                });
+
+                const polylinePoints = points.map(p => `${p.x},${p.y}`).join(' ');
+
+                return (
+                  <Svg width={chartWidth} height={chartHeight}>
+                    {[0, 0.5, 1].map((ratio, idx) => {
+                      const yPos = paddingTop + usableHeight * ratio;
+                      const valLabel = Math.round(maxAmount * (1 - ratio));
+                      return (
+                        <G key={idx}>
+                          <Line
+                            x1={paddingLeft}
+                            y1={yPos}
+                            x2={chartWidth - paddingRight}
+                            y2={yPos}
+                            stroke="#E2E8F0"
+                            strokeDasharray="4,4"
+                            strokeWidth="1"
+                          />
+                          <SvgText
+                            x={paddingLeft - 15}
+                            y={yPos + 4}
+                            fontSize="9"
+                            fill={COLORS.textMuted}
+                            textAnchor="end"
+                          >
+                            {valLabel}
+                          </SvgText>
+                        </G>
+                      );
+                    })}
+
+                    <Polyline
+                      points={polylinePoints}
+                      fill="none"
+                      stroke={COLORS.deepTeal}
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+
+                    {points.map((p, idx) => (
+                      <G key={idx}>
+                        <Circle
+                          cx={p.x}
+                          cy={p.y}
+                          r={4.5}
+                          fill={COLORS.yellowGreen}
+                          stroke={COLORS.deepTeal}
+                          strokeWidth="2"
+                        />
+                        <SvgText
+                          x={p.x}
+                          y={chartHeight - 6}
+                          fontSize="9"
+                          fill={COLORS.textMuted}
+                          textAnchor="middle"
+                        >
+                          {p.displayDay}
+                        </SvgText>
+                      </G>
+                    ))}
+                  </Svg>
+                );
+              })()}
+            </View>
+          </View>
         </View>
       </ScrollView>
 
@@ -813,14 +1074,13 @@ const styles = StyleSheet.create({
   pillAmountDivider: { fontSize: 22, color: 'rgba(255,255,255,0.3)', fontWeight: '300' },
   pillAmountTotal: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
 
-  sectionBlock: { paddingHorizontal: 24, marginTop: 28 },
+  sectionBlock: { paddingHorizontal: 24, marginTop: 20 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontSize: 17, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
   seeAllText: { fontSize: 13, color: COLORS.deepTeal, fontWeight: '700' },
 
   dateStripContainer: {
     gap: 8,
-    marginBottom: 16,
     paddingVertical: 4,
   },
   dateBox: {
@@ -834,7 +1094,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 6,
-    elevation: 2,
     borderWidth: 1.5,
     borderColor: '#E2E8F0',
   },
@@ -880,6 +1139,111 @@ const styles = StyleSheet.create({
   },
   pendingDotBorderSelected: {
     backgroundColor: COLORS.deepTeal,
+  },
+
+  // Statistics Styles
+  statsCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 24,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  circleContainer: {
+    width: 180,
+    height: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  innerCircle: {
+    position: 'absolute',
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: 'COLORS.card',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statsLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginBottom: 2,
+  },
+  statsAmount: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.darkOlive,
+    letterSpacing: -0.5,
+  },
+  legendContainer: {
+    width: '100%',
+    marginTop: 16,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 16,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  legendLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    marginRight: 12,
+  },
+  legendColorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  legendCategoryName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
+  legendRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendAmount: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.black,
+  },
+  legendPercentage: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  emptyLegendText: {
+    textAlign: 'center',
+    fontSize: 13,
+    color: COLORS.textMuted,
+    paddingVertical: 10,
+  },
+  lineGraphSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  graphWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 8,
   },
 
   // Modal Styles
@@ -981,18 +1345,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
-  },
-  calendarMonthHome: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.deepTeal,
-    letterSpacing: 0.5,
-  },
-  calendarDayHome: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.deepTeal,
-    lineHeight: 18,
   },
   deleteButtonHome: {
     width: 36,

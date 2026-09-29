@@ -23,9 +23,7 @@ interface CategoryStat {
   categoryId: string;
   categoryName: string;
   categoryIcon: string;
-  allocated: number;
   spent: number;
-  remaining: number;
   percentageSpent: number;
   expenseCount: number;
 }
@@ -85,11 +83,8 @@ export default function StatisticsScreen() {
 
       const { data: userExpenses } = await supabase
         .from('expenses')
-        .select(`
-          spent_at,
-          budgets!inner ( user_id )
-        `)
-        .eq('budgets.user_id', user.id);
+        .select('spent_at')
+        .eq('user_id', user.id);
 
       const activeDates = (userExpenses || []).map((e: any) => new Date(e.spent_at));
 
@@ -201,17 +196,13 @@ export default function StatisticsScreen() {
           id,
           amount,
           spent_at,
-          budgets!inner (
-            user_id,
-            allocated_amount,
-            categories:category_id (
-              id,
-              name,
-              icon
-            )
+          categories:category_id (
+            id,
+            name,
+            icon
           )
         `)
-        .eq('budgets.user_id', user.id)
+        .eq('user_id', user.id)
         .gte('spent_at', activePeriod.startDate)
         .lte('spent_at', activePeriod.endDate + 'T23:59:59')
         .order('spent_at', { ascending: true });
@@ -226,10 +217,9 @@ export default function StatisticsScreen() {
         const amt = Number(exp.amount) || 0;
         overallSum += amt;
 
-        const category = exp.budgets?.categories;
+        const category = exp.categories;
         if (category) {
           const catId = category.id;
-          const allocated = Number(exp.budgets.allocated_amount) || 0;
 
           if (catMap[catId]) {
             catMap[catId].spent += amt;
@@ -239,9 +229,7 @@ export default function StatisticsScreen() {
               categoryId: catId,
               categoryName: category.name || 'General',
               categoryIcon: category.icon || 'wallet-outline',
-              allocated,
               spent: amt,
-              remaining: 0,
               percentageSpent: 0,
               expenseCount: 1,
             };
@@ -250,11 +238,9 @@ export default function StatisticsScreen() {
       });
 
       const compiledCats: CategoryStat[] = Object.values(catMap).map((cat) => {
-        const remaining = cat.allocated - cat.spent;
         return {
           ...cat,
-          remaining,
-          percentageSpent: cat.allocated > 0 ? Math.min(100, (cat.spent / cat.allocated) * 100) : 0,
+          percentageSpent: overallSum > 0 ? Math.min(100, (cat.spent / overallSum) * 100) : 0,
         };
       }).sort((a, b) => b.spent - a.spent);
 
@@ -279,7 +265,6 @@ export default function StatisticsScreen() {
     await fetchStatistics();
   }, [loadActivePeriods, timeFrame, fetchStatistics]);
 
-  // Slightly adjusted size (175px)
   const renderDonutChart = () => {
     const size = 175;
     const strokeWidth = 18;
@@ -465,7 +450,7 @@ export default function StatisticsScreen() {
           }
           renderItem={({ item: cat, index }) => {
             const color = CATEGORY_COLORS[index % CATEGORY_COLORS.length];
-            const percent = totalSpent > 0 ? Math.round((cat.spent / totalSpent) * 100) : 0;
+            const percent = Math.round(cat.percentageSpent);
 
             return (
               <View style={styles.cardItem}>
@@ -673,4 +658,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#94A3B8',
   },
-});
+}); 
