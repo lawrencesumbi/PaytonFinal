@@ -761,9 +761,9 @@ const showAlert = (title: string, message: string) => {
 
           
 
-{/* ACTIVE SPLITS HISTORY */}
-<View style={styles.sectionTitleRow}>
+<View style={[styles.sectionTitleRow, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
   <Text style={styles.sectionTitle}>Split History</Text>
+  <Text style={styles.sectionCount}>{activeSplits?.length || 0} splits</Text>
 </View>
 
 {(activeSplits?.length || 0) === 0 ? (

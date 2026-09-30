@@ -854,5 +854,4 @@ horizontalChecklist: {
   paddingRight: 16,
   marginBottom: 16,
 },
-
 });
