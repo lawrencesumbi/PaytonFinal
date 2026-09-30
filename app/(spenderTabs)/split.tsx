@@ -18,7 +18,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { categoryThemes, colors, styles } from '../../constants/split.style';
+import { colors, styles } from '../../constants/split.style';
 
 type Friend = {
   id: string;
@@ -36,7 +36,7 @@ type ActiveSplitFriend = {
   friends?: {
     id: string;
     full_name: string;
-    avatar_url?: string; // I-apil kini diri
+    avatar_url?: string;
   };
 };
 
@@ -45,25 +45,9 @@ type ActiveSplit = {
   description: string;
   total_amount: number;
   personal_share: number;
-  split_type: 'EQUAL' | 'CUSTOM'; // Gitangtang ang '?' kay mandatory na siya gikan sa DB
+  split_type: 'EQUAL' | 'CUSTOM';
   created_at: string;
   split_friends: ActiveSplitFriend[];
-};
-
-type BudgetOption = {
-  id: string;
-  name?: string;
-  allocated_amount: number;
-  allowance_id: string;
-  categories?: {
-    name: string;
-  };
-  allowances?: {
-    id: string;
-    start_date: string;
-    end_date: string;
-  };
-  expenses?: { amount: number }[];
 };
 
 export default function SplitScreen() {
@@ -74,7 +58,6 @@ export default function SplitScreen() {
   // Default Array States
   const [friends, setFriends] = useState<Friend[]>([]);
   const [activeSplits, setActiveSplits] = useState<ActiveSplit[]>([]);
-  const [availableBudgets, setAvailableBudgets] = useState<BudgetOption[]>([]);
 
   // Creation Form States
   const [formVisible, setFormVisible] = useState<boolean>(false);
@@ -98,16 +81,11 @@ export default function SplitScreen() {
   const [selectedFriendToSettle, setSelectedFriendToSettle] = useState<ActiveSplitFriend | null>(null);
   const [paymentInputAmount, setPaymentInputAmount] = useState<string>('');
 
-  // Budget Selection Modal State (For New Split creation only)
-  const [budgetModalVisible, setBudgetModalVisible] = useState<boolean>(false);
-  const [pendingSplitPayload, setPendingSplitPayload] = useState<any>(null);
-
   const [editingFriend, setEditingFriend] = useState<Friend | null>(null);
-
   const [friendImageUri, setFriendImageUri] = useState<string | null>(null);
 
-  const [editingSplit, setEditingSplit] = useState(null); // Para masubay kung naa ba tay gi-edit
-  const [actionMenuVisible, setActionMenuVisible] = useState(false); // Para sa 3-dots menu kung kinahanglan
+  const [editingSplit, setEditingSplit] = useState(null); 
+  const [actionMenuVisible, setActionMenuVisible] = useState(false); 
   const [selectedSplitForAction, setSelectedSplitForAction] = useState(null);
 
   const [myProfile, setMyProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
@@ -154,15 +132,6 @@ export default function SplitScreen() {
     }
     setRefreshing(false);
   }, []);
-
-  const calculateRemainingAmount = (budget: any): number => {
-    const allocated = budget.allocated_amount || 0;
-    const totalSpent = (budget.expenses || []).reduce(
-      (sum: number, exp: { amount: number }) => sum + (exp.amount || 0),
-      0
-    );
-    return allocated - totalSpent;
-  };
 
   const fetchData = async (userId: string) => {
     // 1. Fetch Friends
@@ -216,42 +185,7 @@ export default function SplitScreen() {
       setActiveSplits([]);
     }
 
-    // 3. Fetch Budgets
-    try {
-      const { data: budgetData, error: budgetErr } = await supabase
-        .from('budgets')
-        .select(`
-          id,
-          user_id,
-          category_id,
-          allocated_amount,
-          allowance_id,
-          categories ( name ),
-          allowances ( id, start_date, end_date ),
-          expenses ( amount )
-        `)
-        .eq('user_id', userId);
-
-      if (budgetErr) console.error('Budgets fetch error:', budgetErr.message);
-
-      if (budgetData) {
-        const today = new Date().toISOString().split('T')[0];
-        const activeBudgets = budgetData.filter((b: any) => {
-          const allowance = Array.isArray(b.allowances) ? b.allowances[0] : b.allowances;
-          if (!allowance) return true;
-          return today >= allowance.start_date && today <= allowance.end_date;
-        });
-
-        setAvailableBudgets((activeBudgets as unknown as BudgetOption[]) || []);
-      } else {
-        setAvailableBudgets([]);
-      }
-    } catch (err) {
-      console.error('Budgets error:', err);
-      setAvailableBudgets([]);
-    }
-
-    // 4. Fetch User Profile (Para sa imong Avatar)
+    // 3. Fetch User Profile
     try {
       const { data: profileData, error: profileErr } = await supabase
         .from('profiles')
@@ -266,8 +200,6 @@ export default function SplitScreen() {
       setMyProfile(null);
     }
   };
-
-  
 
   const pickImage = async (useCamera: boolean = false) => {
     let permissionResult;
@@ -288,7 +220,7 @@ export default function SplitScreen() {
           mediaTypes: ['images'], 
           allowsEditing: true, 
           aspect: [1, 1], 
-          quality: 0.5, // Giubos gamay ang quality para mas dali ma-process
+          quality: 0.5,
           base64: false,
         })
       : await ImagePicker.launchImageLibraryAsync({ 
@@ -300,60 +232,53 @@ export default function SplitScreen() {
         });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
-      // Siguruhon nato nga .jpg ang extension sa file nga i-upload para walay "unknown format"
       const uri = result.assets[0].uri;
       setFriendImageUri(uri);
     }
   };
 
-  // Upload function padulong sa Supabase Storage
-const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
-  try {
-    if (!user) throw new Error('No user logged in');
+  const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
+    try {
+      if (!user) throw new Error('No user logged in');
 
-    const fileName = `${Date.now()}.jpg`;
-    const filePath = `${user.id}/${fileName}`;
+      const fileName = `${Date.now()}.jpg`;
+      const filePath = `${user.id}/${fileName}`;
 
-    // 1. Basahon ang file gikan sa local uri isip base64
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
-    // 2. I-convert ang base64 ngadto sa raw binary array nga madawat sa Supabase
-    const binaryString = atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    // 3. I-upload ang binary nga naay saktong contentType
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, bytes, {
-        contentType: 'image/jpeg',
-        upsert: true,
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
       });
 
-    if (uploadError) throw uploadError;
+      const binaryString = atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
 
-    const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
-    return data.publicUrl;
-  } catch (err: any) {
-    console.error('Upload error:', err.message);
-    return null;
-  }
-};
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, bytes, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
 
- const handleSaveFriend = async () => {
-    // Gi-alisdan nato aron Full Name ra ang kinahanglanon (gi-remove ang && !newFriendEmail.trim())
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      return data.publicUrl;
+    } catch (err: any) {
+      console.error('Upload error:', err.message);
+      return null;
+    }
+  };
+
+  const handleSaveFriend = async () => {
     if (!newFriendName.trim() || !user) return;
 
     try {
       setLoading(true);
       let uploadedAvatarUrl = editingFriend?.avatar_url || null;
 
-      // Kung naay bag-ong gipili nga imahe, i-upload sa Supabase
       if (friendImageUri && !friendImageUri.startsWith('http')) {
         uploadedAvatarUrl = await uploadAvatarToSupabase(friendImageUri);
       }
@@ -361,7 +286,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
       const friendDataPayload = {
         user_id: user.id,
         full_name: newFriendName.trim(),
-        // Kung naay gi-type sa email, i-lowercase; kung wala, mahimo siyang null
         email: newFriendEmail.trim() ? newFriendEmail.trim().toLowerCase() : null,
         avatar_url: uploadedAvatarUrl,
       };
@@ -391,7 +315,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
         }
       }
 
-      // Reset form states
       setEditingFriend(null);
       setNewFriendName('');
       setNewFriendEmail('');
@@ -459,8 +382,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
     setEditingSplit(splitItem);
     setDescription(splitItem.description || '');
     setAmount(splitItem.total_amount ? splitItem.total_amount.toString() : '');
-    
-    // Dire na niya basahon ang bag-ong column nga split_type
     setSplitType(splitItem.split_type || 'EQUAL');
 
     const friendIds = (splitItem.split_friends || []).map((sf: any) => sf.friend_id);
@@ -478,7 +399,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
   const handleDeleteSplit = async (splitId: string) => {
     try {
       setLoading(true);
-      // Tangtanga ang sakop sa split_friends una o i-delete ang split_expenses (depende sa foreign key cascade)
       const { error } = await supabase
         .from('split_expenses')
         .delete()
@@ -486,7 +406,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
 
       if (error) throw error;
 
-      // I-update ang local state aron mawala dayon sa UI
       setActiveSplits((prev) => prev.filter((s) => s.id !== splitId));
       showAlert('Success', 'Split expense deleted successfully.');
     } catch (err: any) {
@@ -511,7 +430,8 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
     setCustomShares((prev) => ({ ...prev, [friendId]: val }));
   };
 
-  const handleInitiateCreateSplit = () => {
+  // Direct Creation Split Handler (Budget checking removed)
+  const handleCreateSplitDirectly = async () => {
     const numericAmount = parseFloat(amount);
     if (!description.trim() || isNaN(numericAmount) || numericAmount <= 0) {
       showAlert('Invalid Input', 'Please enter a valid description and amount.');
@@ -556,122 +476,63 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
       ownerShare = parseFloat((numericAmount - customSum).toFixed(2));
     }
 
-    setPendingSplitPayload({
-      description: description.trim(),
-      total_amount: numericAmount,
-      personal_share: ownerShare,
-      split_type: splitType,
-      friends: calculatedFriendsPayload,
-    });
+    setLoading(true);
 
-    setFormVisible(false);
-    setBudgetModalVisible(true);
+    try {
+      const { data: splitExp, error: splitExpErr } = await supabase
+        .from('split_expenses')
+        .insert([
+          {
+            user_id: user.id,
+            description: description.trim(),
+            total_amount: numericAmount,
+            personal_share: ownerShare,
+            created_at: new Date().toISOString(),
+            split_type: splitType,
+          },
+        ])
+        .select()
+        .single();
+
+      if (splitExpErr) throw splitExpErr;
+
+      const friendInserts = calculatedFriendsPayload.map((f: any) => ({
+        split_expense_id: splitExp.id,
+        friend_id: f.friend_id,
+        owed_amount: f.owed_amount,
+        status: 'unpaid',
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error: friendsErr } = await supabase.from('split_friends').insert(friendInserts);
+
+      if (friendsErr) throw friendsErr;
+
+      await sendNewSplitEmails(
+        splitExp,
+        calculatedFriendsPayload,
+        numericAmount,
+        description.trim(),
+        myProfile?.full_name
+      );
+
+      showAlert('Success', 'Split expense saved and emails sent!');
+      setFormVisible(false);
+      resetForm();
+      fetchData(user.id);
+    } catch (err: any) {
+      showAlert('Error', err.message || 'Failed to process split.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSelectBudgetAndCreateSplit = async (selectedBudgetId: string) => {
-      if (!user || !pendingSplitPayload) return;
-      setBudgetModalVisible(false);
-      setLoading(true);
-  
-      try {
-        const { data: budgetData, error: budgetErr } = await supabase
-          .from('budgets')
-          .select(`
-            id, 
-            allocated_amount, 
-            income_id,
-            expenses ( amount )
-          `)
-          .eq('id', selectedBudgetId)
-          .single();
-  
-        if (budgetErr || !budgetData) {
-          showAlert('Error', 'Could not verify budget status.');
-          setLoading(false);
-          return;
-        }
-  
-        const remainingAmount = calculateRemainingAmount(budgetData);
-        const splitAmount = pendingSplitPayload.total_amount;
-  
-        if (remainingAmount < splitAmount) {
-          showAlert('Insufficient Budget', 'The selected budget category does not have enough balance. Try selecting a different budget or adjust the split amount.');
-          setLoading(false);
-          return;
-        }
-  
-        const { error: expErr } = await supabase.from('expenses').insert([
-          {
-            budget_id: selectedBudgetId,
-            amount: splitAmount,
-            description: `[Split] ${pendingSplitPayload.description}`,
-            spent_at: new Date().toISOString(),
-            income_id: budgetData.income_id,
-          },
-        ]);
-  
-        if (expErr) throw expErr;
-  
-        const { data: splitExp, error: splitExpErr } = await supabase
-          .from('split_expenses')
-          .insert([
-            {
-              user_id: user.id,
-              description: pendingSplitPayload.description,
-              total_amount: splitAmount,
-              personal_share: pendingSplitPayload.personal_share,
-              created_at: new Date().toISOString(),
-              split_type: pendingSplitPayload.split_type,
-            },
-          ])
-          .select()
-          .single();
-  
-        if (splitExpErr) throw splitExpErr;
-  
-        const friendInserts = (pendingSplitPayload.friends || []).map((f: any) => ({
-          split_expense_id: splitExp.id,
-          friend_id: f.friend_id,
-          owed_amount: f.owed_amount,
-          status: 'unpaid',
-          updated_at: new Date().toISOString(),
-        }));
-  
-        const { error: friendsErr } = await supabase.from('split_friends').insert(friendInserts);
-  
-        if (friendsErr) throw friendsErr;
-  
-        // -------------------------------------------------------------
-        // 🚀 BAG-ONG GIDUGANG: Tawgon ang function aron mag-send og email
-        // -------------------------------------------------------------
-        await sendNewSplitEmails(
-          splitExp,                               // Resulta gikan sa split_expenses insert
-          pendingSplitPayload.friends,            // Ang array sa mga friends nga naay friend_id ug owed_amount
-          splitAmount,                            // Total Amount
-          pendingSplitPayload.description,        // Description sa gasto
-          myProfile?.full_name                    // Imong pangalan isip sender
-        );
-        // -------------------------------------------------------------
-  
-        showAlert('Success', 'Split expense saved, deducted from budget, and emails sent!');
-        setPendingSplitPayload(null);
-        resetForm();
-        fetchData(user.id);
-      } catch (err: any) {
-        showAlert('Error', err.message || 'Failed to process split.');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-  // 1. Opens the Payment Input Modal when Mark Paid is clicked
   const handleInitiateSettleFriend = (friendShare: ActiveSplitFriend) => {
     setSelectedFriendToSettle(friendShare);
     setPaymentInputAmount(friendShare.owed_amount.toString());
     setSettleAmountModalVisible(true);
   };
 
-  // 2. Confirms repayment, updates split_friends, and increments allowance amount
   const handleConfirmSettlePayment = async () => {
     if (!user || !selectedFriendToSettle) return;
 
@@ -690,7 +551,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
       const newOwed = Math.max(0, currentOwed - paidVal);
       const isFullyPaid = newOwed === 0;
 
-      // Step A: Update friend's share in split_friends table
       const { error: updateFriendErr } = await supabase
         .from('split_friends')
         .update({
@@ -702,71 +562,12 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
 
       if (updateFriendErr) throw updateFriendErr;
 
-      // Step B: Fetch active or fallback allowance using spender_id
-      // Step B: Fetch active or fallback allowance using spender_id
-      const today = new Date().toISOString().split('T')[0];
-      let isUsingFallback = false; // Flag para mahibal-an nato kung nag-fallback ba
-
-      let { data: activeAllowances, error: allowanceErr } = await supabase
-        .from('allowances')
-        .select('id, amount, start_date, end_date')
-        .eq('spender_id', user.id)
-        .lte('start_date', today)
-        .gte('end_date', today)
-        .order('received_at', { ascending: false })
-        .limit(1);
-
-      if (allowanceErr) {
-        console.error('Allowance fetch error:', allowanceErr.message);
-      }
-
-      // Fallback: If no allowance matches the exact current date, retrieve the latest allowance for this spender
-      if (!activeAllowances || activeAllowances.length === 0) {
-        const { data: latestAllowance, error: latestErr } = await supabase
-          .from('allowances')
-          .select('id, amount, start_date, end_date')
-          .eq('spender_id', user.id)
-          .order('end_date', { ascending: false })
-          .limit(1);
-
-        if (latestErr) {
-          console.error('Latest allowance fetch error:', latestErr.message);
-        } else {
-          activeAllowances = latestAllowance;
-          isUsingFallback = true; // Na-trigger ang fallback kay walay active karon
-        }
-      }
-
-      if (activeAllowances && activeAllowances.length > 0) {
-        const activeAllowance = activeAllowances[0];
-        const currentAllowanceAmount = parseFloat(activeAllowance.amount || 0);
-        const updatedAllowanceAmount = currentAllowanceAmount + paidVal;
-
-        const { error: incErr } = await supabase
-          .from('allowances')
-          .update({ amount: parseFloat(updatedAllowanceAmount.toFixed(2)) })
-          .eq('id', activeAllowance.id);
-
-        if (incErr) {
-          console.error('Error updating allowance balance:', incErr.message);
-          showAlert('Warning', `Payment recorded, but failed to update allowance: ${incErr.message}`);
-        }
-      } else {
-        showAlert('Notice', 'Payment processed, but no allowance record was found to credit.');
-      }
-
-      // Gi-adjust ang Alert message aron ma-notify ang user kung nag-fallback ba
       let successMessage = `Successfully received ₱${paidVal.toFixed(2)} from ${friendName}. ${
         isFullyPaid ? 'Fully settled!' : `Remaining balance: ₱${newOwed.toFixed(2)}`
       }`;
 
-      if (isUsingFallback) {
-        successMessage += ` \n\n(Note: Added to your latest allowance because there is no active allowance set for today.)`;
-      }
-
       showAlert('Payment Recorded', successMessage);
 
-      // Update local state for immediate UI feedback
       if (selectedSplitForSettle) {
         setSelectedSplitForSettle((prev) => {
           if (!prev) return null;
@@ -801,6 +602,7 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
     setSplitType('EQUAL');
     setSelectedFriends([]);
     setCustomShares({});
+    setEditingSplit(null);
   };
 
   const calculateOwnerShare = () => {
@@ -818,9 +620,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
     }
   };
 
-  // Shared avatar palette — same style family as categoryThemes used in the
-  // budget picker below. Each entry is just { bg, text } since avatars only
-  // show a flat circle + initial (no separate icon).
   const CARD_THEMES = [
     { bg: '#54C9CC', text: '#ffffff' },
     { bg: '#7EA00E', text: '#ffffff' },
@@ -841,7 +640,7 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
     { youOwe: 0, youAreOwed: 0 }
   );
 
- const handleSendReminderEmail = async (
+  const handleSendReminderEmail = async (
     friendEmail: any, 
     friendName: any, 
     owedAmount: any, 
@@ -851,15 +650,15 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
   ) => {
     try {
       const templateParams = {
-        email: friendEmail,                               // Email sa recipient
-        email_subject: `Reminder: Balance for ${description}`, // Subject para sa reminder
-        friend_name: friendName,                          // Pangalan sa higala
+        email: friendEmail,                        
+        email_subject: `Reminder: Balance for ${description}`, 
+        friend_name: friendName,                       
         intro_message: "This is a friendly reminder that you still have a remaining balance for this expense.",
-        description: description,                         // Gasto o pangalan sa item
-        total_amount: (totalAmount || 0).toFixed(2),      // Total nga gasto (naay .toFixed aron limpyo ang desimal)
-        amount: (owedAmount || 0).toFixed(2),             // Imong utang / balance
+        description: description,                       
+        total_amount: (totalAmount || 0).toFixed(2),      
+        amount: (owedAmount || 0).toFixed(2),            
         call_to_action: "Please settle this at your earliest convenience. Thank you!",
-        sender_name: senderName,                          // Imong pangalan (Sender)
+        sender_name: senderName,                       
       };
 
       const serviceID = 'service_67drjkh';    
@@ -883,24 +682,22 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
       const userID = 'W4iiQMEllSfk5dSfk';        
 
       for (const item of friendsPayload) {
-        // Pangitaon ang tinuod nga email ug pangalan sa amigo base sa friend_id gamit ang imong main 'friends' array
         const friendObj = (friends || []).find((f) => f.id === item.friend_id);
         
-        if (!friendObj || !friendObj.email) continue; // Kung walay email, skip
+        if (!friendObj || !friendObj.email) continue;
 
         const templateParams = {
-          email: friendObj.email,                                   // Email sa amigo
-          email_subject: `New Split Expense Added: ${description}`, // Subject
-          friend_name: friendObj.full_name,                         // Pangalan sa amigo
-          intro_message: "You have been added to a new split expense.", // Intro
-          description: description,                                 // Item o Gasto
-          total_amount: parseFloat(totalAmount).toFixed(2),         // Total nga gasto
-          amount: parseFloat(item.owed_amount || 0).toFixed(2),     // Ila indibidwal nga owed amount gikan sa payload
+          email: friendObj.email,                            
+          email_subject: `New Split Expense Added: ${description}`, 
+          friend_name: friendObj.full_name,                         
+          intro_message: "You have been added to a new split expense.", 
+          description: description,                             
+          total_amount: parseFloat(totalAmount).toFixed(2),         
+          amount: parseFloat(item.owed_amount || 0).toFixed(2),    
           call_to_action: "Please settle your balance accordingly. Thank you!",
-          sender_name: senderName,                                  // Imong pangalan
+          sender_name: senderName,                              
         };
 
-        // I-send ang email
         await emailjs.send(serviceID, templateID, templateParams, userID);
       }
 
@@ -909,6 +706,8 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
       console.error('FAILED sending split emails...', err);
     }
   };
+
+  
 
   return (
     <View style={styles.container}>
@@ -1022,7 +821,7 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
                 <View key={item.id} style={styles.historyCard}>
                   <View style={styles.historyTop}>
                     
-                    {/* 1. Category Icon sa Wala */}
+                    {/* Category Icon */}
           <View style={styles.categoryIconContainer}>
             <Ionicons 
               name={"people-outline"} 
@@ -1048,7 +847,7 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
             {allPaid && (
 
               <TouchableOpacity style={styles.fullySettledBadge}
-                    onPress={() => {
+                  onPress={() => {
                     setSelectedSplitForSettle(item);
                     setSettleModalVisible(true);
                   }}>
@@ -1059,7 +858,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
             )}
 
             <View style={styles.iconButtonsRow}>
-              {/* I-display lang ang Settle button kung WALA PA NA-SETTLE ang tanan */}
               {!allPaid && (
 
                 <TouchableOpacity
@@ -1074,7 +872,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
 
               )}
 
-              {/* 3 Dots Button para sa Edit ug Delete options */}
               <TouchableOpacity
                 style={styles.actionIconButton}
                 onPress={() => {
@@ -1113,7 +910,7 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
         </ScrollView>
       )}
 
-      {/* CREATE SPLIT — floating centered card */}
+      {/* CREATE / EDIT SPLIT MODAL */}
       <Modal visible={formVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.formDrawerContainer}>
@@ -1231,60 +1028,13 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
                 </View>
               )}
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleInitiateCreateSplit}>
+              <TouchableOpacity style={styles.submitBtn} onPress={handleCreateSplitDirectly}>
                 <Text style={styles.submitBtnText}>
-                  {editingSplit ? "Update Split" : "Confirm & Process Split"}
+                  {editingSplit ? "Update Split" : "Confirm & Save Split"}
                 </Text>
                 <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
               </TouchableOpacity>
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* SELECT BUDGET MODAL (FOR CREATION ONLY) — themed rows, matching Home's Quick Budget cards */}
-      <Modal visible={budgetModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlayCenter}>
-          <View style={styles.alertModalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Budget Category</Text>
-              <TouchableOpacity style={styles.closeCircle} onPress={() => setBudgetModalVisible(false)}>
-                <Ionicons name="close" size={20} color={colors.headerDarker} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSub}>Select category to deduct the total expense:</Text>
-
-            {(availableBudgets?.length || 0) === 0 ? (
-              <Text style={styles.emptyText}>No active budget categories available.</Text>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
-                {(availableBudgets || []).map((b, index) => {
-                  const remaining = calculateRemainingAmount(b);
-                  const theme = categoryThemes[index % categoryThemes.length];
-                  return (
-                    <TouchableOpacity
-                      key={b.id}
-                      style={[styles.budgetChipOption, { backgroundColor: theme.bg }]}
-                      onPress={() => handleSelectBudgetAndCreateSplit(b.id)}
-                    >
-                      <View style={[styles.budgetIconCircle, { backgroundColor: theme.iconBg }]}>
-                        <Ionicons name="folder-outline" size={18} color={theme.iconColor} />
-                      </View>
-                      <View style={styles.budgetTextGroup}>
-                        <Text style={[styles.budgetName, { color: theme.text }]}>
-                          {b.categories?.name || b.name || 'Budget Category'}
-                        </Text>
-                        <Text style={[styles.budgetBalance, { color: theme.text }]}>
-                          Remaining: ₱{remaining.toFixed(2)}
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={18} color={theme.text} />
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            )}
           </View>
         </View>
       </Modal>
@@ -1327,7 +1077,6 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
               onChangeText={setNewFriendEmail}
             />
 
-            {/* Preview ug Avatar Picker Buttons */}
             <View style={{ alignItems: 'center', marginVertical: 10 }}>
               <Image
                 source={
@@ -1356,219 +1105,207 @@ const uploadAvatarToSupabase = async (uri: string): Promise<string | null> => {
         </View>
       </Modal>
 
-      {/* MANAGE SHARES & SETTLEMENT MODAL — floating centered card */}
-<Modal visible={settleModalVisible} animationType="fade" transparent>
-  <View style={styles.modalOverlay}>
-    <View style={[styles.modalContainer, { width: '92%', maxHeight: '85%' }]}>
-      <View style={styles.modalHeader}>
-        <Text style={styles.modalTitle}>Settlement Details</Text>
-        <TouchableOpacity style={styles.closeCircle} onPress={() => setSettleModalVisible(false)}>
-          <Ionicons name="close" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.modalSub}>Track paid shares and manage settlement:</Text>
-
-      <FlatList
-        data={selectedSplitForSettle ? [selectedSplitForSettle] : []}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => {
-          const totalAmount = item.total_amount || 0;
-          const personalShare = item.personal_share || 0;
-          const friendsList = item.split_friends || [];
-
-          return (
-            <View style={{ gap: 12, paddingBottom: 16 }}>
-              {/* Main Summary Info Card */}
-              <View style={styles.settleMainCard}>
-                <View style={{ flex: 1, paddingRight: 8 }}>
-                  <Text style={styles.settleCardDesc}>{item.description}</Text>
-                  <Text style={styles.settleCardDate}>
-                    {item.created_at 
-                      ? new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) 
-                      : ''}
-                  </Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={styles.settleCardTotalLabel}>Total Amount</Text>
-                  <Text style={styles.settleCardTotalValue}>₱{totalAmount.toFixed(2)}</Text>
-                </View>
-              </View>
-
-              <Text style={[styles.modalSub, { marginTop: 8, marginBottom: 4 }]}>Involved Members & Shares:</Text>
-
-              {/* Personal Share Row (You) */}
-              <View style={styles.settleMemberRowCard}>
-                <View style={styles.settleLeftCol}>
-                  <Image
-                    source={
-                      myProfile?.avatar_url
-                        ? { uri: myProfile.avatar_url }
-                        : require('../../assets/images/default.png')
-                    }
-                    style={styles.settleAvatarImage}
-                  />
-                  <View style={{ flexShrink: 1 }}>
-                    <Text style={styles.settleMemberName}>Me</Text>
-                    <Text style={styles.settleMemberSub}>My Share</Text>
-                  </View>
-                </View>
-
-                <View style={styles.settleCenterCol}>
-                  <Text style={styles.settleAmountText}>₱{personalShare.toFixed(2)}</Text>
-                </View>
-
-                <View style={styles.settleRightCol}>
-                  <View style={styles.settleOwnerBadge}>
-                    <Text style={styles.settleOwnerBadgeText}>Owner</Text>
-                  </View>
-                </View>
-              </View>
-
-{/* Friends Involved List */}
-{friendsList.map((sf: any) => {
-  const isPaid = sf.status === 'paid' && sf.owed_amount <= 0;
-  const friendName = sf.friends?.full_name || 'Friend';
-  const avatarUrl = sf.friends?.avatar_url;
-
-  return (
-    <View key={sf.id} style={styles.settleMemberRowCard}>
-      {/* Left: Friend Info */}
-      <View style={styles.settleLeftCol}>
-        <Image
-          source={
-            avatarUrl
-              ? { uri: avatarUrl }
-              : require('../../assets/images/default.png')
-          }
-          style={styles.settleAvatarImage}
-        />
-        <View style={{ flexShrink: 1 }}>
-          <Text style={styles.settleMemberName} numberOfLines={1}>{friendName}</Text>
-          <Text style={styles.settleMemberSub}>
-            {isPaid ? 'Settled' : 'Owes you'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Center: Amount */}
-      <View style={styles.settleCenterCol}>
-        <Text style={styles.settleAmountText}>₱{(sf.owed_amount || 0).toFixed(2)}</Text>
-      </View>
-
-      {/* Right Column: Dynamic alignment based on isPaid */}
-      <View style={[
-        styles.settleRightCol, 
-        { 
-          flexDirection: 'row', 
-          alignItems: 'center', 
-          gap: 6, 
-          justifyContent: isPaid ? 'flex-end' : 'flex-start' // Kung paid, iduot sa pinaka-tuo para walay space
-        }
-    ]}>
-        {isPaid ? (
-          <View style={styles.settlePaidPill}>
-            <Ionicons name="checkmark-circle" size={14} color={colors.positive} />
-            <Text style={styles.settlePaidPillText}>Paid</Text>
-          </View>
-        ) : (
-          <>
-            <TouchableOpacity
-              style={styles.settlePayButton}
-              onPress={() => handleInitiateSettleFriend(sf)}
-            >
-              <Text style={styles.settlePayButtonText}>Pay</Text>
-            </TouchableOpacity>
-
-            {/* Notification Icon Button - Makita ra kung wala pa naka-pay */}
-            <TouchableOpacity 
-  onPress={() => handleSendReminderEmail(
-    sf.friends?.email,         // Email gikan sa joined friends table
-    sf.friends?.full_name,     // Pangalan sa higala
-    sf.owed_amount,            // Kantidad sa utang (owed amount)
-    item?.total_amount,        // Total nga gasto sa maong split
-    item?.description,         // Description sa gasto
-    myProfile?.full_name       // Imong pangalan isip sender
-  )}
->
-  <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
-</TouchableOpacity>
-          </>
-        )}
-      </View>
-    </View>
-  );
-})}
+      {/* MANAGE SHARES & SETTLEMENT MODAL */}
+      <Modal visible={settleModalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { width: '92%', maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Settlement Details</Text>
+              <TouchableOpacity style={styles.closeCircle} onPress={() => setSettleModalVisible(false)}>
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
             </View>
-          );
-        }}
-      />
-    </View>
-  </View>
-</Modal>
+
+            <Text style={styles.modalSub}>Track paid shares and manage settlement:</Text>
+
+            <FlatList
+              data={selectedSplitForSettle ? [selectedSplitForSettle] : []}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => {
+                const totalAmount = item.total_amount || 0;
+                const personalShare = item.personal_share || 0;
+                const friendsList = item.split_friends || [];
+
+                return (
+                  <View style={{ gap: 12, paddingBottom: 16 }}>
+                    <View style={styles.settleMainCard}>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={styles.settleCardDesc}>{item.description}</Text>
+                        <Text style={styles.settleCardDate}>
+                          {item.created_at 
+                            ? new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) 
+                            : ''}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.settleCardTotalLabel}>Total Amount</Text>
+                        <Text style={styles.settleCardTotalValue}>₱{totalAmount.toFixed(2)}</Text>
+                      </View>
+                    </View>
+
+                    <Text style={[styles.modalSub, { marginTop: 8, marginBottom: 4 }]}>Involved Members & Shares:</Text>
+
+                    <View style={styles.settleMemberRowCard}>
+                      <View style={styles.settleLeftCol}>
+                        <Image
+                          source={
+                            myProfile?.avatar_url
+                              ? { uri: myProfile.avatar_url }
+                              : require('../../assets/images/default.png')
+                          }
+                          style={styles.settleAvatarImage}
+                        />
+                        <View style={{ flexShrink: 1 }}>
+                          <Text style={styles.settleMemberName}>Me</Text>
+                          <Text style={styles.settleMemberSub}>My Share</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.settleCenterCol}>
+                        <Text style={styles.settleAmountText}>₱{personalShare.toFixed(2)}</Text>
+                      </View>
+
+                      <View style={styles.settleRightCol}>
+                        <View style={styles.settleOwnerBadge}>
+                          <Text style={styles.settleOwnerBadgeText}>Owner</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    {friendsList.map((sf: any) => {
+                      const isPaid = sf.status === 'paid' && sf.owed_amount <= 0;
+                      const friendName = sf.friends?.full_name || 'Friend';
+                      const avatarUrl = sf.friends?.avatar_url;
+
+                      return (
+                        <View key={sf.id} style={styles.settleMemberRowCard}>
+                          <View style={styles.settleLeftCol}>
+                            <Image
+                              source={
+                                avatarUrl
+                                  ? { uri: avatarUrl }
+                                  : require('../../assets/images/default.png')
+                              }
+                              style={styles.settleAvatarImage}
+                            />
+                            <View style={{ flexShrink: 1 }}>
+                              <Text style={styles.settleMemberName} numberOfLines={1}>{friendName}</Text>
+                              <Text style={styles.settleMemberSub}>
+                                {isPaid ? 'Settled' : 'Owes you'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.settleCenterCol}>
+                            <Text style={styles.settleAmountText}>₱{(sf.owed_amount || 0).toFixed(2)}</Text>
+                          </View>
+
+                          <View style={[
+                            styles.settleRightCol, 
+                            { 
+                              flexDirection: 'row', 
+                              alignItems: 'center', 
+                              gap: 6, 
+                              justifyContent: isPaid ? 'flex-end' : 'flex-start' 
+                            }
+                          ]}>
+                            {isPaid ? (
+                              <View style={styles.settlePaidPill}>
+                                <Ionicons name="checkmark-circle" size={14} color={colors.positive} />
+                                <Text style={styles.settlePaidPillText}>Paid</Text>
+                              </View>
+                            ) : (
+                              <>
+                                <TouchableOpacity
+                                  style={styles.settlePayButton}
+                                  onPress={() => handleInitiateSettleFriend(sf)}
+                                >
+                                  <Text style={styles.settlePayButtonText}>Pay</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity 
+                                  onPress={() => handleSendReminderEmail(
+                                    sf.friends?.email,        
+                                    sf.friends?.full_name,    
+                                    sf.owed_amount,           
+                                    item?.total_amount,       
+                                    item?.description,        
+                                    myProfile?.full_name      
+                                  )}
+                                >
+                                  <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
+                                </TouchableOpacity>
+                              </>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                );
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* PAYMENT ENTRY INPUT MODAL FOR MARK PAID */}
-<Modal visible={settleAmountModalVisible} animationType="fade" transparent>
-  <View style={styles.modalOverlayCenter}>
-    <View style={styles.paymentModalContainer}>
-      
-      {/* Header */}
-      <View style={styles.paymentModalHeader}>
-        <View style={styles.paymentModalTitleRow}>
-          <View style={styles.paymentIconContainer}>
-            <Ionicons name="cash-outline" size={20} color={colors.primary} />
+      <Modal visible={settleAmountModalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlayCenter}>
+          <View style={styles.paymentModalContainer}>
+            <View style={styles.paymentModalHeader}>
+              <View style={styles.paymentModalTitleRow}>
+                <View style={styles.paymentIconContainer}>
+                  <Ionicons name="cash-outline" size={20} color={colors.primary} />
+                </View>
+                <Text style={styles.paymentModalMainTitle}>Record Payment</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.closeCircle}
+                onPress={() => setSettleAmountModalVisible(false)}
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.paymentInfoCard}>
+              <Text style={styles.paymentCardLabel}>From Friend</Text>
+              <Text style={styles.paymentFriendName}>
+                {selectedFriendToSettle?.friends?.full_name || 'Friend'}
+              </Text>
+              
+              <View style={styles.paymentCardDivider} />
+              
+              <View style={styles.paymentBalanceRow}>
+                <Text style={styles.paymentCardLabel}>Current Balance Owed:</Text>
+                <Text style={styles.paymentOwedAmount}>
+                  ₱{(selectedFriendToSettle?.owed_amount || 0).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.label, { marginBottom: 6 }]}>Amount Received (₱)</Text>
+            <TextInput
+              style={styles.paymentInput}
+              placeholder="0.00"
+              placeholderTextColor={colors.textFaint}
+              keyboardType="numeric"
+              value={paymentInputAmount}
+              onChangeText={setPaymentInputAmount}
+              autoFocus={true}
+            />
+
+            <TouchableOpacity
+              style={styles.paymentSubmitBtn}
+              onPress={handleConfirmSettlePayment}
+            >
+              <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.paymentSubmitBtnText}>Confirm Settlement</Text>
+            </TouchableOpacity>
+
           </View>
-          <Text style={styles.paymentModalMainTitle}>Record Payment</Text>
         </View>
-        <TouchableOpacity
-          style={styles.closeCircle}
-          onPress={() => setSettleAmountModalVisible(false)}
-        >
-          <Ionicons name="close" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Info Card / Summary Box */}
-      <View style={styles.paymentInfoCard}>
-        <Text style={styles.paymentCardLabel}>From Friend</Text>
-        <Text style={styles.paymentFriendName}>
-          {selectedFriendToSettle?.friends?.full_name || 'Friend'}
-        </Text>
-        
-        <View style={styles.paymentCardDivider} />
-        
-        <View style={styles.paymentBalanceRow}>
-          <Text style={styles.paymentCardLabel}>Current Balance Owed:</Text>
-          <Text style={styles.paymentOwedAmount}>
-            ₱{(selectedFriendToSettle?.owed_amount || 0).toFixed(2)}
-          </Text>
-        </View>
-      </View>
-
-      {/* Input Section */}
-      <Text style={[styles.label, { marginBottom: 6 }]}>Amount Received (₱)</Text>
-      <TextInput
-        style={styles.paymentInput}
-        placeholder="0.00"
-        placeholderTextColor={colors.textFaint}
-        keyboardType="numeric"
-        value={paymentInputAmount}
-        onChangeText={setPaymentInputAmount}
-        autoFocus={true}
-      />
-
-      {/* Submit Button */}
-      <TouchableOpacity
-        style={styles.paymentSubmitBtn}
-        onPress={handleConfirmSettlePayment}
-      >
-        <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
-        <Text style={styles.paymentSubmitBtnText}>Confirm & Add to Allowance</Text>
-      </TouchableOpacity>
-
-    </View>
-  </View>
-</Modal>
+      </Modal>
 
       {/* CUSTOM ALERT MODAL */}
       <Modal visible={alertConfig.visible} animationType="fade" transparent>
