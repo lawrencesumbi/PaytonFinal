@@ -221,8 +221,8 @@ export default function SpenderLayout() {
               <TabIcon
                 color={color}
                 focused={focused}
-                activeIcon="bulb"
-                inactiveIcon="bulb-outline"
+                activeIcon="chatbox-ellipses"
+                inactiveIcon="chatbox-ellipses-outline"
               />
             ),
           }}
