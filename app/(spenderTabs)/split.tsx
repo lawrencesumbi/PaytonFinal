@@ -8,7 +8,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Image,
   Modal,
   RefreshControl,
@@ -90,20 +89,13 @@ export default function SplitScreen() {
 
   const [myProfile, setMyProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
 
-  // Custom Alert Modal State
-  const [alertConfig, setAlertConfig] = useState<{
-    visible: boolean;
-    title: string;
-    message: string;
-  }>({
-    visible: false,
-    title: '',
-    message: '',
-  });
+  // Ibutang kini uban sa imong uban nga mga useState declarations
+const [expandedSplitId, setExpandedSplitId] = useState<string | null>(null);
 
-  const showAlert = (title: string, message: string) => {
-    setAlertConfig({ visible: true, title, message });
-  };
+  // Ilisi ang imong kasamtangang showAlert function og ingon ani:
+const showAlert = (title: string, message: string) => {
+  Alert.alert(title, message, [{ text: 'OK' }]);
+};
 
   useEffect(() => {
     fetchUserAndData();
@@ -378,23 +370,7 @@ export default function SplitScreen() {
     setAddFriendModalVisible(true);
   };
 
-  const handleOpenEditSplit = (splitItem: any) => {
-    setEditingSplit(splitItem);
-    setDescription(splitItem.description || '');
-    setAmount(splitItem.total_amount ? splitItem.total_amount.toString() : '');
-    setSplitType(splitItem.split_type || 'EQUAL');
-
-    const friendIds = (splitItem.split_friends || []).map((sf: any) => sf.friend_id);
-    setSelectedFriends(friendIds);
-
-    let sharesObj: Record<string, string> = {};
-    (splitItem.split_friends || []).forEach((sf: any) => {
-      sharesObj[sf.friend_id] = sf.owed_amount.toString();
-    });
-    setCustomShares(sharesObj);
-
-    setFormVisible(true);
-  };
+  
 
   const handleDeleteSplit = async (splitId: string) => {
     try {
@@ -744,93 +720,75 @@ export default function SplitScreen() {
           }
         > 
 
-          <View style={styles.summaryPillsContainer}>
-            {/* Who Owes You Pill */}
-            <View style={[styles.summaryPill, styles.summaryPillOwed]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="cash-outline" size={16} color={colors.olive} />
-                <Text style={styles.summaryPillLabel}>Who Owes You</Text>
-              </View>
-              <Text style={styles.summaryPillAmount}>₱{balanceSummary.youAreOwed.toFixed(2)}</Text>
-            </View>
-
-            {/* Your Share Pill */}
-            <View style={[styles.summaryPill, styles.summaryPillOwe]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="pie-chart-outline" size={16} color={colors.positive} />
-                <Text style={styles.summaryPillLabel}>Your Share</Text>
-              </View>
-              <Text style={styles.summaryPillAmount}>₱{balanceSummary.youOwe.toFixed(2)}</Text>
-            </View>
-          </View>
-
           {/* FRIENDS SECTION */}
-          <View style={styles.friendsSection}>
-            <View style={styles.sectionTitleRow}>
-              <Text style={styles.sectionTitle}>Friends List</Text>
-              <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFriendsScroll}>
-              <TouchableOpacity style={styles.avatarContainer} onPress={() => setAddFriendModalVisible(true)}>
-                <View style={styles.addCircle}>
-                  <Ionicons name="add" size={24} color={colors.textFaint} />
-                </View>
-                <Text style={styles.avatarName}>Add Friend</Text>
-              </TouchableOpacity>
+<View style={styles.friendsSection}>
+  <View style={styles.sectionTitleRow}>
+    <Text style={styles.sectionTitle}>Friends List</Text>
+    <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
+  </View>
+  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFriendsScroll}>
+    <TouchableOpacity style={styles.avatarContainer} onPress={() => setAddFriendModalVisible(true)}>
+      <View style={styles.addCircle}>
+        <Ionicons name="add" size={24} color={colors.textFaint} />
+      </View>
+      <Text style={styles.avatarName}>Add Friend</Text>
+    </TouchableOpacity>
 
-              {(friends || []).map((f) => {
-            return (
-              <TouchableOpacity 
-                key={f.id} 
-                style={styles.avatarContainer}
-                onPress={() => handleFriendPress(f)}
-              >
-                <Image
-                  source={
-                    f.avatar_url
-                      ? { uri: f.avatar_url }
-                      : require('../../assets/images/default.png')
-                  }
-                  style={styles.friendAvatar}
-                />
-                <Text style={styles.avatarName} numberOfLines={1}>
-                  {f.full_name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-            </ScrollView>
-          </View>
+    {/* Gi-add ang .slice().reverse() para mauna ang pinakabag-o */}
+    {([...(friends || [])].reverse()).map((f) => {
+      return (
+        <TouchableOpacity 
+          key={f.id} 
+          style={styles.avatarContainer}
+          onPress={() => handleFriendPress(f)}
+        >
+          <Image
+            source={
+              f.avatar_url
+                ? { uri: f.avatar_url }
+                : require('../../assets/images/default.png')
+            }
+            style={styles.friendAvatar}
+          />
+          <Text style={styles.avatarName} numberOfLines={1}>
+            {f.full_name}
+          </Text>
+        </TouchableOpacity>
+      );
+    })}
+  </ScrollView>
+</View>
 
-          {/* ACTIVE SPLITS HISTORY */}
-          <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionTitle}>Split History</Text>
-          </View>
+          
 
-          {(activeSplits?.length || 0) === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="receipt-outline" size={48} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No splits recorded yet.</Text>
-            </View>
-          ) : (
-            (activeSplits || []).map((item: any) => {
-              const sfList = item.split_friends || [];
-              const allPaid = sfList.length > 0 && sfList.every((sf: any) => sf.status === 'paid' && sf.owed_amount <= 0);
+{/* ACTIVE SPLITS HISTORY */}
+<View style={styles.sectionTitleRow}>
+  <Text style={styles.sectionTitle}>Split History</Text>
+</View>
 
-              return (
-                <View key={item.id} style={styles.historyCard}>
-                  <View style={styles.historyTop}>
-                    
-                    {/* Category Icon */}
+{(activeSplits?.length || 0) === 0 ? (
+  <View style={styles.emptyContainer}>
+    <Ionicons name="receipt-outline" size={48} color="#CBD5E1" />
+    <Text style={styles.emptyText}>No splits recorded yet.</Text>
+  </View>
+) : (
+  (activeSplits || []).map((item: any) => {
+    const sfList = item.split_friends || [];
+    const allPaid = sfList.length > 0 && sfList.every((sf: any) => sf.status === 'paid' && sf.owed_amount <= 0);
+    
+    const totalAmount = item.total_amount || 0;
+    const personalShare = item.personal_share || 0;
+
+    return (
+      <View key={item.id} style={styles.historyCard}>
+        
+        {/* TOP ROW: Description, Date & Total Amount */}
+        <View style={styles.historyTop}>
           <View style={styles.categoryIconContainer}>
-            <Ionicons 
-              name={"people-outline"} 
-              size={22} 
-              color={colors.primary} 
-            />
+            <Ionicons name={"people-outline"} size={22} color={colors.primary} />
           </View>
 
-          <View style={{ flex: 1, marginLeft: 12 }}>
+          <View style={{ flex: 1,  }}>
             <Text style={styles.historyDesc}>{item.description}</Text>
             <Text style={styles.historyMeta}>
               {item.created_at 
@@ -843,201 +801,282 @@ export default function SplitScreen() {
             </Text>
           </View>
 
+          {/* Moved Total Amount to the Top Row */}
+          <View style={{ alignItems: 'flex-end', justifyContent: 'center', marginRight: 10,}}>
+            <Text style={{ fontSize: 11, color: '#64748B',  }}>Total Amount</Text>
+            <Text style={styles.settleCardTotalValue}>₱{totalAmount.toFixed(2)}</Text>
+          </View>
+
           <View style={styles.rightActionsContainer}>
-            {allPaid && (
-
-              <TouchableOpacity style={styles.fullySettledBadge}
-                  onPress={() => {
-                    setSelectedSplitForSettle(item);
-                    setSettleModalVisible(true);
-                  }}>
-                <Ionicons name="checkmark-circle" size={16} color={colors.positive} />
-                <Text style={styles.fullySettledText}>Settled</Text>
-              </TouchableOpacity>
-
-            )}
-
             <View style={styles.iconButtonsRow}>
-              {!allPaid && (
-
-                <TouchableOpacity
-                  style={styles.settleActionBtn}
-                  onPress={() => {
-                    setSelectedSplitForSettle(item);
-                    setSettleModalVisible(true);
-                  }}
-                >
-                  <Text style={styles.settleActionBtnText}>Settle</Text>
-                </TouchableOpacity>
-
-              )}
-
               <TouchableOpacity
                 style={styles.actionIconButton}
                 onPress={() => {
-                  setSelectedSplitForAction(item);
                   Alert.alert(
-                    item.description || 'Split Options',
-                    "Choose an action:",
+                    "Delete Split",
+                    "Are you sure you want to delete this split expense?",
                     [
+                      { text: "Cancel", style: "cancel" },
                       { 
-                        text: "Cancel", 
-                        style: "cancel" 
+                        text: "Delete", 
+                        style: "destructive", 
+                        onPress: () => handleDeleteSplit(item.id) 
                       },
-                      {
-                        text: "Edit",
-                        onPress: () => handleOpenEditSplit(item),
-                      },
-                      {
-                        text: "Delete",
-                        style: "destructive",
-                        onPress: () => handleDeleteSplit(item.id),
-                      },
-                      
                     ]
                   );
                 }}
               >
-                <Ionicons name="ellipsis-vertical" size={18} color={'#555'} />
+                <Ionicons name="trash-outline" size={18} color={'#ff5252'} />
               </TouchableOpacity>
             </View>
           </View>
         </View>
+
+        <View style={{ height: 1, backgroundColor: '#f1f1f1', marginTop: 10, marginBottom: 7, }} />
+
+        {/* DIRECTLY DISPLAYED DETAILS */}
+        <View style={{ marginTop: 1, }}>
+          
+          {/* Owner Row (Me) */}
+          <View style={styles.settleMemberRowCard}>
+            <View style={styles.settleLeftCol}>
+              <Image
+                source={
+                  myProfile?.avatar_url
+                    ? { uri: myProfile.avatar_url }
+                    : require('../../assets/images/default.png')
+                }
+                style={styles.settleAvatarImage}
+              />
+              <View style={{ flexShrink: 1 }}>
+                <Text style={styles.settleMemberName}>Me</Text>
+                <Text style={styles.settleMemberSub}>My Share</Text>
+              </View>
+            </View>
+
+            <View style={styles.settleCenterCol}>
+              <Text style={styles.settleAmountText}>₱{personalShare.toFixed(2)}</Text>
+            </View>
+
+            <View style={styles.settleRightCol}>
+              <View style={styles.settleOwnerBadge}>
+                <Text style={styles.settleOwnerBadgeText}>Payer</Text>
+              </View>
+            </View>
+
+            <View style={styles.settleSuperRightCol}>
+              
+            </View>
+          </View>
+
+          {/* Friends Rows */}
+          {sfList.map((sf: any) => {
+            const isPaid = sf.status === 'paid' && sf.owed_amount <= 0;
+            const friendName = sf.friends?.full_name || 'Friend';
+            const avatarUrl = sf.friends?.avatar_url;
+
+            return (
+              <View key={sf.id} style={styles.settleMemberRowCard}>
+                <View style={styles.settleLeftCol}>
+                  <Image
+                    source={
+                      avatarUrl
+                        ? { uri: avatarUrl }
+                        : require('../../assets/images/default.png')
+                    }
+                    style={styles.settleAvatarImage}
+                  />
+                  <View style={{ flexShrink: 1 }}>
+                    <Text style={styles.settleMemberName} numberOfLines={1}>{friendName}</Text>
+                    <Text style={styles.settleMemberSub}>
+                      {isPaid ? 'Settled' : 'Owes you'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.settleCenterCol}>
+                  <Text style={styles.settleAmountText}>₱{(sf.owed_amount || 0).toFixed(2)}</Text>
+                </View>
+
+                <View style={styles.settleRightCol}>
+                  {isPaid ? (
+                    <View style={styles.settlePaidPill}>
+                      <Ionicons name="checkmark-circle" size={14} color={colors.positive} />
+                      <Text style={styles.settlePaidPillText}>Paid</Text>
+                    </View>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={styles.settlePayButton}
+                        onPress={() => handleInitiateSettleFriend(sf)}
+                      >
+                        <Text style={styles.settlePayButtonText}>Settle</Text>
+                      </TouchableOpacity>
+                      
+                    </>
+                  )}
+                </View>
+
+           <View style={styles.settleSuperRightCol}>
+                  {!isPaid && (
+                    <TouchableOpacity 
+                      onPress={() => handleSendReminderEmail(
+                        sf.friends?.email,        
+                        sf.friends?.full_name,    
+                        sf.owed_amount,          
+                        item?.total_amount,      
+                        item?.description,        
+                        myProfile?.full_name      
+                      )}
+                    >
+                      <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+              </View>
+            );
+          })}
+        </View>
+
       </View>
     );
   })
 )}
-        </ScrollView>
-      )}
+</ScrollView>
+)}
 
-      {/* CREATE / EDIT SPLIT MODAL */}
-      <Modal visible={formVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.formDrawerContainer}>
-            <View style={styles.pullBar} />
-            <View style={styles.modalHeader}>
-              <Text style={styles.drawerTitle}>
-                {editingSplit ? "Edit Split Expense" : "Create Split Expense"}
-              </Text>
-              <TouchableOpacity 
-                style={styles.closeCircle} 
-                onPress={() => {
-                  setFormVisible(false);
-                  setDescription('');
-                  setAmount('');
-                  setSelectedFriends([]);
-                  setCustomShares({});
-                  setEditingSplit(null);
-                }}
-              >
-                <Ionicons name="close" size={23} color={colors.headerDarker} />
-              </TouchableOpacity>
-            </View>
+{/* CREATE SPLIT MODAL */}
+<Modal visible={formVisible} animationType="fade" transparent>
+  <View style={styles.modalOverlay}>
+    <View style={styles.formDrawerContainer}>
+      <View style={styles.pullBar} />
+      <View style={styles.modalHeader}>
+        <Text style={styles.drawerTitle}>Create Split Expense</Text>
+        <TouchableOpacity 
+          style={styles.closeCircle} 
+          onPress={() => {
+            setFormVisible(false);
+            setDescription('');
+            setAmount('');
+            setSelectedFriends([]);
+            setCustomShares({});
+          }}
+        >
+          <Ionicons name="close" size={23} color={colors.headerDarker} />
+        </TouchableOpacity>
+      </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
-              <Text style={styles.label}>Description</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. Dinner with Friends"
-                placeholderTextColor={colors.textFaint}
-                value={description}
-                onChangeText={setDescription}
-              />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        
+        {/* 1. Total Amount First & Big */}
+        <Text style={styles.label}>Total Amount (₱)</Text>
+        <TextInput
+          style={styles.largeAmountInput}
+          placeholder="0.00"
+          placeholderTextColor={colors.textFaint}
+          keyboardType="numeric"
+          value={amount}
+          onChangeText={setAmount}
+        />
 
-              <Text style={styles.label}>Total Amount (₱)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0.00"
-                placeholderTextColor={colors.textFaint}
-                keyboardType="numeric"
-                value={amount}
-                onChangeText={setAmount}
-              />
+        {/* 2. Description Second */}
+        <Text style={styles.label}>Description</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Dinner with Friends"
+          placeholderTextColor={colors.textFaint}
+          value={description}
+          onChangeText={setDescription}
+        />
 
-              <Text style={styles.label}>Split Method</Text>
-              <View style={styles.tabContainer}>
-                <TouchableOpacity
-                  style={[styles.tabBtn, splitType === 'EQUAL' && styles.tabBtnActive]}
-                  onPress={() => setSplitType('EQUAL')}
-                >
-                  <Text style={[styles.tabBtnText, splitType === 'EQUAL' && styles.tabBtnTextActive]}>Equal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.tabBtn, splitType === 'CUSTOM' && styles.tabBtnActive]}
-                  onPress={() => setSplitType('CUSTOM')}
-                >
-                  <Text style={[styles.tabBtnText, splitType === 'CUSTOM' && styles.tabBtnTextActive]}>Custom</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.label}>Select Friends Included</Text>
-              {(friends?.length || 0) === 0 ? (
-                <Text style={styles.emptyInlineText}>No friends added yet. Please add a friend first.</Text>
-              ) : (
-                <View style={styles.inlineChecklist}>
-                  {(friends || []).map((f) => {
-                    const isSelected = selectedFriends.includes(f.id);
-                    return (
-                      <TouchableOpacity
-                        key={f.id}
-                        style={[styles.checkChip, isSelected && styles.checkChipSelected]}
-                        onPress={() => toggleSelectFriend(f.id)}
-                      >
-                        <Ionicons
-                           name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
-                          size={16}
-                          color={isSelected ? colors.primary : colors.textMuted}
-                        />
-                        <Text style={[styles.checkChipText, isSelected && styles.checkChipTextSelected]}>
-                          {f.full_name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-
-              {splitType === 'CUSTOM' && (selectedFriends?.length || 0) > 0 && (
-                <View style={styles.customSection}>
-                  <Text style={styles.customSectionTitle}>Enter Friend Shares (₱)</Text>
-                  {selectedFriends.map((fId) => {
-                    const friendObj = (friends || []).find((f) => f.id === fId);
-                    return (
-                      <View key={fId} style={styles.customRow}>
-                        <Text style={styles.customMemberName}>{friendObj?.full_name || 'Friend'}</Text>
-                        <TextInput
-                          style={styles.customInput}
-                          placeholder="0.00"
-                          placeholderTextColor={colors.textFaint}
-                          keyboardType="numeric"
-                          value={customShares[fId] || ''}
-                          onChangeText={(val) => handleCustomShareChange(fId, val)}
-                        />
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-
-              {amount !== '' && (selectedFriends?.length || 0) > 0 && (
-                <View style={styles.previewBanner}>
-                  <Ionicons name="information-circle-outline" size={20} color={colors.positive} />
-                  <Text style={styles.previewText}>
-                    Your Personal Share: <Text style={{ fontWeight: '800' }}>₱{calculateOwnerShare()}</Text>
-                  </Text>
-                </View>
-              )}
-
-              <TouchableOpacity style={styles.submitBtn} onPress={handleCreateSplitDirectly}>
-                <Text style={styles.submitBtnText}>
-                  {editingSplit ? "Update Split" : "Confirm & Save Split"}
-                </Text>
-                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
+        <Text style={styles.label}>Split Method</Text>
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tabBtn, splitType === 'EQUAL' && styles.tabBtnActive]}
+            onPress={() => setSplitType('EQUAL')}
+          >
+            <Text style={[styles.tabBtnText, splitType === 'EQUAL' && styles.tabBtnTextActive]}>Equal</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, splitType === 'CUSTOM' && styles.tabBtnActive]}
+            onPress={() => setSplitType('CUSTOM')}
+          >
+            <Text style={[styles.tabBtnText, splitType === 'CUSTOM' && styles.tabBtnTextActive]}>Custom</Text>
+          </TouchableOpacity>
         </View>
-      </Modal>
+
+        {/* 3. Horizontal Scrollable Friends Checklist */}
+        <Text style={styles.label}>Select Friends Included</Text>
+        {(friends?.length || 0) === 0 ? (
+          <Text style={styles.emptyInlineText}>No friends added yet. Please add a friend first.</Text>
+        ) : (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            contentContainerStyle={styles.horizontalChecklist}
+          >
+            {(friends || []).map((f) => {
+              const isSelected = selectedFriends.includes(f.id);
+              return (
+                <TouchableOpacity
+                  key={f.id}
+                  style={[styles.checkChip, isSelected && styles.checkChipSelected]}
+                  onPress={() => toggleSelectFriend(f.id)}
+                >
+                  <Ionicons
+                    name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={16}
+                    color={isSelected ? colors.primary : colors.textMuted}
+                  />
+                  <Text style={[styles.checkChipText, isSelected && styles.checkChipTextSelected]}>
+                    {f.full_name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {splitType === 'CUSTOM' && (selectedFriends?.length || 0) > 0 && (
+          <View style={styles.customSection}>
+            <Text style={styles.customSectionTitle}>Enter Friend Shares (₱)</Text>
+            {selectedFriends.map((fId) => {
+              const friendObj = (friends || []).find((f) => f.id === fId);
+              return (
+                <View key={fId} style={styles.customRow}>
+                  <Text style={styles.customMemberName}>{friendObj?.full_name || 'Friend'}</Text>
+                  <TextInput
+                    style={styles.customInput}
+                    placeholder="0.00"
+                    placeholderTextColor={colors.textFaint}
+                    keyboardType="numeric"
+                    value={customShares[fId] || ''}
+                    onChangeText={(val) => handleCustomShareChange(fId, val)}
+                  />
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {amount !== '' && (selectedFriends?.length || 0) > 0 && (
+          <View style={styles.previewBanner}>
+            <Ionicons name="information-circle-outline" size={20} color={colors.positive} />
+            <Text style={styles.previewText}>
+              Your Personal Share: <Text style={{ fontWeight: '800' }}>₱{calculateOwnerShare()}</Text>
+            </Text>
+          </View>
+        )}
+
+        <TouchableOpacity style={styles.submitBtn} onPress={handleCreateSplitDirectly}>
+          <Text style={styles.submitBtnText}>Confirm & Save Split</Text>
+          <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  </View>
+</Modal>
 
       {/* ADD / EDIT FRIEND MODAL */}
       <Modal visible={addFriendModalVisible} animationType="fade" transparent>
@@ -1105,149 +1144,7 @@ export default function SplitScreen() {
         </View>
       </Modal>
 
-      {/* MANAGE SHARES & SETTLEMENT MODAL */}
-      <Modal visible={settleModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { width: '92%', maxHeight: '85%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Settlement Details</Text>
-              <TouchableOpacity style={styles.closeCircle} onPress={() => setSettleModalVisible(false)}>
-                <Ionicons name="close" size={18} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSub}>Track paid shares and manage settlement:</Text>
-
-            <FlatList
-              data={selectedSplitForSettle ? [selectedSplitForSettle] : []}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item }) => {
-                const totalAmount = item.total_amount || 0;
-                const personalShare = item.personal_share || 0;
-                const friendsList = item.split_friends || [];
-
-                return (
-                  <View style={{ gap: 12, paddingBottom: 16 }}>
-                    <View style={styles.settleMainCard}>
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={styles.settleCardDesc}>{item.description}</Text>
-                        <Text style={styles.settleCardDate}>
-                          {item.created_at 
-                            ? new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) 
-                            : ''}
-                        </Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.settleCardTotalLabel}>Total Amount</Text>
-                        <Text style={styles.settleCardTotalValue}>₱{totalAmount.toFixed(2)}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={[styles.modalSub, { marginTop: 8, marginBottom: 4 }]}>Involved Members & Shares:</Text>
-
-                    <View style={styles.settleMemberRowCard}>
-                      <View style={styles.settleLeftCol}>
-                        <Image
-                          source={
-                            myProfile?.avatar_url
-                              ? { uri: myProfile.avatar_url }
-                              : require('../../assets/images/default.png')
-                          }
-                          style={styles.settleAvatarImage}
-                        />
-                        <View style={{ flexShrink: 1 }}>
-                          <Text style={styles.settleMemberName}>Me</Text>
-                          <Text style={styles.settleMemberSub}>My Share</Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.settleCenterCol}>
-                        <Text style={styles.settleAmountText}>₱{personalShare.toFixed(2)}</Text>
-                      </View>
-
-                      <View style={styles.settleRightCol}>
-                        <View style={styles.settleOwnerBadge}>
-                          <Text style={styles.settleOwnerBadgeText}>Owner</Text>
-                        </View>
-                      </View>
-                    </View>
-
-                    {friendsList.map((sf: any) => {
-                      const isPaid = sf.status === 'paid' && sf.owed_amount <= 0;
-                      const friendName = sf.friends?.full_name || 'Friend';
-                      const avatarUrl = sf.friends?.avatar_url;
-
-                      return (
-                        <View key={sf.id} style={styles.settleMemberRowCard}>
-                          <View style={styles.settleLeftCol}>
-                            <Image
-                              source={
-                                avatarUrl
-                                  ? { uri: avatarUrl }
-                                  : require('../../assets/images/default.png')
-                              }
-                              style={styles.settleAvatarImage}
-                            />
-                            <View style={{ flexShrink: 1 }}>
-                              <Text style={styles.settleMemberName} numberOfLines={1}>{friendName}</Text>
-                              <Text style={styles.settleMemberSub}>
-                                {isPaid ? 'Settled' : 'Owes you'}
-                              </Text>
-                            </View>
-                          </View>
-
-                          <View style={styles.settleCenterCol}>
-                            <Text style={styles.settleAmountText}>₱{(sf.owed_amount || 0).toFixed(2)}</Text>
-                          </View>
-
-                          <View style={[
-                            styles.settleRightCol, 
-                            { 
-                              flexDirection: 'row', 
-                              alignItems: 'center', 
-                              gap: 6, 
-                              justifyContent: isPaid ? 'flex-end' : 'flex-start' 
-                            }
-                          ]}>
-                            {isPaid ? (
-                              <View style={styles.settlePaidPill}>
-                                <Ionicons name="checkmark-circle" size={14} color={colors.positive} />
-                                <Text style={styles.settlePaidPillText}>Paid</Text>
-                              </View>
-                            ) : (
-                              <>
-                                <TouchableOpacity
-                                  style={styles.settlePayButton}
-                                  onPress={() => handleInitiateSettleFriend(sf)}
-                                >
-                                  <Text style={styles.settlePayButtonText}>Pay</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity 
-                                  onPress={() => handleSendReminderEmail(
-                                    sf.friends?.email,        
-                                    sf.friends?.full_name,    
-                                    sf.owed_amount,           
-                                    item?.total_amount,       
-                                    item?.description,        
-                                    myProfile?.full_name      
-                                  )}
-                                >
-                                  <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
-                                </TouchableOpacity>
-                              </>
-                            )}
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                );
-              }}
-            />
-          </View>
-        </View>
-      </Modal>
+      
 
       {/* PAYMENT ENTRY INPUT MODAL FOR MARK PAID */}
       <Modal visible={settleAmountModalVisible} animationType="fade" transparent>
@@ -1303,22 +1200,6 @@ export default function SplitScreen() {
               <Text style={styles.paymentSubmitBtnText}>Confirm Settlement</Text>
             </TouchableOpacity>
 
-          </View>
-        </View>
-      </Modal>
-
-      {/* CUSTOM ALERT MODAL */}
-      <Modal visible={alertConfig.visible} animationType="fade" transparent>
-        <View style={styles.modalOverlayCenter}>
-          <View style={styles.alertModalContainer}>
-            <Text style={styles.modalTitle}>{alertConfig.title}</Text>
-            <Text style={[styles.modalSub, { marginTop: 8 }]}>{alertConfig.message}</Text>
-            <TouchableOpacity
-              style={[styles.submitBtn, { marginTop: 12 }]}
-              onPress={() => setAlertConfig({ visible: false, title: '', message: '' })}
-            >
-              <Text style={styles.submitBtnText}>OK</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>

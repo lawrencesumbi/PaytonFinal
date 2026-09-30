@@ -357,12 +357,12 @@ export const styles = StyleSheet.create({
   backgroundColor: colors.surface,
   padding: 16,
   borderRadius: 16,
-  borderWidth: 0,
   shadowColor: '#000',
   shadowOffset: { width: 0, height: 6 },
   shadowOpacity: 0.06,
   shadowRadius: 12,
   marginBottom: 14,
+  
 },
   historyTop: {
     flexDirection: 'row',
@@ -379,7 +379,6 @@ export const styles = StyleSheet.create({
   historyMeta: {
     fontSize: 12,
     color: colors.textMuted,
-    marginTop: 5,
     lineHeight: 16,
   },
   settleOpenBtn: {
@@ -598,9 +597,7 @@ iconButtonsRow: {
   gap: 6,
 },
 actionIconButton: {
-  padding: 8,
   borderRadius: 8,
-  backgroundColor: '#f2f2f2', // Adjust to match your theme card background
   justifyContent: 'center',
   alignItems: 'center',
 },
@@ -631,11 +628,10 @@ settleMainCard: {
   flexDirection: 'row',
   justifyContent: 'space-between',
   alignItems: 'center',
-  backgroundColor: '#F8FAFC',
+  backgroundColor: '#ffffff',
   padding: 14,
   borderRadius: 12,
-  borderWidth: 1,
-  borderColor: '#E2E8F0',
+  
 },
 settleCardDesc: {
   fontSize: 15,
@@ -654,26 +650,22 @@ settleCardTotalLabel: {
 },
 settleCardTotalValue: {
   fontSize: 16,
-  fontWeight: '800',
+  fontWeight: '700',
   color: '#0F172A',
-  marginTop: 2,
 },
 settleMemberRowCard: {
   flexDirection: 'row',
   alignItems: 'center',
   justifyContent: 'space-between',
   backgroundColor: '#FFFFFF',
-  paddingVertical: 10,
-  paddingHorizontal: 12,
+  paddingVertical: 7.5,
   borderRadius: 10,
-  borderWidth: 1,
-  borderColor: '#F1F5F9',
-  marginBottom: 6,
+  
 },
 settleLeftCol: {
   flexDirection: 'row',
   alignItems: 'center',
-  flex: 1.2,
+  flex: 1.3,
   gap: 10,
 },
 settleCenterCol: {
@@ -681,8 +673,12 @@ settleCenterCol: {
   alignItems: 'center',
 },
 settleRightCol: {
-  flex: 0.9,
-  alignItems: 'flex-end',
+  flex: 1.1,
+  alignItems: 'center',
+},
+settleSuperRightCol: {
+  flex: 0.25,
+  alignItems: 'center',
 },
 settleAvatarChip: {
   width: 34,
@@ -712,9 +708,9 @@ settleAmountText: {
   color: '#0F172A',
 },
 settlePayButton: {
-  backgroundColor: colors.primary || '#007AFF',
-  paddingHorizontal: 14,
-  paddingVertical: 6,
+  backgroundColor: colors.primary,
+  paddingHorizontal: 12,
+  paddingVertical: 4,
   borderRadius: 6,
 },
 settlePayButtonText: {
@@ -842,4 +838,21 @@ paymentSubmitBtnText: {
   fontSize: 15,
   fontWeight: '600',
 },
+largeAmountInput: {
+  fontSize: 32,
+  fontWeight: '700',
+  color: colors.textDark, // Adjust to your theme's primary text color
+  borderBottomWidth: 2,
+  borderBottomColor: colors.primary,
+  paddingVertical: 8,
+  marginBottom: 16,
+},
+horizontalChecklist: {
+  flexDirection: 'row',
+  gap: 8,
+  paddingVertical: 4,
+  paddingRight: 16,
+  marginBottom: 16,
+},
+
 });

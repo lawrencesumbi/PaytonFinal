@@ -574,7 +574,7 @@ function TransactionsScreenContent() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   centeredContent: { justifyContent: 'center', alignItems: 'center' },
-  topBackgroundHeader: { backgroundColor: '#1F4F59', borderBottomLeftRadius: 28, borderBottomRightRadius: 28, paddingBottom: 20 },
+  topBackgroundHeader: { backgroundColor: '#1F4F59', borderBottomLeftRadius: 32, borderBottomRightRadius: 32, paddingBottom: 15 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20 },
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255, 255, 255, 0.15)', justifyContent: 'center', alignItems: 'center' },
   headerContent: { flex: 1, alignItems: 'center', paddingHorizontal: 12 },
