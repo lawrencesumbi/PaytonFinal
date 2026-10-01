@@ -8,7 +8,6 @@ import {
   Alert,
   Image,
   Modal,
-  RefreshControl, // 1. Import RefreshControl
   ScrollView,
   StyleSheet,
   Text,
@@ -63,7 +62,6 @@ export default function MonitoringScreen() {
   const { spenderId } = useLocalSearchParams<{ spenderId: string }>();
 
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // 2. Add refreshing state
   const [spenderName, setSpenderName] = useState('Spender Log');
   const [allowances, setAllowances] = useState<AllowanceItem[]>([]);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
@@ -71,10 +69,10 @@ export default function MonitoringScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
-  const fetchMonitoringData = async (isRefreshing = false) => {
+  const fetchMonitoringData = async () => {
     if (!spenderId) return;
     try {
-      if (!isRefreshing) setLoading(true);
+      setLoading(true);
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -121,15 +119,8 @@ export default function MonitoringScreen() {
       console.error('Error loading monitoring data:', e.message);
     } finally {
       setLoading(false);
-      setRefreshing(false); // Stop refresh loader
     }
   };
-
-  // 3. Create pull-to-refresh handler
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchMonitoringData(true);
-  }, [spenderId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -249,21 +240,7 @@ export default function MonitoringScreen() {
       {loading ? (
         <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
       ) : (
-        /* 4. Wrapped main content in a parent ScrollView with RefreshControl */
-        <ScrollView
-          style={styles.contentContainer}
-          contentContainerStyle={{ paddingBottom: 40 }}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={COLORS.deepTeal}
-              colors={[COLORS.deepTeal]}
-            />
-          }
-        >
+        <View style={styles.contentContainer}>
           
           {/* TOP SECTION (Allowances & Search) */}
           <View>
@@ -341,56 +318,62 @@ export default function MonitoringScreen() {
             )}
           </View>
 
-          {/* EXPENSES LIST */}
-          {expenses.length === 0 ? (
-            <View style={styles.emptyExpensesBox}>
-              <Ionicons name="receipt-outline" size={32} color={COLORS.textMuted} />
-              <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
-            </View>
-          ) : filteredExpenses.length === 0 ? (
-            <View style={styles.emptyExpensesBox}>
-              <Ionicons name="search-outline" size={32} color={COLORS.textMuted} />
-              <Text style={styles.emptyExpensesText}>No expenses match your search.</Text>
-            </View>
-          ) : (
-            <View style={styles.expensesListContainer}>
-              {filteredExpenses.map((exp) => (
-                <View key={exp.id} style={styles.expenseCard}>
-                  <View style={styles.expenseCategoryIconCircle}>
-                    <Ionicons 
-                      name={(exp.categories?.icon as any) || 'pricetag-outline'} 
-                      size={18} 
-                      color={COLORS.deepTeal} 
-                    />
-                  </View>
-                  
-                  <View style={{ flex: 1, marginLeft: 12, marginRight: 8 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
-                      
-                      {exp.photo_url ? (
-                        <TouchableOpacity 
-                          style={styles.photoIndicatorBadge}
-                          onPress={() => setSelectedImageUri(exp.photo_url!)}
-                          activeOpacity={0.7}
-                        >
-                          <Ionicons name="image" size={11} color={COLORS.deepTeal} />
-                        </TouchableOpacity>
-                      ) : null}
+          {/* SCROLLABLE EXPENSES LIST */}
+          <ScrollView 
+            contentContainerStyle={styles.expensesScrollContent} 
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {expenses.length === 0 ? (
+              <View style={styles.emptyExpensesBox}>
+                <Ionicons name="receipt-outline" size={32} color={COLORS.textMuted} />
+                <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
+              </View>
+            ) : filteredExpenses.length === 0 ? (
+              <View style={styles.emptyExpensesBox}>
+                <Ionicons name="search-outline" size={32} color={COLORS.textMuted} />
+                <Text style={styles.emptyExpensesText}>No expenses match your search.</Text>
+              </View>
+            ) : (
+              <View style={styles.expensesListContainer}>
+                {filteredExpenses.map((exp) => (
+                  <View key={exp.id} style={styles.expenseCard}>
+                    <View style={styles.expenseCategoryIconCircle}>
+                      <Ionicons 
+                        name={(exp.categories?.icon as any) || 'pricetag-outline'} 
+                        size={18} 
+                        color={COLORS.deepTeal} 
+                      />
                     </View>
                     
-                    <Text style={styles.expenseTime}>
-                      {exp.categories?.name ? `${exp.categories.name} • ` : ''}{formatDateTime(exp.spent_at)}
+                    <View style={{ flex: 1, marginLeft: 12, marginRight: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
+                        
+                        {exp.photo_url ? (
+                          <TouchableOpacity 
+                            style={styles.photoIndicatorBadge}
+                            onPress={() => setSelectedImageUri(exp.photo_url!)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="image" size={11} color={COLORS.deepTeal} />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                      
+                      <Text style={styles.expenseTime}>
+                        {exp.categories?.name ? `${exp.categories.name} • ` : ''}{formatDateTime(exp.spent_at)}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.expenseAmount}>
+                      -₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
-
-                  <Text style={styles.expenseAmount}>
-                    -₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          )}
+                ))}
+              </View>
+            )}
+          </ScrollView>
 
           {/* FULL-SCREEN IMAGE VIEWER MODAL */}
           <Modal
@@ -416,7 +399,7 @@ export default function MonitoringScreen() {
             </View>
           </Modal>
 
-        </ScrollView>
+        </View>
       )}
     </View>
   );
@@ -602,6 +585,9 @@ const styles = StyleSheet.create({
   },
 
   // Upgraded Expense Cards
+  expensesScrollContent: {
+    paddingBottom: 40,
+  },
   expensesListContainer: {
     gap: 10,
   },
@@ -651,6 +637,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 6,
     gap: 3,
+  },
+  photoIndicatorText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.deepTeal,
   },
 
   // Empty state & modals
