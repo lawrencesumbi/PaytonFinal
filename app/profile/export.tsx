@@ -16,6 +16,11 @@ export default function ExportScreen() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
+  // Sponsor-specific states
+  const [linkedSpenders, setLinkedSpenders] = useState<any[]>([]);
+  const [selectedSpenderId, setSelectedSpenderId] = useState<string | null>(null);
+  const [loadingAllowances, setLoadingAllowances] = useState(false);
+
   const [allowanceOptions, setAllowanceOptions] = useState<any[]>([]);
   const [selectedAllowanceId, setSelectedAllowanceId] = useState<string | null>(null);
 
@@ -26,6 +31,7 @@ export default function ExportScreen() {
     fetchUserRoleAndOptions();
   }, []);
 
+  // Fetch initial profile & role data
   const fetchUserRoleAndOptions = async () => {
     try {
       setLoadingMeta(true);
@@ -45,15 +51,37 @@ export default function ExportScreen() {
       const role = profileData?.role || 'Personal';
       setUserRole(role);
 
-      if (role === 'Spender' || role === 'Sponsor') {
-        const queryField = role === 'Spender' ? 'spender_id' : 'sponsor_id';
+      if (role === 'Sponsor') {
+        // Fetch spenders linked to this sponsor (adjust table/relation names to match your DB schema if needed)
+        // Usually, allowances table connects sponsor_id to spender_id
+        const { data: allowancesData, error: allowancesError } = await supabase
+          .from('allowances')
+          .select('spender_id, profiles:spender_id(id, full_name, email)')
+          .eq('sponsor_id', user.id);
+
+        if (allowancesError) throw allowancesError;
+
+        // Extract unique spenders
+        const uniqueSpendersMap = new Map();
+        allowancesData?.forEach((item: any) => {
+          if (item.profiles) {
+            uniqueSpendersMap.set(item.profiles.id, item.profiles);
+          }
+        });
+
+        const spenders = Array.from(uniqueSpendersMap.values());
+        setLinkedSpenders(spenders);
+        if (spenders.length > 0) {
+          setSelectedSpenderId(spenders[0].id);
+          fetchAllowancesForSpender(spenders[0].id, user.id);
+        }
+      } else if (role === 'Spender') {
         const { data: allowancesData, error: allowancesError } = await supabase
           .from('allowances')
           .select('id, allowance_name, amount, start_date, end_date')
-          .eq(queryField, user.id);
+          .eq('spender_id', user.id);
 
         if (!allowancesError && allowancesData) {
-          // Sort allowances from latest to oldest based on start_date
           const sortedAllowances = allowancesData.sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
           setAllowanceOptions(sortedAllowances);
           if (sortedAllowances.length > 0) setSelectedAllowanceId(sortedAllowances[0].id);
@@ -65,7 +93,6 @@ export default function ExportScreen() {
           .eq('user_id', user.id);
 
         if (!incomeError && incomeData) {
-          // Sort income from latest to oldest based on start_date
           const sortedIncome = incomeData.sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
           setIncomePeriods(sortedIncome);
           if (sortedIncome.length > 0) setSelectedIncomeId(sortedIncome[0].id);
@@ -79,6 +106,32 @@ export default function ExportScreen() {
     }
   };
 
+  // Fetch allowances when a sponsor changes the selected spender
+  const fetchAllowancesForSpender = async (spenderId: string, sponsorId: string) => {
+    try {
+      setLoadingAllowances(true);
+      setSelectedAllowanceId(null);
+      
+      const { data: allowancesData, error } = await supabase
+        .from('allowances')
+        .select('id, allowance_name, amount, start_date, end_date')
+        .eq('sponsor_id', sponsorId)
+        .eq('spender_id', spenderId);
+
+      if (error) throw error;
+
+      if (allowancesData) {
+        const sortedAllowances = allowancesData.sort((a, b) => new Date(b.start_date).getTime() - new Date(a.start_date).getTime());
+        setAllowanceOptions(sortedAllowances);
+        if (sortedAllowances.length > 0) setSelectedAllowanceId(sortedAllowances[0].id);
+      }
+    } catch (error: any) {
+      console.error("Error fetching spender allowances:", error.message);
+    } finally {
+      setLoadingAllowances(false);
+    }
+  };
+
   const handleExport = async () => {
     if (!userId) return;
     setIsExporting(true);
@@ -87,12 +140,67 @@ export default function ExportScreen() {
       let csvContent = "";
       let fileName = "statement_ledger.csv";
 
-      if (userRole === 'Spender' || userRole === 'Sponsor') {
+      // Helper function to format the timestamp into "Month Day, Year, HH:MM:SS"
+      // Helper function to format the timestamp cleanly without special space characters
+      const formatSpentAt = (dateString: string) => {
+        if (!dateString) return "";
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        
+        const months = [
+          "January", "February", "March", "April", "May", "June", 
+          "July", "August", "September", "October", "November", "December"
+        ];
+        
+        const month = months[date.getMonth()];
+        const day = date.getDate();
+        const year = date.getFullYear();
+        
+        let hours = date.getHours();
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        
+        hours = hours % 12 || 12; // the hour '0' should be '12'
+        const formattedHours = String(hours).padStart(2, '0');
+
+        return `${month} ${day}, ${year} at ${formattedHours}:${minutes}:${seconds} ${ampm}`;
+      };
+
+      // Helper to sanitize file names (removes spaces and special characters)
+      const sanitizeFileName = (name: string) => {
+        return name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      };
+
+      if (userRole === 'Sponsor') {
+        if (!selectedSpenderId) {
+          Alert.alert("Selection Required", "Please select a spender first.");
+          setIsExporting(false);
+          return;
+        }
         if (!selectedAllowanceId) {
           Alert.alert("Selection Required", "Please select an allowance period to export.");
           setIsExporting(false);
           return;
         }
+
+        // Fetch spender details for the filename
+        const { data: spenderProfile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', selectedSpenderId)
+          .single();
+
+        // Fetch allowance name
+        const { data: allowanceData } = await supabase
+          .from('allowances')
+          .select('allowance_name')
+          .eq('id', selectedAllowanceId)
+          .single();
+
+        const spenderName = sanitizeFileName(spenderProfile?.full_name || spenderProfile?.email || 'spender');
+        const allowanceName = sanitizeFileName(allowanceData?.allowance_name || 'allowance');
+        fileName = `${spenderName}_${allowanceName}.csv`;
 
         const { data: expenses, error } = await supabase
           .from('expenses')
@@ -101,10 +209,48 @@ export default function ExportScreen() {
 
         if (error) throw error;
 
-        fileName = `allowance_statement_${selectedAllowanceId}.csv`;
-        csvContent = "Expense ID,Amount,Description,Spent At\n";
-        expenses?.forEach((item) => {
-          csvContent += `"${item.id}","${item.amount}","${item.description || ''}","${item.spent_at}"\n`;
+        csvContent = "No.,Amount,Description,Spent At\n";
+        expenses?.forEach((item, index) => {
+          const formattedDate = formatSpentAt(item.spent_at);
+          csvContent += `"${index + 1}","${item.amount}","${item.description || ''}","${formattedDate}"\n`;
+        });
+
+      } else if (userRole === 'Spender') {
+        if (!selectedAllowanceId) {
+          Alert.alert("Selection Required", "Please select an allowance period to export.");
+          setIsExporting(false);
+          return;
+        }
+
+        // Fetch current user's profile name
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', userId)
+          .single();
+
+        // Fetch allowance name
+        const { data: allowanceData } = await supabase
+          .from('allowances')
+          .select('allowance_name')
+          .eq('id', selectedAllowanceId)
+          .single();
+
+        const userName = sanitizeFileName(userProfile?.full_name || userProfile?.email || 'user');
+        const allowanceName = sanitizeFileName(allowanceData?.allowance_name || 'allowance');
+        fileName = `${userName}_${allowanceName}.csv`;
+
+        const { data: expenses, error } = await supabase
+          .from('expenses')
+          .select('id, amount, description, spent_at')
+          .eq('allowance_id', selectedAllowanceId);
+
+        if (error) throw error;
+
+        csvContent = "No.,Amount,Description,Spent At\n";
+        expenses?.forEach((item, index) => {
+          const formattedDate = formatSpentAt(item.spent_at);
+          csvContent += `"${index + 1}","${item.amount}","${item.description || ''}","${formattedDate}"\n`;
         });
 
       } else {
@@ -114,6 +260,24 @@ export default function ExportScreen() {
           return;
         }
 
+        // Fetch current user's profile name
+        const { data: userProfile } = await supabase
+          .from('profiles')
+          .select('full_name, email')
+          .eq('id', userId)
+          .single();
+
+        // Fetch income source name
+        const { data: incomeDataObj } = await supabase
+          .from('income')
+          .select('source_name')
+          .eq('id', selectedIncomeId)
+          .single();
+
+        const userName = sanitizeFileName(userProfile?.full_name || userProfile?.email || 'user');
+        const incomeName = sanitizeFileName(incomeDataObj?.source_name || 'income');
+        fileName = `${userName}_${incomeName}.csv`;
+
         const { data: expenses, error } = await supabase
           .from('expenses')
           .select('id, amount, description, spent_at')
@@ -121,10 +285,10 @@ export default function ExportScreen() {
 
         if (error) throw error;
 
-        fileName = `personal_statement_${selectedIncomeId}.csv`;
-        csvContent = "Expense ID,Amount,Description,Spent At\n";
-        expenses?.forEach((item) => {
-          csvContent += `"${item.id}","${item.amount}","${item.description || ''}","${item.spent_at}"\n`;
+        csvContent = "No.,Amount,Description,Spent At\n";
+        expenses?.forEach((item, index) => {
+          const formattedDate = formatSpentAt(item.spent_at);
+          csvContent += `"${index + 1}","${item.amount}","${item.description || ''}","${formattedDate}"\n`;
         });
       }
 
@@ -180,11 +344,52 @@ export default function ExportScreen() {
             <Text style={styles.roleBadgeText}>Role: {userRole}</Text>
           </View>
 
+          {/* SPONSOR FLOW: Select Spender First */}
+          {userRole === 'Sponsor' && (
+            <View style={styles.sectionContainer}>
+              <Text style={styles.label}>1. Select Spender</Text>
+              {linkedSpenders.length === 0 ? (
+                <Text style={styles.noDataText}>No linked spenders found.</Text>
+              ) : (
+                linkedSpenders.map((spender) => {
+                  const isSelected = selectedSpenderId === spender.id;
+                  return (
+                    <TouchableOpacity
+                      key={spender.id}
+                      style={[styles.optionCard, isSelected && styles.selectedChip]}
+                      onPress={() => {
+                        setSelectedSpenderId(spender.id);
+                        if (userId) fetchAllowancesForSpender(spender.id, userId);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.optionContent}>
+                        <Text style={[styles.optionTitle, isSelected && styles.selectedOptionText]}>
+                          {spender.full_name || spender.email}
+                        </Text>
+                      </View>
+                      <Ionicons 
+                        name={isSelected ? "radio-button-on" : "radio-button-off"} 
+                        size={20} 
+                        color={isSelected ? "#173D45" : "#CBD5E1"} 
+                      />
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </View>
+          )}
+
+          {/* ALLOWANCE SELECTION (For Spender or Sponsor) */}
           {(userRole === 'Spender' || userRole === 'Sponsor') ? (
             <View style={styles.sectionContainer}>
-              <Text style={styles.label}>Select Allowance Period</Text>
-              {allowanceOptions.length === 0 ? (
-                <Text style={styles.noDataText}>No allowance periods found.</Text>
+              <Text style={styles.label}>
+                {userRole === 'Sponsor' ? '2. Select Allowance Period' : 'Select Allowance Period'}
+              </Text>
+              {loadingAllowances ? (
+                <ActivityIndicator color="#173D45" style={{ marginVertical: 12 }} />
+              ) : allowanceOptions.length === 0 ? (
+                <Text style={styles.noDataText}>No allowance periods found for this selection.</Text>
               ) : (
                 allowanceOptions.map((item) => {
                   const isSelected = selectedAllowanceId === item.id;
@@ -216,6 +421,7 @@ export default function ExportScreen() {
               )}
             </View>
           ) : (
+            // PERSONAL FLOW: Select Income Period
             <View style={styles.sectionContainer}>
               <Text style={styles.label}>Select Income Period</Text>
               {incomePeriods.length === 0 ? (
