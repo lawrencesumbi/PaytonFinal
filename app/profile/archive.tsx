@@ -434,7 +434,7 @@ export default function ArchiveScreen() {
 
               {/* Action Buttons Row */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {!item.source_name && (
+                {!item.source_name && userRole !== 'Spender' && (
                   <TouchableOpacity 
                     style={styles.unarchiveBtn} 
                     onPress={() => handleUnarchiveItem(item)}
