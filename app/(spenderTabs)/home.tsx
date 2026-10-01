@@ -41,11 +41,19 @@ const COLORS = {
 };
 
 const CATEGORY_COLORS = [
+  // Original Colors
   '#54C9CC', // Cyan
   '#1F4F59', // Dark Teal
   '#7EA00E', // Olive Green
   '#DCD964', // Light Yellow-Green
   '#213502', // Deep Forest Green
+
+  // New Neighboring Colors
+  '#3AA8AC', // Muted Cyan (closer to Dark Teal / Cyan mix)
+  '#357380', // Medium Teal (between Cyan and Dark Teal)
+  '#9BC915', // Vibrant Olive Green (bright relative to your Olive)
+  '#F4F19C', // Soft Pastel Yellow-Green (lighter shade of Light Yellow-Green)
+  '#3D6105', // Mid Forest Green (softer transition into Deep Forest Green)
 ];
 
 const PALETTE_LIGHT_CARDS = [

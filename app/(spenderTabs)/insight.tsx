@@ -91,7 +91,7 @@ export default function InsightScreen() {
             }
 
             const model = genAI.getGenerativeModel({ 
-                model: "gemini-2.5-flash",
+                model: "gemini-3.5-flash-lite",
                 generationConfig: { responseMimeType: "application/json" }
             });
 
@@ -176,7 +176,7 @@ export default function InsightScreen() {
                 .select(`*, friends ( name )`);
 
             const model = genAI.getGenerativeModel({ 
-                model: "gemini-2.5-flash",
+                model: "gemini-3.5-flash-lite",
                 generationConfig: { responseMimeType: "application/json" }
             });
 
@@ -210,7 +210,7 @@ export default function InsightScreen() {
                         id: (Date.now() + 1).toString(),
                         sender: 'coach',
                         type: 'text',
-                        content: `⚠️ Pasensya na, dili nako ma-log kana nga gasto (₱${expenseAmount}). Ang imong nahibiling balanse kay ₱${remainingBalance} na lang! Kulang ang imong budget.`,
+                        content: `⚠️ Sorry, I couldn't log that expense (₱${expenseAmount}). Your remaining balance is only ₱${remainingBalance}! Your budget is insufficient.`,
                     };
                     setMessages((prev) => [...prev, rejectionMsg]);
                     return;
@@ -255,7 +255,7 @@ export default function InsightScreen() {
                     id: (Date.now() + 1).toString(),
                     sender: 'coach',
                     type: 'text',
-                    content: `✅ Na-log na nako ang imong gasto nga ₱${expenseAmount} (${parsedIntent.expenseDescription || 'Expense'}). Gidawat kini kay sakto pa ang imong balanse!`,
+                    content: `✅ I've logged your expense of ₱${expenseAmount} (${parsedIntent.expenseDescription || 'Expense'}). It's been approved as it fits within your allowance!`,
                 };
                 setMessages((prev) => [...prev, successMsg]);
 
@@ -264,7 +264,7 @@ export default function InsightScreen() {
                     id: (Date.now() + 1).toString(),
                     sender: 'coach',
                     type: 'text',
-                    content: parsedIntent.replyText || "Naa koy nadawat nga tubag apan wala kini kahulugan. Palihog sulayi og usab!",
+                    content: parsedIntent.replyText || "I received a response, but it doesn't make sense. Please try again!",
                 };
                 setMessages((prev) => [...prev, coachMsg]);
             }
@@ -274,7 +274,7 @@ export default function InsightScreen() {
                 id: (Date.now() + 1).toString(),
                 sender: 'coach',
                 type: 'text',
-                content: "Naa ko'y nadungog nga problema sa pagkonekta sa database. Palihog sulayi og usab!",
+                content: "I heard about a database connection issue. Please try again.",
             };
             setMessages((prev) => [...prev, errorMsg]);
         } finally {
