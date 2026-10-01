@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors } from '../(spenderTabs)/profile';
 import { supabase } from '../../lib/supabase';
 
@@ -17,6 +17,9 @@ export default function ArchiveScreen() {
   
   // Search state for associated expenses
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Fullscreen photo modal state
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     fetchArchivedData();
@@ -53,7 +56,7 @@ export default function ArchiveScreen() {
           .from('allowances')
           .select('*')
           .or(`spender_id.eq.${user.id},sponsor_id.eq.${user.id}`)
-          .lt('end_date', today)
+          .eq('is_archived', true)
           .order('end_date', { ascending: false });
 
         if (!error) setInactiveItems(allowances || []);
@@ -74,12 +77,10 @@ export default function ArchiveScreen() {
       .from('expenses')
       .select(`
         *,
-        budgets (
-          categories (
-            name,
-            icon,
-            color
-          )
+        categories (
+          name,
+          icon,
+          color
         )
       `);
 
@@ -93,6 +94,8 @@ export default function ArchiveScreen() {
 
     if (!error) {
       setExpenses(data || []);
+    } else {
+      console.error('Error fetching expenses with category:', error.message);
     }
     setLoadingExpenses(false);
   };
@@ -121,12 +124,45 @@ export default function ArchiveScreen() {
               if (error) {
                 Alert.alert('Error', error.message);
               } else {
-                // Remove from local state so UI updates instantly
                 setInactiveItems((prev) => prev.filter((i) => i.id !== item.id));
               }
             } catch (err) {
               console.error('Error deleting item:', err);
               Alert.alert('Error', 'An unexpected error occurred while deleting.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Function to handle unarchiving an allowance
+  const handleUnarchiveItem = (item: any) => {
+    const isIncome = !!item.source_name;
+    if (isIncome) return;
+
+    Alert.alert(
+      'Unarchive Allowance',
+      `Are you sure you want to restore "${item.allowance_name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restore',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('allowances')
+                .update({ is_archived: false })
+                .eq('id', item.id);
+
+              if (error) {
+                Alert.alert('Error', error.message);
+              } else {
+                setInactiveItems((prev) => prev.filter((i) => i.id !== item.id));
+              }
+            } catch (err) {
+              console.error('Error unarchiving item:', err);
+              Alert.alert('Error', 'An unexpected error occurred while unarchiving.');
             }
           },
         },
@@ -155,9 +191,36 @@ export default function ArchiveScreen() {
     }
   };
 
+  const formatDateTimeString = (dateString: string) => {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+
+      const formattedDate = date.toLocaleDateString('en-US', {
+        month: 'long',
+        day: '2-digit',
+        year: 'numeric',
+      });
+      const formattedTime = date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+      return `${formattedDate} • ${formattedTime}`;
+    } catch (e) {
+      return dateString;
+    }
+  };
+
   const formatDateRange = (startDateStr: string, endDateStr: string) => {
     if (!startDateStr || !endDateStr) return '';
     try {
+      if (startDateStr === endDateStr) {
+        return formatDateString(startDateStr);
+      }
+
       const [startYear, startMonth, startDay] = startDateStr.split('-');
       const [endYear, endMonth, endDay] = endDateStr.split('-');
 
@@ -188,7 +251,7 @@ export default function ArchiveScreen() {
 
   const filteredExpenses = expenses.filter((item) => {
     const desc = item.description?.toLowerCase() || '';
-    const categoryName = item.budgets?.categories?.name?.toLowerCase() || '';
+    const categoryName = item.categories?.name?.toLowerCase() || '';
     const query = searchQuery.toLowerCase();
     return desc.includes(query) || categoryName.includes(query);
   });
@@ -224,7 +287,7 @@ export default function ArchiveScreen() {
                 <Text style={styles.cardAmount}>₱{totalAmount.toLocaleString()}</Text>
               </View>
               <View style={styles.validityBadge}>
-                <Ionicons name="calendar-outline" size={12} color="#94a3b8" style={{ marginRight: 4 }} />
+                <Ionicons name="calendar-outline" size={12} color="#64748b" style={{ marginRight: 4 }} />
                 <Text style={styles.cardDates}>
                   {formatDateRange(selectedItem.start_date, selectedItem.end_date)}
                 </Text>
@@ -234,12 +297,12 @@ export default function ArchiveScreen() {
             <View style={styles.metricsGrid}>
               <View style={styles.metricBox}>
                 <Text style={styles.metricTitle}>Total Spent</Text>
-                <Text style={[styles.metricValue, { color: '#f87171' }]}>₱{totalSpent.toLocaleString()}</Text>
+                <Text style={[styles.metricValue, { color: '#ef4444' }]}>₱{totalSpent.toLocaleString()}</Text>
               </View>
               <View style={styles.metricDivider} />
               <View style={styles.metricBox}>
                 <Text style={styles.metricTitle}>Remaining</Text>
-                <Text style={[styles.metricValue, { color: isOverBudget ? '#f87171' : '#34d399' }]}>
+                <Text style={[styles.metricValue, { color: isOverBudget ? '#ef4444' : '#10b981' }]}>
                   ₱{totalRemaining.toLocaleString()}
                 </Text>
               </View>
@@ -256,7 +319,7 @@ export default function ArchiveScreen() {
                     styles.progressBarFill, 
                     { 
                       width: `${remainingRatio * 100}%`,
-                      backgroundColor: isOverBudget ? '#ef4444' : '#34d399' 
+                      backgroundColor: isOverBudget ? '#ef4444' : '#10b981' 
                     }
                   ]} 
                 />
@@ -302,7 +365,7 @@ export default function ArchiveScreen() {
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
-                const category = item.budgets?.categories;
+                const category = item.categories;
                 const iconName = (category?.icon || 'pricetag-outline') as any;
                 const iconBgColor = category?.color || '#e2e8f0';
 
@@ -313,8 +376,18 @@ export default function ArchiveScreen() {
                     </View>
 
                     <View style={{ flex: 1, marginRight: 12 }}>
-                      <Text style={styles.expenseDesc}>{item.description || 'No Description'}</Text>
-                      <Text style={styles.expenseDate}>{formatDateString(item.spent_at?.split('T')[0])}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Text style={styles.expenseDesc}>{item.description || 'No Description'}</Text>
+                        {item.photo_url ? (
+                          <TouchableOpacity 
+                            onPress={() => setSelectedPhoto(item.photo_url)} 
+                            style={styles.photoIconButton}
+                          >
+                            <Ionicons name="image-outline" size={14} color="#0f766e" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                      <Text style={styles.expenseDate}>{formatDateTimeString(item.spent_at)}</Text>
                     </View>
                     <Text style={styles.expenseAmount}>-₱{Number(item.amount).toLocaleString()}</Text>
                   </View>
@@ -359,19 +432,49 @@ export default function ArchiveScreen() {
                 </View>
               </TouchableOpacity>
 
-              {/* Delete Button - Hidden if userRole is 'Spender' */}
-              {userRole !== 'Spender' && (
-                <TouchableOpacity 
-                  style={styles.deleteBtn} 
-                  onPress={() => handleDeleteItem(item)}
-                >
-                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                </TouchableOpacity>
-              )}
+              {/* Action Buttons Row */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {!item.source_name && (
+                  <TouchableOpacity 
+                    style={styles.unarchiveBtn} 
+                    onPress={() => handleUnarchiveItem(item)}
+                  >
+                    <Ionicons name="arrow-undo-outline" size={16} color="#0f766e" />
+                  </TouchableOpacity>
+                )}
+
+                {userRole !== 'Spender' && (
+                  <TouchableOpacity 
+                    style={styles.deleteBtn} 
+                    onPress={() => handleDeleteItem(item)}
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           )}
         />
       )}
+
+      {/* Fullscreen Photo Modal */}
+      <Modal visible={!!selectedPhoto} transparent={true} animationType="fade">
+        <View style={styles.modalBackground}>
+          <TouchableOpacity 
+            style={styles.closeButtonContainer} 
+            onPress={() => setSelectedPhoto(null)}
+          >
+            <Ionicons name="close" size={24} color="#ffffff" />
+          </TouchableOpacity>
+          {selectedPhoto && (
+            <Image 
+              source={{ uri: selectedPhoto }} 
+              style={styles.fullscreenImage} 
+              resizeMode="contain" 
+            />
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -453,6 +556,16 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: '#f1f5f9',
   },
+  unarchiveBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#e6f4f1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ccebe6',
+  },
   deleteBtn: {
     width: 34,
     height: 34,
@@ -498,14 +611,17 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   cardDetail: {
-    backgroundColor: '#1F4F59',
+    backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 20,
     marginBottom: 24,
-    shadowColor: '#1F4F59',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 1,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -515,7 +631,7 @@ const styles = StyleSheet.create({
   },
   cardLabel: {
     fontSize: 12,
-    color: '#94a3b8',
+    color: '#64748b',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: 4,
@@ -523,12 +639,14 @@ const styles = StyleSheet.create({
   cardAmount: {
     fontSize: 26,
     fontWeight: '800',
-    color: '#ffffff',
+    color: '#1e293b',
   },
   validityBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -536,16 +654,18 @@ const styles = StyleSheet.create({
   },
   cardDates: {
     fontSize: 10,
-    color: '#cbd5e1',
+    color: '#475569',
     fontWeight: '500',
     flexShrink: 1,
   },
   metricsGrid: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.15)',
+    backgroundColor: '#f8fafc',
     borderRadius: 12,
     paddingVertical: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
   },
   metricBox: {
     flex: 1,
@@ -553,11 +673,11 @@ const styles = StyleSheet.create({
   },
   metricDivider: {
     width: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#e2e8f0',
   },
   metricTitle: {
     fontSize: 11,
-    color: '#94a3b8',
+    color: '#64748b',
     marginBottom: 2,
     fontWeight: '500',
   },
@@ -575,17 +695,17 @@ const styles = StyleSheet.create({
   },
   progressLabel: {
     fontSize: 12,
-    color: '#cbd5e1',
+    color: '#64748b',
     fontWeight: '500',
   },
   progressPercent: {
     fontSize: 12,
-    color: '#ffffff',
+    color: '#1e293b',
     fontWeight: '700',
   },
   progressBarBackground: {
     height: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: '#f1f5f9',
     borderRadius: 4,
     overflow: 'hidden',
   },
@@ -646,6 +766,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1E293B',
     marginBottom: 2,
+    marginRight: 6,
+  },
+  photoIconButton: {
+    padding: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#e6f4f1',
+    borderRadius: 6,
+    marginBottom: 2,
   },
   expenseDate: {
     fontSize: 11,
@@ -655,5 +784,24 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#ef4444',
-  }
+  },
+  modalBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonContainer: {
+    position: 'absolute',
+    top: 50,
+    right: 25,
+    zIndex: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 20,
+    padding: 8,
+  },
+  fullscreenImage: {
+    width: '90%',
+    height: '80%',
+  },
 });
