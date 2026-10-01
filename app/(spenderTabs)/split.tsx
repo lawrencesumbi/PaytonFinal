@@ -569,6 +569,7 @@ export default function SplitScreen() {
       const newOwed = Math.max(0, currentOwed - paidVal);
       const isFullyPaid = newOwed === 0;
 
+      // 1. Update split_friends table
       const { error: updateFriendErr } = await supabase
         .from('split_friends')
         .update({
@@ -580,7 +581,31 @@ export default function SplitScreen() {
 
       if (updateFriendErr) throw updateFriendErr;
 
-      let successMessage = `Successfully received ₱${paidVal.toFixed(2)} from ${friendName}. ${
+      // 2. Fetch the user's active/recent allowance and add the received payment to it
+      const { data: latestAllowance, error: allowFetchErr } = await supabase
+        .from('allowances')
+        .select('id, amount')
+        .eq('spender_id', user.id)
+        .eq('is_archived', false)
+        .order('received_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!allowFetchErr && latestAllowance) {
+        const currentAllowanceAmount = parseFloat(latestAllowance.amount) || 0;
+        const updatedAllowanceAmount = currentAllowanceAmount + paidVal;
+
+        const { error: allowUpdateErr } = await supabase
+          .from('allowances')
+          .update({ amount: updatedAllowanceAmount })
+          .eq('id', latestAllowance.id);
+
+        if (allowUpdateErr) {
+          console.error('Failed to update allowance amount:', allowUpdateErr.message);
+        }
+      }
+
+      let successMessage = `Successfully received ₱${paidVal.toFixed(2)} from ${friendName} (added to your active allowance). ${
         isFullyPaid ? 'Fully settled!' : `Remaining balance: ₱${newOwed.toFixed(2)}`
       }`;
 
@@ -928,7 +953,7 @@ export default function SplitScreen() {
                           </View>
 
                           <View style={styles.settleSuperRightCol}>
-                            {!isPaid && (
+                            {!isPaid && sf.friends?.email ? (
                               <TouchableOpacity 
                                 onPress={() => handleSendReminderEmail(
                                   sf.friends?.email,       
@@ -941,7 +966,7 @@ export default function SplitScreen() {
                               >
                                 <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
                               </TouchableOpacity>
-                            )}
+                            ) : null}
                           </View>
                         </View>
                       );
