@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import emailjs from 'emailjs-com';
 import 'expo-blob';
-import * as FileSystem from 'expo-file-system/legacy'; // Siguraduha nga naay /legacy para walay deprecated error
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useState } from 'react';
 import {
@@ -24,6 +24,12 @@ type Friend = {
   full_name: string;
   email?: string;
   avatar_url?: string;
+};
+
+type Category = {
+  id: string;
+  name: string;
+  icon?: string;
 };
 
 type ActiveSplitFriend = {
@@ -57,6 +63,7 @@ export default function SplitScreen() {
   // Default Array States
   const [friends, setFriends] = useState<Friend[]>([]);
   const [activeSplits, setActiveSplits] = useState<ActiveSplit[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
 
   // Creation Form States
   const [formVisible, setFormVisible] = useState<boolean>(false);
@@ -65,6 +72,7 @@ export default function SplitScreen() {
   const [splitType, setSplitType] = useState<'EQUAL' | 'CUSTOM'>('EQUAL');
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [customShares, setCustomShares] = useState<{ [key: string]: string }>({});
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   // Friend Modal State
   const [addFriendModalVisible, setAddFriendModalVisible] = useState<boolean>(false);
@@ -83,19 +91,11 @@ export default function SplitScreen() {
   const [editingFriend, setEditingFriend] = useState<Friend | null>(null);
   const [friendImageUri, setFriendImageUri] = useState<string | null>(null);
 
-  const [editingSplit, setEditingSplit] = useState(null); 
-  const [actionMenuVisible, setActionMenuVisible] = useState(false); 
-  const [selectedSplitForAction, setSelectedSplitForAction] = useState(null);
-
   const [myProfile, setMyProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
 
-  // Ibutang kini uban sa imong uban nga mga useState declarations
-const [expandedSplitId, setExpandedSplitId] = useState<string | null>(null);
-
-  // Ilisi ang imong kasamtangang showAlert function og ingon ani:
-const showAlert = (title: string, message: string) => {
-  Alert.alert(title, message, [{ text: 'OK' }]);
-};
+  const showAlert = (title: string, message: string) => {
+    Alert.alert(title, message, [{ text: 'OK' }]);
+  };
 
   useEffect(() => {
     fetchUserAndData();
@@ -126,6 +126,23 @@ const showAlert = (title: string, message: string) => {
   }, []);
 
   const fetchData = async (userId: string) => {
+    // 0. Fetch Categories[cite: 1]
+    try {
+      const { data: catData, error: catErr } = await supabase
+        .from('categories')
+        .select('id, name, icon')
+        .order('name', { ascending: true });
+
+      if (catErr) console.error('Categories fetch error:', catErr.message);
+      setCategories(catData || []);
+      if (catData && catData.length > 0 && !selectedCategoryId) {
+        setSelectedCategoryId(catData[0].id);
+      }
+    } catch (err) {
+      console.error('Categories error:', err);
+      setCategories([]);
+    }
+
     // 1. Fetch Friends
     try {
       const { data: friendsData, error: friendsErr } = await supabase
@@ -362,16 +379,6 @@ const showAlert = (title: string, message: string) => {
     setAddFriendModalVisible(true);
   };
 
-  const handleOpenAddModal = () => {
-    setEditingFriend(null);
-    setNewFriendName('');
-    setNewFriendEmail('');
-    setFriendImageUri(null);
-    setAddFriendModalVisible(true);
-  };
-
-  
-
   const handleDeleteSplit = async (splitId: string) => {
     try {
       setLoading(true);
@@ -406,7 +413,6 @@ const showAlert = (title: string, message: string) => {
     setCustomShares((prev) => ({ ...prev, [friendId]: val }));
   };
 
-  // Direct Creation Split Handler (Budget checking removed)
   const handleCreateSplitDirectly = async () => {
     const numericAmount = parseFloat(amount);
     if (!description.trim() || isNaN(numericAmount) || numericAmount <= 0) {
@@ -455,6 +461,22 @@ const showAlert = (title: string, message: string) => {
     setLoading(true);
 
     try {
+      // 1. Fetch the user's most recent allowance dynamically
+      let activeAllowanceId = null;
+      const { data: latestAllowance, error: allowFetchErr } = await supabase
+        .from('allowances')
+        .select('id')
+        .eq('spender_id', user.id)
+        .eq('is_archived', false) // Optional: ensure it's not archived
+        .order('received_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!allowFetchErr && latestAllowance) {
+        activeAllowanceId = latestAllowance.id;
+      }
+
+      // 2. Insert into split_expenses table
       const { data: splitExp, error: splitExpErr } = await supabase
         .from('split_expenses')
         .insert([
@@ -481,9 +503,23 @@ const showAlert = (title: string, message: string) => {
       }));
 
       const { error: friendsErr } = await supabase.from('split_friends').insert(friendInserts);
-
       if (friendsErr) throw friendsErr;
 
+      // 3. Insert into general expenses table using category_id, fetched allowance_id, and spent_at[cite: 2, 3]
+      const { error: expenseErr } = await supabase.from('expenses').insert([
+        {
+          user_id: user.id,
+          amount: numericAmount,
+          description: description.trim(),
+          category_id: selectedCategoryId,
+          allowance_id: activeAllowanceId,
+          spent_at: new Date().toISOString(),
+        },
+      ]);
+
+      if (expenseErr) console.error('Failed to log in expenses table:', expenseErr.message);
+
+      // 4. Send email notifications
       await sendNewSplitEmails(
         splitExp,
         calculatedFriendsPayload,
@@ -492,7 +528,7 @@ const showAlert = (title: string, message: string) => {
         myProfile?.full_name
       );
 
-      showAlert('Success', 'Split expense saved and emails sent!');
+      showAlert('Success', 'Split expense saved, logged to expenses, and emails sent!');
       setFormVisible(false);
       resetForm();
       fetchData(user.id);
@@ -578,7 +614,7 @@ const showAlert = (title: string, message: string) => {
     setSplitType('EQUAL');
     setSelectedFriends([]);
     setCustomShares({});
-    setEditingSplit(null);
+    if (categories.length > 0) setSelectedCategoryId(categories[0].id);
   };
 
   const calculateOwnerShare = () => {
@@ -596,26 +632,6 @@ const showAlert = (title: string, message: string) => {
     }
   };
 
-  const CARD_THEMES = [
-    { bg: '#54C9CC', text: '#ffffff' },
-    { bg: '#7EA00E', text: '#ffffff' },
-    { bg: '#DCD964', text: '#213502' },
-  ];
-  const getAvatarTheme = (index: number) => CARD_THEMES[index % CARD_THEMES.length];
-
-  const balanceSummary = (activeSplits || []).reduce(
-    (totals, item) => {
-      const outstandingFriendBalances = (item.split_friends || []).reduce(
-        (sum, friendSplit) => sum + (friendSplit.owed_amount || 0),
-        0
-      );
-      totals.youAreOwed += outstandingFriendBalances;
-      totals.youOwe += Number(item.personal_share || 0);
-      return totals;
-    },
-    { youOwe: 0, youAreOwed: 0 }
-  );
-
   const handleSendReminderEmail = async (
     friendEmail: any, 
     friendName: any, 
@@ -626,15 +642,15 @@ const showAlert = (title: string, message: string) => {
   ) => {
     try {
       const templateParams = {
-        email: friendEmail,                        
+        email: friendEmail,                         
         email_subject: `Reminder: Balance for ${description}`, 
-        friend_name: friendName,                       
+        friend_name: friendName,                     
         intro_message: "This is a friendly reminder that you still have a remaining balance for this expense.",
-        description: description,                       
+        description: description,                     
         total_amount: (totalAmount || 0).toFixed(2),      
         amount: (owedAmount || 0).toFixed(2),            
         call_to_action: "Please settle this at your earliest convenience. Thank you!",
-        sender_name: senderName,                       
+        sender_name: senderName,                     
       };
 
       const serviceID = 'service_67drjkh';    
@@ -663,15 +679,15 @@ const showAlert = (title: string, message: string) => {
         if (!friendObj || !friendObj.email) continue;
 
         const templateParams = {
-          email: friendObj.email,                            
+          email: friendObj.email,                                    
           email_subject: `New Split Expense Added: ${description}`, 
-          friend_name: friendObj.full_name,                         
+          friend_name: friendObj.full_name,                          
           intro_message: "You have been added to a new split expense.", 
-          description: description,                             
-          total_amount: parseFloat(totalAmount).toFixed(2),         
+          description: description,                                  
+          total_amount: parseFloat(totalAmount).toFixed(2),        
           amount: parseFloat(item.owed_amount || 0).toFixed(2),    
           call_to_action: "Please settle your balance accordingly. Thank you!",
-          sender_name: senderName,                              
+          sender_name: senderName,                                     
         };
 
         await emailjs.send(serviceID, templateID, templateParams, userID);
@@ -682,8 +698,6 @@ const showAlert = (title: string, message: string) => {
       console.error('FAILED sending split emails...', err);
     }
   };
-
-  
 
   return (
     <View style={styles.container}>
@@ -721,362 +735,373 @@ const showAlert = (title: string, message: string) => {
         > 
 
           {/* FRIENDS SECTION */}
-<View style={styles.friendsSection}>
-  <View style={styles.sectionTitleRow}>
-    <Text style={styles.sectionTitle}>Friends List</Text>
-    <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
-  </View>
-  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFriendsScroll}>
-    <TouchableOpacity style={styles.avatarContainer} onPress={() => setAddFriendModalVisible(true)}>
-      <View style={styles.addCircle}>
-        <Ionicons name="add" size={24} color={colors.textFaint} />
-      </View>
-      <Text style={styles.avatarName}>Add Friend</Text>
-    </TouchableOpacity>
-
-    {/* Gi-add ang .slice().reverse() para mauna ang pinakabag-o */}
-    {([...(friends || [])].reverse()).map((f) => {
-      return (
-        <TouchableOpacity 
-          key={f.id} 
-          style={styles.avatarContainer}
-          onPress={() => handleFriendPress(f)}
-        >
-          <Image
-            source={
-              f.avatar_url
-                ? { uri: f.avatar_url }
-                : require('../../assets/images/default.png')
-            }
-            style={styles.friendAvatar}
-          />
-          <Text style={styles.avatarName} numberOfLines={1}>
-            {f.full_name}
-          </Text>
-        </TouchableOpacity>
-      );
-    })}
-  </ScrollView>
-</View>
-
-          
-
-<View style={[styles.sectionTitleRow, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
-  <Text style={styles.sectionTitle}>Split History</Text>
-  <Text style={styles.sectionCount}>{activeSplits?.length || 0} splits</Text>
-</View>
-
-{(activeSplits?.length || 0) === 0 ? (
-  <View style={styles.emptyContainer}>
-    <Ionicons name="receipt-outline" size={48} color="#CBD5E1" />
-    <Text style={styles.emptyText}>No splits recorded yet.</Text>
-  </View>
-) : (
-  (activeSplits || []).map((item: any) => {
-    const sfList = item.split_friends || [];
-    const allPaid = sfList.length > 0 && sfList.every((sf: any) => sf.status === 'paid' && sf.owed_amount <= 0);
-    
-    const totalAmount = item.total_amount || 0;
-    const personalShare = item.personal_share || 0;
-
-    return (
-      <View key={item.id} style={styles.historyCard}>
-        
-        {/* TOP ROW: Description, Date & Total Amount */}
-        <View style={styles.historyTop}>
-          <View style={styles.categoryIconContainer}>
-            <Ionicons name={"people-outline"} size={22} color={colors.primary} />
-          </View>
-
-          <View style={{ flex: 1,  }}>
-            <Text style={styles.historyDesc}>{item.description}</Text>
-            <Text style={styles.historyMeta}>
-              {item.created_at 
-                ? new Date(item.created_at).toLocaleDateString('en-US', { 
-                    month: 'long', 
-                    day: 'numeric', 
-                    year: 'numeric' 
-                  }) 
-                : ''}
-            </Text>
-          </View>
-
-          {/* Moved Total Amount to the Top Row */}
-          <View style={{ alignItems: 'flex-end', justifyContent: 'center', marginRight: 10,}}>
-            <Text style={{ fontSize: 11, color: '#64748B',  }}>Total Amount</Text>
-            <Text style={styles.settleCardTotalValue}>₱{totalAmount.toFixed(2)}</Text>
-          </View>
-
-          <View style={styles.rightActionsContainer}>
-            <View style={styles.iconButtonsRow}>
-              <TouchableOpacity
-                style={styles.actionIconButton}
-                onPress={() => {
-                  Alert.alert(
-                    "Delete Split",
-                    "Are you sure you want to delete this split expense?",
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      { 
-                        text: "Delete", 
-                        style: "destructive", 
-                        onPress: () => handleDeleteSplit(item.id) 
-                      },
-                    ]
-                  );
-                }}
-              >
-                <Ionicons name="trash-outline" size={18} color={'#ff5252'} />
+          <View style={styles.friendsSection}>
+            <View style={styles.sectionTitleRow}>
+              <Text style={styles.sectionTitle}>Friends List</Text>
+              <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalFriendsScroll}>
+              <TouchableOpacity style={styles.avatarContainer} onPress={() => setAddFriendModalVisible(true)}>
+                <View style={styles.addCircle}>
+                  <Ionicons name="add" size={24} color={colors.textFaint} />
+                </View>
+                <Text style={styles.avatarName}>Add Friend</Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        </View>
 
-        <View style={{ height: 1, backgroundColor: '#f1f1f1', marginTop: 10, marginBottom: 7, }} />
-
-        {/* DIRECTLY DISPLAYED DETAILS */}
-        <View style={{ marginTop: 1, }}>
-          
-          {/* Owner Row (Me) */}
-          <View style={styles.settleMemberRowCard}>
-            <View style={styles.settleLeftCol}>
-              <Image
-                source={
-                  myProfile?.avatar_url
-                    ? { uri: myProfile.avatar_url }
-                    : require('../../assets/images/default.png')
-                }
-                style={styles.settleAvatarImage}
-              />
-              <View style={{ flexShrink: 1 }}>
-                <Text style={styles.settleMemberName}>Me</Text>
-                <Text style={styles.settleMemberSub}>My Share</Text>
-              </View>
-            </View>
-
-            <View style={styles.settleCenterCol}>
-              <Text style={styles.settleAmountText}>₱{personalShare.toFixed(2)}</Text>
-            </View>
-
-            <View style={styles.settleRightCol}>
-              <View style={styles.settleOwnerBadge}>
-                <Text style={styles.settleOwnerBadgeText}>Payer</Text>
-              </View>
-            </View>
-
-            <View style={styles.settleSuperRightCol}>
-              
-            </View>
-          </View>
-
-          {/* Friends Rows */}
-          {sfList.map((sf: any) => {
-            const isPaid = sf.status === 'paid' && sf.owed_amount <= 0;
-            const friendName = sf.friends?.full_name || 'Friend';
-            const avatarUrl = sf.friends?.avatar_url;
-
-            return (
-              <View key={sf.id} style={styles.settleMemberRowCard}>
-                <View style={styles.settleLeftCol}>
-                  <Image
-                    source={
-                      avatarUrl
-                        ? { uri: avatarUrl }
-                        : require('../../assets/images/default.png')
-                    }
-                    style={styles.settleAvatarImage}
-                  />
-                  <View style={{ flexShrink: 1 }}>
-                    <Text style={styles.settleMemberName} numberOfLines={1}>{friendName}</Text>
-                    <Text style={styles.settleMemberSub}>
-                      {isPaid ? 'Settled' : 'Owes you'}
+              {([...(friends || [])].reverse()).map((f) => {
+                return (
+                  <TouchableOpacity 
+                    key={f.id} 
+                    style={styles.avatarContainer}
+                    onPress={() => handleFriendPress(f)}
+                  >
+                    <Image
+                      source={
+                        f.avatar_url
+                          ? { uri: f.avatar_url }
+                          : require('../../assets/images/default.png')
+                      }
+                      style={styles.friendAvatar}
+                    />
+                    <Text style={styles.avatarName} numberOfLines={1}>
+                      {f.full_name}
                     </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+              
+          <View style={[styles.sectionTitleRow, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+            <Text style={styles.sectionTitle}>Split History</Text>
+            <Text style={styles.sectionCount}>{activeSplits?.length || 0} splits</Text>
+          </View>
+
+          {(activeSplits?.length || 0) === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="receipt-outline" size={48} color="#CBD5E1" />
+              <Text style={styles.emptyText}>No splits recorded yet.</Text>
+            </View>
+          ) : (
+            (activeSplits || []).map((item: any) => {
+              const sfList = item.split_friends || [];
+              const totalAmount = item.total_amount || 0;
+              const personalShare = item.personal_share || 0;
+
+              return (
+                <View key={item.id} style={styles.historyCard}>
+                  {/* TOP ROW: Description, Date & Total Amount */}
+                  <View style={styles.historyTop}>
+                    <View style={styles.categoryIconContainer}>
+                      <Ionicons name={"people-outline"} size={22} color={colors.primary} />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.historyDesc}>{item.description}</Text>
+                      <Text style={styles.historyMeta}>
+                        {item.created_at 
+                          ? new Date(item.created_at).toLocaleDateString('en-US', { 
+                              month: 'long', 
+                              day: 'numeric', 
+                              year: 'numeric' 
+                            }) 
+                          : ''}
+                      </Text>
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end', justifyContent: 'center', marginRight: 10 }}>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>Total Amount</Text>
+                      <Text style={styles.settleCardTotalValue}>₱{totalAmount.toFixed(2)}</Text>
+                    </View>
+
+                    <View style={styles.rightActionsContainer}>
+                      <View style={styles.iconButtonsRow}>
+                        <TouchableOpacity
+                          style={styles.actionIconButton}
+                          onPress={() => {
+                            Alert.alert(
+                              "Delete Split",
+                              "Are you sure you want to delete this split expense?",
+                              [
+                                { text: "Cancel", style: "cancel" },
+                                { 
+                                  text: "Delete", 
+                                  style: "destructive", 
+                                  onPress: () => handleDeleteSplit(item.id) 
+                                },
+                              ]
+                            );
+                          }}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={'#ff5252'} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={{ height: 1, backgroundColor: '#f1f1f1', marginTop: 10, marginBottom: 7 }} />
+
+                  {/* DIRECTLY DISPLAYED DETAILS */}
+                  <View style={{ marginTop: 1 }}>
+                    {/* Owner Row (Me) */}
+                    <View style={styles.settleMemberRowCard}>
+                      <View style={styles.settleLeftCol}>
+                        <Image
+                          source={
+                            myProfile?.avatar_url
+                              ? { uri: myProfile.avatar_url }
+                              : require('../../assets/images/default.png')
+                          }
+                          style={styles.settleAvatarImage}
+                        />
+                        <View style={{ flexShrink: 1 }}>
+                          <Text style={styles.settleMemberName}>Me</Text>
+                          <Text style={styles.settleMemberSub}>My Share</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.settleCenterCol}>
+                        <Text style={styles.settleAmountText}>₱{personalShare.toFixed(2)}</Text>
+                      </View>
+
+                      <View style={styles.settleRightCol}>
+                        <View style={styles.settleOwnerBadge}>
+                          <Text style={styles.settleOwnerBadgeText}>Payer</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.settleSuperRightCol} />
+                    </View>
+
+                    {/* Friends Rows */}
+                    {sfList.map((sf: any) => {
+                      const isPaid = sf.status === 'paid' && sf.owed_amount <= 0;
+                      const friendName = sf.friends?.full_name || 'Friend';
+                      const avatarUrl = sf.friends?.avatar_url;
+
+                      return (
+                        <View key={sf.id} style={styles.settleMemberRowCard}>
+                          <View style={styles.settleLeftCol}>
+                            <Image
+                              source={
+                                avatarUrl
+                                  ? { uri: avatarUrl }
+                                  : require('../../assets/images/default.png')
+                              }
+                              style={styles.settleAvatarImage}
+                            />
+                            <View style={{ flexShrink: 1 }}>
+                              <Text style={styles.settleMemberName} numberOfLines={1}>{friendName}</Text>
+                              <Text style={styles.settleMemberSub}>
+                                {isPaid ? 'Settled' : 'Owes you'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.settleCenterCol}>
+                            <Text style={styles.settleAmountText}>₱{(sf.owed_amount || 0).toFixed(2)}</Text>
+                          </View>
+
+                          <View style={styles.settleRightCol}>
+                            {isPaid ? (
+                              <View style={styles.settlePaidPill}>
+                                <Ionicons name="checkmark-circle" size={14} color={colors.positive} />
+                                <Text style={styles.settlePaidPillText}>Paid</Text>
+                              </View>
+                            ) : (
+                              <TouchableOpacity
+                                style={styles.settlePayButton}
+                                onPress={() => handleInitiateSettleFriend(sf)}
+                              >
+                                <Text style={styles.settlePayButtonText}>Settle</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+
+                          <View style={styles.settleSuperRightCol}>
+                            {!isPaid && (
+                              <TouchableOpacity 
+                                onPress={() => handleSendReminderEmail(
+                                  sf.friends?.email,       
+                                  sf.friends?.full_name,   
+                                  sf.owed_amount,          
+                                  item?.total_amount,      
+                                  item?.description,       
+                                  myProfile?.full_name     
+                                )}
+                              >
+                                <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
                   </View>
                 </View>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
 
-                <View style={styles.settleCenterCol}>
-                  <Text style={styles.settleAmountText}>₱{(sf.owed_amount || 0).toFixed(2)}</Text>
-                </View>
+      {/* CREATE SPLIT MODAL */}
+      <Modal visible={formVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.formDrawerContainer}>
+            <View style={styles.pullBar} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.drawerTitle}>Create Split Expense</Text>
+              <TouchableOpacity 
+                style={styles.closeCircle} 
+                onPress={() => {
+                  setFormVisible(false);
+                  setDescription('');
+                  setAmount('');
+                  setSelectedFriends([]);
+                  setCustomShares({});
+                }}
+              >
+                <Ionicons name="close" size={23} color={colors.headerDarker} />
+              </TouchableOpacity>
+            </View>
 
-                <View style={styles.settleRightCol}>
-                  {isPaid ? (
-                    <View style={styles.settlePaidPill}>
-                      <Ionicons name="checkmark-circle" size={14} color={colors.positive} />
-                      <Text style={styles.settlePaidPillText}>Paid</Text>
-                    </View>
-                  ) : (
-                    <>
-                      <TouchableOpacity
-                        style={styles.settlePayButton}
-                        onPress={() => handleInitiateSettleFriend(sf)}
-                      >
-                        <Text style={styles.settlePayButtonText}>Settle</Text>
-                      </TouchableOpacity>
-                      
-                    </>
-                  )}
-                </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+              {/* 1. Total Amount First & Big */}
+              <Text style={styles.label}>Total Amount (₱)</Text>
+              <TextInput
+                style={styles.largeAmountInput}
+                placeholder="0.00"
+                placeholderTextColor={colors.textFaint}
+                keyboardType="numeric"
+                value={amount}
+                onChangeText={setAmount}
+              />
 
-           <View style={styles.settleSuperRightCol}>
-                  {!isPaid && (
-                    <TouchableOpacity 
-                      onPress={() => handleSendReminderEmail(
-                        sf.friends?.email,        
-                        sf.friends?.full_name,    
-                        sf.owed_amount,          
-                        item?.total_amount,      
-                        item?.description,        
-                        myProfile?.full_name      
-                      )}
+              {/* 2. Description Second */}
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Dinner with Friends"
+                placeholderTextColor={colors.textFaint}
+                value={description}
+                onChangeText={setDescription}
+              />
+
+              {/* 3. Category Selection (Horizontal ScrollView) */}
+              <Text style={styles.label}>Category</Text>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                contentContainerStyle={{ gap: 8, marginBottom: 16 }}
+              >
+                {(categories || []).map((cat) => {
+                  const isSelected = selectedCategoryId === cat.id;
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      style={[
+                        styles.checkChip, 
+                        isSelected && styles.checkChipSelected,
+                        { paddingHorizontal: 16, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }
+                      ]}
+                      onPress={() => setSelectedCategoryId(cat.id)}
                     >
-                      <Ionicons name="notifications-outline" size={20} color={colors.textMuted} />
+                      <Text style={[styles.checkChipText, isSelected && styles.checkChipTextSelected]}>
+                        {cat.name}
+                      </Text>
                     </TouchableOpacity>
-                  )}
-                </View>
+                  );
+                })}
+              </ScrollView>
 
-              </View>
-            );
-          })}
-        </View>
-
-      </View>
-    );
-  })
-)}
-</ScrollView>
-)}
-
-{/* CREATE SPLIT MODAL */}
-<Modal visible={formVisible} animationType="fade" transparent>
-  <View style={styles.modalOverlay}>
-    <View style={styles.formDrawerContainer}>
-      <View style={styles.pullBar} />
-      <View style={styles.modalHeader}>
-        <Text style={styles.drawerTitle}>Create Split Expense</Text>
-        <TouchableOpacity 
-          style={styles.closeCircle} 
-          onPress={() => {
-            setFormVisible(false);
-            setDescription('');
-            setAmount('');
-            setSelectedFriends([]);
-            setCustomShares({});
-          }}
-        >
-          <Ionicons name="close" size={23} color={colors.headerDarker} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
-        
-        {/* 1. Total Amount First & Big */}
-        <Text style={styles.label}>Total Amount (₱)</Text>
-        <TextInput
-          style={styles.largeAmountInput}
-          placeholder="0.00"
-          placeholderTextColor={colors.textFaint}
-          keyboardType="numeric"
-          value={amount}
-          onChangeText={setAmount}
-        />
-
-        {/* 2. Description Second */}
-        <Text style={styles.label}>Description</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g. Dinner with Friends"
-          placeholderTextColor={colors.textFaint}
-          value={description}
-          onChangeText={setDescription}
-        />
-
-        <Text style={styles.label}>Split Method</Text>
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tabBtn, splitType === 'EQUAL' && styles.tabBtnActive]}
-            onPress={() => setSplitType('EQUAL')}
-          >
-            <Text style={[styles.tabBtnText, splitType === 'EQUAL' && styles.tabBtnTextActive]}>Equal</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabBtn, splitType === 'CUSTOM' && styles.tabBtnActive]}
-            onPress={() => setSplitType('CUSTOM')}
-          >
-            <Text style={[styles.tabBtnText, splitType === 'CUSTOM' && styles.tabBtnTextActive]}>Custom</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 3. Horizontal Scrollable Friends Checklist */}
-        <Text style={styles.label}>Select Friends Included</Text>
-        {(friends?.length || 0) === 0 ? (
-          <Text style={styles.emptyInlineText}>No friends added yet. Please add a friend first.</Text>
-        ) : (
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            contentContainerStyle={styles.horizontalChecklist}
-          >
-            {(friends || []).map((f) => {
-              const isSelected = selectedFriends.includes(f.id);
-              return (
+              <Text style={styles.label}>Split Method</Text>
+              <View style={styles.tabContainer}>
                 <TouchableOpacity
-                  key={f.id}
-                  style={[styles.checkChip, isSelected && styles.checkChipSelected]}
-                  onPress={() => toggleSelectFriend(f.id)}
+                  style={[styles.tabBtn, splitType === 'EQUAL' && styles.tabBtnActive]}
+                  onPress={() => setSplitType('EQUAL')}
                 >
-                  <Ionicons
-                    name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={16}
-                    color={isSelected ? colors.primary : colors.textMuted}
-                  />
-                  <Text style={[styles.checkChipText, isSelected && styles.checkChipTextSelected]}>
-                    {f.full_name}
-                  </Text>
+                  <Text style={[styles.tabBtnText, splitType === 'EQUAL' && styles.tabBtnTextActive]}>Equal</Text>
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
+                <TouchableOpacity
+                  style={[styles.tabBtn, splitType === 'CUSTOM' && styles.tabBtnActive]}
+                  onPress={() => setSplitType('CUSTOM')}
+                >
+                  <Text style={[styles.tabBtnText, splitType === 'CUSTOM' && styles.tabBtnTextActive]}>Custom</Text>
+                </TouchableOpacity>
+              </View>
 
-        {splitType === 'CUSTOM' && (selectedFriends?.length || 0) > 0 && (
-          <View style={styles.customSection}>
-            <Text style={styles.customSectionTitle}>Enter Friend Shares (₱)</Text>
-            {selectedFriends.map((fId) => {
-              const friendObj = (friends || []).find((f) => f.id === fId);
-              return (
-                <View key={fId} style={styles.customRow}>
-                  <Text style={styles.customMemberName}>{friendObj?.full_name || 'Friend'}</Text>
-                  <TextInput
-                    style={styles.customInput}
-                    placeholder="0.00"
-                    placeholderTextColor={colors.textFaint}
-                    keyboardType="numeric"
-                    value={customShares[fId] || ''}
-                    onChangeText={(val) => handleCustomShareChange(fId, val)}
-                  />
+              {/* 4. Horizontal Scrollable Friends Checklist */}
+              <Text style={styles.label}>Select Friends Included</Text>
+              {(friends?.length || 0) === 0 ? (
+                <Text style={styles.emptyInlineText}>No friends added yet. Please add a friend first.</Text>
+              ) : (
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false} 
+                  contentContainerStyle={styles.horizontalChecklist}
+                >
+                  {(friends || []).map((f) => {
+                    const isSelected = selectedFriends.includes(f.id);
+                    return (
+                      <TouchableOpacity
+                        key={f.id}
+                        style={[styles.checkChip, isSelected && styles.checkChipSelected]}
+                        onPress={() => toggleSelectFriend(f.id)}
+                      >
+                        <Ionicons
+                          name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                          size={16}
+                          color={isSelected ? colors.primary : colors.textMuted}
+                        />
+                        <Text style={[styles.checkChipText, isSelected && styles.checkChipTextSelected]}>
+                          {f.full_name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+
+              {splitType === 'CUSTOM' && (selectedFriends?.length || 0) > 0 && (
+                <View style={styles.customSection}>
+                  <Text style={styles.customSectionTitle}>Enter Friend Shares (₱)</Text>
+                  {selectedFriends.map((fId) => {
+                    const friendObj = (friends || []).find((f) => f.id === fId);
+                    return (
+                      <View key={fId} style={styles.customRow}>
+                        <Text style={styles.customMemberName}>{friendObj?.full_name || 'Friend'}</Text>
+                        <TextInput
+                          style={styles.customInput}
+                          placeholder="0.00"
+                          placeholderTextColor={colors.textFaint}
+                          keyboardType="numeric"
+                          value={customShares[fId] || ''}
+                          onChangeText={(val) => handleCustomShareChange(fId, val)}
+                        />
+                      </View>
+                    );
+                  })}
                 </View>
-              );
-            })}
-          </View>
-        )}
+              )}
 
-        {amount !== '' && (selectedFriends?.length || 0) > 0 && (
-          <View style={styles.previewBanner}>
-            <Ionicons name="information-circle-outline" size={20} color={colors.positive} />
-            <Text style={styles.previewText}>
-              Your Personal Share: <Text style={{ fontWeight: '800' }}>₱{calculateOwnerShare()}</Text>
-            </Text>
-          </View>
-        )}
+              {amount !== '' && (selectedFriends?.length || 0) > 0 && (
+                <View style={styles.previewBanner}>
+                  <Ionicons name="information-circle-outline" size={20} color={colors.positive} />
+                  <Text style={styles.previewText}>
+                    Your Personal Share: <Text style={{ fontWeight: '800' }}>₱{calculateOwnerShare()}</Text>
+                  </Text>
+                </View>
+              )}
 
-        <TouchableOpacity style={styles.submitBtn} onPress={handleCreateSplitDirectly}>
-          <Text style={styles.submitBtnText}>Confirm & Save Split</Text>
-          <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
-  </View>
-</Modal>
+              <TouchableOpacity style={styles.submitBtn} onPress={handleCreateSplitDirectly}>
+                <Text style={styles.submitBtnText}>Confirm & Save Split</Text>
+                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* ADD / EDIT FRIEND MODAL */}
       <Modal visible={addFriendModalVisible} animationType="fade" transparent>
@@ -1143,8 +1168,6 @@ const showAlert = (title: string, message: string) => {
           </View>
         </View>
       </Modal>
-
-      
 
       {/* PAYMENT ENTRY INPUT MODAL FOR MARK PAID */}
       <Modal visible={settleAmountModalVisible} animationType="fade" transparent>

@@ -362,7 +362,7 @@ export const styles = StyleSheet.create({
   shadowOpacity: 0.06,
   shadowRadius: 12,
   marginBottom: 14,
-  
+  elevation: 3,
 },
   historyTop: {
     flexDirection: 'row',
@@ -658,7 +658,8 @@ settleMemberRowCard: {
   alignItems: 'center',
   justifyContent: 'space-between',
   backgroundColor: '#FFFFFF',
-  paddingVertical: 7.5,
+  paddingVertical: 10,
+  paddingHorizontal: 3,
   borderRadius: 10,
   
 },
