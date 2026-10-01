@@ -17,17 +17,11 @@ import {
   View
 } from 'react-native';
 import { colors } from '../(spenderTabs)/profile';
-import { supabase } from '../../lib/supabase';
 
 interface Message {
   id: string;
   sender: 'user' | 'payton';
   text: string;
-  extractedData?: {
-    amount: number;
-    category: string;
-    description: string;
-  };
 }
 
 const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
@@ -37,7 +31,7 @@ export default function HelpScreen() {
   const router = useRouter();
   const [chatVisible, setChatVisible] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
-    { id: '1', sender: 'payton', text: "Hello! I am Payton, your AI assistant. How can I help you today regarding the system or your finances?" }
+    { id: '1', sender: 'payton', text: "Hello! I am Payton, your AI assistant. How can I help you today regarding system help, FAQs, or general financial guidance?" }
   ]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -60,136 +54,27 @@ export default function HelpScreen() {
     try {
       if (!apiKey) throw new Error("Missing EXPO_PUBLIC_GEMINI_API_KEY in .env");
 
-      // 🔑 Get the current authenticated user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No authenticated user found");
-
-      // 📅 Get the start date of the current month
-      const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-      
-      // 📊 STEP A: Fetch expenses using relational join
-      const { data: userExpenses, error: expensesError } = await supabase
-        .from('expenses')
-        .select(`
-          amount,
-          description,
-          spent_at,
-          budgets!inner (
-            id,
-            user_id,
-            allocated_amount,
-            categories ( name )
-          )
-        `)
-        .eq('budgets.user_id', user.id)
-        .gte('spent_at', startOfMonth);
-
-      if (expensesError) {
-        console.error("❌ Supabase Expenses Fetch Error:", expensesError.message);
-      }
-
-      // 📊 STEP B: Fetch budgets
-      const { data: userBudgets, error: budgetsError } = await supabase
-        .from('budgets')
-        .select(`
-          allocated_amount,
-          categories ( name )
-        `)
-        .eq('user_id', user.id);
-
-      if (budgetsError) {
-        console.error("❌ Supabase Budgets Fetch Error:", budgetsError.message);
-      }
-
       const model = genAI.getGenerativeModel({ 
         model: "gemini-3.5-flash-lite",
-        generationConfig: {
-          responseMimeType: "application/json",
-        }
       });
 
       const systemInstruction = `
-        You are Payton, a smart financial tracking assistant, system help desk advisor, and customer support for the Payton mobile app.
+        You are Payton, a friendly financial advisor, system help desk specialist, and customer support for the Payton mobile app.
         Today's date is ${new Date().toDateString()}.
 
-        Your job is to analyze the user's input. Decide whether they want to log an expense ("intent": "LOG_EXPENSE"), ask a question about their spending/budget ("intent": "ASK_INSIGHT"), or ask for system help/FAQ troubleshooting ("intent": "SYSTEM_HELP").
-
-        ALLOWED CATEGORIES: ["Entertainment", "Rent", "Utilities", "Transportation", "Food & Dining", "Shopping", "Education", "Healthcare"]
-
-        USER'S FINANCIAL DATA CONTEXT:
-        - Recent Expenses This Month: ${JSON.stringify(userExpenses || [])}
-        - Current Active Budgets: ${JSON.stringify(userBudgets || [])}
-
-        DIRECTIONS:
-        - If it's a technical or system help question (e.g. password reset, email updates, security, app features), answer it clearly, helpfully, and warmly in English (or Visayan if appropriate, but English/Taglish is great for financial clarity).
-        - If they want to log an expense or ask insights, use the financial context data.
-        - Return a strict raw JSON matching this schema:
-        {
-          "intent": "LOG_EXPENSE" | "ASK_INSIGHT" | "SYSTEM_HELP",
-          "reply": "Your response to the user.",
-          "amount": number (numeric float value if LOG_EXPENSE, otherwise 0),
-          "category": "string (strictly pick one from Allowed categories if logging expense, otherwise empty string)",
-          "description": "string (short details if logging expense, otherwise empty string)"
-        }
+        YOUR ROLE AND CONSTRAINTS:
+        - You do NOT have direct access to the user's personal database, balance ledgers, or specific account balances. If they ask about their personal remaining balance, account total, or private transaction history, politely explain that for security and privacy reasons, you cannot view their personal database, and guide them to check their dashboard or transaction tabs instead.
+        - Answer questions regarding general personal finance advice, budgeting tips (like the 50/30/20 rule), savings strategies, and app FAQs/troubleshooting.
+        - Provide your response in plain text or a warm conversational tone.
       `;
 
       const result = await model.generateContent([systemInstruction, `User Input: ${currentInput}`]);
       const responseText = result.response.text();
       
-      const cleanJsonText = responseText.replace(/```json|```/g, '').trim();
-      const extractedData = JSON.parse(cleanJsonText);
-
-      let savedDataToDisplay = undefined;
-
-      // 💾 CONDITION: If the user intends to LOG an expense from Help desk chat
-      if (extractedData.intent === 'LOG_EXPENSE' && extractedData.amount > 0) {
-        let targetBudgetId = null;
-
-        const { data: categoryData } = await supabase
-          .from('categories')
-          .select('id')
-          .eq('name', extractedData.category)
-          .maybeSingle();
-
-        if (categoryData) {
-          const { data: budgetData } = await supabase
-            .from('budgets')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('category_id', categoryData.id)
-            .maybeSingle();
-
-          if (budgetData) {
-            targetBudgetId = budgetData.id;
-          }
-        }
-
-        const { error: insertError } = await supabase
-          .from('expenses')
-          .insert([
-            {
-              user_id: user.id, 
-              budget_id: targetBudgetId,
-              amount: Number(extractedData.amount || 0),
-              description: extractedData.description || 'Expense logged via Help Desk',
-              spent_at: new Date().toISOString()
-            },
-          ]);
-
-        if (!insertError) {
-          savedDataToDisplay = {
-            amount: Number(extractedData.amount),
-            category: extractedData.category,
-            description: extractedData.description
-          };
-        }
-      }
-
       const paytonMessage: Message = {
         id: (Date.now() + 1).toString(),
         sender: 'payton',
-        text: extractedData.reply,
-        extractedData: savedDataToDisplay
+        text: responseText || "I'm here to help with financial tips and app support!"
       };
 
       setMessages(prev => [...prev, paytonMessage]);
@@ -251,90 +136,76 @@ export default function HelpScreen() {
         transparent={true}
         onRequestClose={() => setChatVisible(false)}
       >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.modalOverlay}
-        >
-          <View style={styles.chatContainer}>
-            {/* Chat Header */}
-            <View style={styles.chatHeader}>
-              <View style={styles.chatHeaderInfo}>
-                <View style={styles.aiAvatar}>
-                  <Ionicons name="chatbubble-ellipses-outline" size={16} color="#FFFFFF" />
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.keyboardAvoidingContainer}
+          >
+            <View style={styles.chatContainer}>
+              {/* Chat Header */}
+              <View style={styles.chatHeader}>
+                <View style={styles.chatHeaderInfo}>
+                  <View style={styles.aiAvatar}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={16} color="#FFFFFF" />
+                  </View>
+                  <View>
+                    <Text style={styles.chatTitle}>Ask Payton</Text>
+                    <Text style={styles.chatSubtitle}>Financial Advisor & System Support</Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.chatTitle}>Ask Payton</Text>
-                  <Text style={styles.chatSubtitle}>AI Financial & System Assistant</Text>
-                </View>
+                <TouchableOpacity onPress={() => setChatVisible(false)} style={styles.closeBtn}>
+                  <Ionicons name="close" size={22} color="#1E293B" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity onPress={() => setChatVisible(false)} style={styles.closeBtn}>
-                <Ionicons name="close" size={22} color="#1E293B" />
-              </TouchableOpacity>
+
+              {/* Chat Messages */}
+              <ScrollView 
+                ref={flatListRef}
+                contentContainerStyle={styles.chatScroll} 
+                showsVerticalScrollIndicator={false}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              >
+                {messages.map((msg) => (
+                  <View 
+                    key={msg.id} 
+                    style={[
+                      styles.messageBubble, 
+                      msg.sender === 'user' ? styles.userBubble : styles.paytonBubble
+                    ]}
+                  >
+                    <Text style={[
+                      styles.messageText, 
+                      msg.sender === 'user' ? styles.userText : styles.paytonText
+                    ]}>
+                      {msg.text}
+                    </Text>
+                  </View>
+                ))}
+                {loading && (
+                  <View style={[styles.messageBubble, styles.paytonBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+                    <ActivityIndicator size="small" color="#173D45" />
+                    <Text style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic' }}>Thinking...</Text>
+                  </View>
+                )}
+              </ScrollView>
+
+              {/* Chat Input Area */}
+              <View style={styles.chatInputContainer}>
+                <TextInput
+                  style={styles.chatInput}
+                  placeholder="Ask Payton..."
+                  placeholderTextColor="#94A3B8"
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                />
+                <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage} disabled={loading}>
+                  <Ionicons name="send" size={18} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
             </View>
-
-            {/* Chat Messages */}
-            <ScrollView 
-              ref={flatListRef}
-              contentContainerStyle={styles.chatScroll} 
-              showsVerticalScrollIndicator={false}
-              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            >
-              {messages.map((msg) => (
-                <View 
-                  key={msg.id} 
-                  style={[
-                    styles.messageBubble, 
-                    msg.sender === 'user' ? styles.userBubble : styles.paytonBubble
-                  ]}
-                >
-                  <Text style={[
-                    styles.messageText, 
-                    msg.sender === 'user' ? styles.userText : styles.paytonText
-                  ]}>
-                    {msg.text}
-                  </Text>
-
-                  {/* DYNAMIC EXPENSE CARD IF LOGGED VIA HELP CHAT */}
-                  {msg.extractedData && msg.extractedData.amount > 0 && (
-                    <View style={styles.dataCard}>
-                      <View style={styles.dataRow}>
-                        <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                        <Text style={styles.dataCardTitle}>Logged Successfully!</Text>
-                      </View>
-                      <Text style={styles.dataDetails}>
-                        ₱{msg.extractedData.amount} • {msg.extractedData.category}
-                      </Text>
-                      <TouchableOpacity style={styles.viewBtn} onPress={() => { setChatVisible(false); router.push('/transaction'); }}>
-                        <Text style={styles.viewBtnText}>View Records</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              ))}
-              {loading && (
-                <View style={[styles.messageBubble, styles.paytonBubble, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
-                  <ActivityIndicator size="small" color="#173D45" />
-                  <Text style={{ fontSize: 12, color: '#64748B', fontStyle: 'italic' }}>Thinking...</Text>
-                </View>
-              )}
-            </ScrollView>
-
-            {/* Chat Input Area */}
-            <View style={styles.chatInputContainer}>
-              <TextInput
-                style={styles.chatInput}
-                placeholder="Ask Payton..."
-                placeholderTextColor="#94A3B8"
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-              />
-              <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage} disabled={loading}>
-                <Ionicons name="send" size={18} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
     </View>
   );
@@ -416,20 +287,24 @@ const styles = StyleSheet.create({
     fontWeight: '700', 
     letterSpacing: 0.5 
   },
-  // Modal & Chat Styles
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
+  keyboardAvoidingContainer: {
+    width: '100%',
+    maxHeight: '75%',
+    justifyContent: 'flex-end',
+  },
   chatContainer: {
-    height: '75%',
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+    maxHeight: '100%',
   },
   chatHeader: {
     flexDirection: 'row',
@@ -521,41 +396,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginLeft: 8,
   },
-  dataCard: { 
-    backgroundColor: '#F8FAFC', 
-    borderWidth: 1, 
-    borderColor: '#E2E8F0', 
-    borderRadius: 12, 
-    padding: 10, 
-    marginTop: 10, 
-    minWidth: 160 
-  },
-  dataRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 6 
-  },
-  dataCardTitle: { 
-    fontSize: 12, 
-    fontWeight: 'bold', 
-    color: '#10B981' 
-  },
-  dataDetails: { 
-    fontSize: 13, 
-    fontWeight: '600', 
-    color: '#2D3748', 
-    marginVertical: 4 
-  },
-  viewBtn: { 
-    backgroundColor: '#173D45', 
-    borderRadius: 6, 
-    paddingVertical: 5, 
-    alignItems: 'center', 
-    marginTop: 4 
-  },
-  viewBtnText: { 
-    color: '#FFFFFF', 
-    fontSize: 11, 
-    fontWeight: 'bold' 
-  }
 });
