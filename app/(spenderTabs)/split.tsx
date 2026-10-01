@@ -170,6 +170,11 @@ export default function SplitScreen() {
           personal_share,
           created_at,
           split_type,
+          category_id,
+          categories (
+            name,
+            icon
+          ),
           split_friends (
             id,
             split_expense_id,
@@ -487,6 +492,7 @@ export default function SplitScreen() {
             personal_share: ownerShare,
             created_at: new Date().toISOString(),
             split_type: splitType,
+            category_id: selectedCategoryId, // <-- Added category_id here
           },
         ])
         .select()
@@ -788,12 +794,15 @@ export default function SplitScreen() {
               const totalAmount = item.total_amount || 0;
               const personalShare = item.personal_share || 0;
 
+              // Get the dynamic category icon name (fallback to 'people-outline' if none exists)
+              const categoryIcon = item.categories?.icon || 'people-outline';
+
               return (
                 <View key={item.id} style={styles.historyCard}>
                   {/* TOP ROW: Description, Date & Total Amount */}
                   <View style={styles.historyTop}>
                     <View style={styles.categoryIconContainer}>
-                      <Ionicons name={"people-outline"} size={22} color={colors.primary} />
+                      <Ionicons name={categoryIcon} size={22} color={colors.primary} />
                     </View>
 
                     <View style={{ flex: 1 }}>

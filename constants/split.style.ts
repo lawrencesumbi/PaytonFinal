@@ -362,7 +362,7 @@ export const styles = StyleSheet.create({
   shadowOpacity: 0.06,
   shadowRadius: 12,
   marginBottom: 14,
-  elevation: 3,
+  elevation: 1,
 },
   historyTop: {
     flexDirection: 'row',
@@ -590,6 +590,7 @@ export const styles = StyleSheet.create({
   flexDirection: 'row',
   alignItems: 'center',
   gap: 8,
+  marginRight: 5,
 },
 iconButtonsRow: {
   flexDirection: 'row',
