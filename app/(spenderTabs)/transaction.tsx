@@ -140,8 +140,12 @@ function TransactionsScreenContent() {
             name,
             icon,
             color
+          ),
+          allowances!inner (
+            is_archived
           )
         `)
+        .eq('allowances.is_archived', false)
         .order('spent_at', { ascending: false });
 
       if (error) throw error;

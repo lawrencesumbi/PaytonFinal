@@ -25,6 +25,7 @@ interface AllowanceItem {
   start_date: string;
   end_date: string;
   received_at: string;
+  is_archived?: boolean;
 }
 
 interface ExpenseItem {
@@ -85,11 +86,12 @@ export default function MonitoringScreen() {
         setSpenderName(profile.full_name);
       }
 
-      // Fetch Allowances for this spender
+      // Fetch Allowances for this spender (filtering out archived ones if desired)
       const { data: allowanceData, error: allowanceError } = await supabase
         .from('allowances')
         .select('*')
         .eq('spender_id', spenderId)
+        .eq('is_archived', false) // Only fetch non-archived allowances
         .order('start_date', { ascending: false });
 
       if (allowanceError) throw allowanceError;
@@ -100,10 +102,11 @@ export default function MonitoringScreen() {
         .from('expenses')
         .select(`
           id, description, amount, spent_at, category_id, photo_url,
-          allowances!inner (spender_id),
+          allowances!inner (spender_id, is_archived),
           categories (name, icon)
         `)
         .eq('allowances.spender_id', spenderId)
+        .eq('allowances.is_archived', false)
         .order('spent_at', { ascending: false });
 
       if (expenseError) throw expenseError;
@@ -129,6 +132,27 @@ export default function MonitoringScreen() {
       fetchMonitoringData();
     }, [spenderId])
   );
+
+  const handleArchiveAllowance = (allowanceId: string) => {
+    Alert.alert('Archive Allowance', 'Are you sure you want to archive this allowance?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Archive',
+        onPress: async () => {
+          const { error } = await supabase
+            .from('allowances')
+            .update({ is_archived: true }) //[cite: 1]
+            .eq('id', allowanceId);
+
+          if (error) {
+            Alert.alert('Error', 'Failed to archive allowance.');
+          } else {
+            fetchMonitoringData();
+          }
+        },
+      },
+    ]);
+  };
 
   const handleDeleteAllowance = (allowanceId: string) => {
     Alert.alert('Delete Allowance', 'Are you sure you want to remove this allowance item?', [
@@ -253,7 +277,14 @@ export default function MonitoringScreen() {
                       </View>
                       <View style={styles.receiptRightSection}>
                         <Text style={styles.receiptItemAmount}>+₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                        <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.deleteAllowanceBtn}>
+                        
+                        {/* Archive Button */}
+                        <TouchableOpacity onPress={() => handleArchiveAllowance(item.id)} style={styles.actionBtn}>
+                          <Ionicons name="archive-outline" size={14} color={COLORS.deepTeal} />
+                        </TouchableOpacity>
+
+                        {/* Delete Button */}
+                        <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.actionBtn}>
                           <Ionicons name="trash-outline" size={14} color={COLORS.danger} />
                         </TouchableOpacity>
                       </View>
@@ -465,14 +496,15 @@ const styles = StyleSheet.create({
   receiptRightSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 6,
   },
   receiptItemAmount: {
     fontSize: 13,
     fontWeight: '700',
     color: COLORS.successGreen,
+    marginRight: 4,
   },
-  deleteAllowanceBtn: {
+  actionBtn: {
     padding: 4,
   },
   sectionHeaderRow: {

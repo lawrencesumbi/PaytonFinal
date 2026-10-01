@@ -109,6 +109,7 @@ export default function HomeScreen() {
     expenses!expenses_allowance_id_fkey (amount)
   `)
   .eq('sponsor_id', user.id)
+  .eq('is_archived', false) // <--- Add this line here
   .order('received_at', { ascending: false });
 
       if (allowancesError) throw allowancesError;
@@ -203,14 +204,6 @@ export default function HomeScreen() {
     setRefreshing(true);
     await fetchDashboardData(true);
   }, []);
-
-  const handleArchiveSpenderAllowances = (spenderName: string) => {
-    Alert.alert(
-      'Archive Feature', 
-      `Archive functionality for ${spenderName}'s allowances will be available soon.`,
-      [{ text: 'OK' }]
-    );
-  };
 
   const handleCardPress = (spenderId: string) => {
     router.push({ pathname: '/monitoring', params: { spenderId } });
@@ -533,14 +526,7 @@ export default function HomeScreen() {
                       </View>
                     </View>
 
-                    <View style={styles.cardActionIcons}>
-                      <TouchableOpacity 
-                        onPress={() => handleArchiveSpenderAllowances(item.spender_name)} 
-                        style={styles.iconCircleBtn}
-                      >
-                        <Ionicons name="archive-outline" size={14} color={COLORS.deepTeal} />
-                      </TouchableOpacity>
-                    </View>
+                    
                   </View>
 
                   <View style={styles.cardDivider} />
@@ -552,7 +538,7 @@ export default function HomeScreen() {
                         ₱{item.totalAllocated.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </Text>
                     </View>
-                    <View style={styles.amountColumn}>
+                    <View style={styles.amountColumnRight}>
                       <Text style={styles.amountLabel}>REMAINING</Text>
                       <Text style={styles.remainingAmountText}>
                         ₱{remainingAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -952,6 +938,10 @@ const styles = StyleSheet.create({
   },
   amountColumn: {
     flex: 1,
+  },
+  amountColumnRight: {
+    flex: 1,
+    alignItems: 'flex-end',
   },
   amountLabel: {
     fontSize: 10,

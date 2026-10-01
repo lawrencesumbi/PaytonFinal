@@ -268,6 +268,7 @@ export default function SpenderHomeScreen() {
         .from('allowances')
         .select('id, allowance_name, amount, received_at')
         .eq('spender_id', user.id)
+        .eq('is_archived', false) // Only fetch non-archived allowances
         .order('received_at', { ascending: false });
 
       if (allowanceError) throw allowanceError;
