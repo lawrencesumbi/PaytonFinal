@@ -5,7 +5,7 @@ import { decode } from 'base64-arraybuffer';
 import { CameraView, FlashMode, useCameraPermissions } from 'expo-camera';
 import { Stack, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,9 +16,16 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming
+} from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
@@ -32,9 +39,36 @@ export default function ScanReceiptScreen() {
 
   const [permission, requestPermission] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
+  const [frozenPhoto, setFrozenPhoto] = useState<string | null>(null);
   const [flash, setFlash] = useState<FlashMode>('off');
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const cameraRef = useRef<any>(null);
+
+  // Laser animation value for scanning effect
+  const scanAnim = useSharedValue(0);
+
+  useEffect(() => {
+    if (scanning) {
+      scanAnim.value = withRepeat(
+        withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true
+      );
+    } else {
+      scanAnim.value = 0;
+    }
+  }, [scanning]);
+
+  const laserStyle = useAnimatedStyle(() => {
+    const targetHeight = width * 1.15;
+    return {
+      transform: [
+        {
+          translateY: scanAnim.value * targetHeight,
+        },
+      ],
+    };
+  });
 
   if (!permission) {
     return (
@@ -73,15 +107,18 @@ export default function ScanReceiptScreen() {
       try {
         setScanning(true);
         
-        const options = { quality: 0.5, base64: true, skipProcessing: false };
+        const options = { quality: 0.7, base64: true, skipProcessing: false };
         const photo = await cameraRef.current.takePictureAsync(options);
 
         if (!photo.base64) {
           throw new Error("Unable to read valid image binary base64 data stream.");
         }
 
+        // Freeze frame with captured URI for smooth UX transition
+        setFrozenPhoto(photo.uri);
+
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash-lite",
           generationConfig: {
             responseMimeType: "application/json",
           }
@@ -132,12 +169,12 @@ export default function ScanReceiptScreen() {
               text: "Log Expense",
               onPress: async () => {
                 try {
-                  // 1. Get current logged-in user
                   const { data: { user }, error: userError } = await supabase.auth.getUser();
                   if (userError || !user) throw new Error("You must be logged in to log expenses.");
 
-                  // 2. Kuhaon ang allowance ID (Gamiton ang gikan sa params kung naa, kung wala, pangitaon ang pinakabag-o)
                   let targetAllowanceId = paramAllowanceId;
+
+                  // 1. Check if allowance exists for the user if not provided in params
                   if (!targetAllowanceId) {
                     const { data: latestAllowance } = await supabase
                       .from('allowances')
@@ -147,12 +184,58 @@ export default function ScanReceiptScreen() {
                       .limit(1)
                       .single();
 
-                    if (latestAllowance) {
-                      targetAllowanceId = latestAllowance.id;
+                    if (!latestAllowance) {
+                      Alert.alert("No Allowance Found ❌", "No active allowance was detected for your account. Please set up an allowance before logging expenses.");
+                      setFrozenPhoto(null);
+                      return;
+                    }
+                    targetAllowanceId = latestAllowance.id;
+                  } else {
+                    // Verify the provided paramAllowanceId actually exists
+                    const { data: specificAllowance } = await supabase
+                      .from('allowances')
+                      .select('id')
+                      .eq('id', targetAllowanceId)
+                      .single();
+
+                    if (!specificAllowance) {
+                      Alert.alert("No Allowance Found ❌", "No allowance was detected for this transaction.");
+                      setFrozenPhoto(null);
+                      return;
                     }
                   }
 
-                  // 3. Fetch matching category ID from categories table
+                  // 2. Calculate remaining allowance amount
+                  const { data: allowanceDetails, error: allowanceError } = await supabase
+                    .from('allowances')
+                    .select('amount')
+                    .eq('id', targetAllowanceId)
+                    .single();
+
+                  if (allowanceError || !allowanceDetails) {
+                    throw new Error("Could not retrieve allowance details.");
+                  }
+
+                  const { data: spentData, error: spentError } = await supabase
+                    .from('expenses')
+                    .select('amount')
+                    .eq('allowance_id', targetAllowanceId);
+
+                  if (spentError) throw spentError;
+
+                  const totalSpent = (spentData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+                  const remainingAllowance = Number(allowanceDetails.amount) - totalSpent;
+
+                  // Check if expense amount is greater than remaining allowance
+                  if (Number(totalAmount) > remainingAllowance) {
+                    Alert.alert(
+                      "Budget Exceeded ⚠️",
+                      `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your remaining allowance balance (₱${remainingAllowance.toFixed(2)}).`
+                    );
+                    setFrozenPhoto(null);
+                    return;
+                  }
+
                   const { data: categoryData } = await supabase
                     .from('categories')
                     .select('id')
@@ -161,7 +244,6 @@ export default function ScanReceiptScreen() {
 
                   const categoryId = categoryData ? categoryData.id : null;
 
-                  // 4. Upload photo directly via base64 arraybuffer
                   const fileName = `${user.id}/${Date.now()}.jpg`;
                   const { error: uploadError } = await supabase.storage
                     .from('receipts')
@@ -172,14 +254,12 @@ export default function ScanReceiptScreen() {
 
                   if (uploadError) throw uploadError;
 
-                  // 5. Get Public URL for the uploaded photo
                   const { data: urlData } = supabase.storage
                     .from('receipts')
                     .getPublicUrl(fileName);
 
                   const photoUrl = urlData.publicUrl;
 
-                  // 6. Insert record into expenses table using targetAllowanceId
                   const { error: insertError } = await supabase.from('expenses').insert([
                     { 
                       description: merchantName, 
@@ -199,10 +279,16 @@ export default function ScanReceiptScreen() {
                 } catch (dbError: any) {
                   console.error("Database/Storage Log Error:", dbError);
                   Alert.alert("Error", dbError.message || "Could not save the expense or upload the receipt.");
+                } finally {
+                  setFrozenPhoto(null);
                 }
               }
             },
-            { text: "Try Again", style: "cancel" }
+            { 
+              text: "Try Again", 
+              style: "cancel",
+              onPress: () => setFrozenPhoto(null)
+            }
           ]
         );
 
@@ -212,6 +298,7 @@ export default function ScanReceiptScreen() {
           "Scan Failed ❌", 
           "Gemini could not read or structuralize the text nodes accurately. Make sure the receipt matches the green framing borders."
         );
+        setFrozenPhoto(null);
       } finally {
         setScanning(false);
       }
@@ -223,7 +310,10 @@ export default function ScanReceiptScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar style="light" />
       
-      {isFocused ? (
+      {/* Live camera view or Frozen Image Preview */}
+      {frozenPhoto ? (
+        <Animated.Image source={{ uri: frozenPhoto }} style={StyleSheet.absoluteFill} />
+      ) : isFocused ? (
         <CameraView 
           style={StyleSheet.absoluteFill} 
           ref={cameraRef} 
@@ -235,6 +325,7 @@ export default function ScanReceiptScreen() {
         <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000000' }]} />
       )}
 
+      {/* Modern Overlay & Scanning Target Box */}
       <View style={styles.overlayContainer}>
         <View style={styles.topUtilityRow}>
           <TouchableOpacity 
@@ -245,7 +336,10 @@ export default function ScanReceiptScreen() {
             <Ionicons name="close" size={22} color="#FFFFFF" />
           </TouchableOpacity>
 
-          <Text style={styles.instructionText}>Align receipt within frame</Text>
+          <View style={styles.badgeContainer}>
+            <View style={styles.pulseDot} />
+            <Text style={styles.instructionText}>AI Auto-Detect</Text>
+          </View>
 
           <TouchableOpacity 
             style={[styles.utilityRoundButton, torchOn && styles.utilityButtonActive]} 
@@ -260,18 +354,31 @@ export default function ScanReceiptScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.scanTargetBox} />
+        {/* Dynamic Edge Framing Target with Corner Highlights */}
+        <View style={styles.scanTargetBox}>
+          <View style={[styles.cornerMarker, styles.topLeftMarker]} />
+          <View style={[styles.cornerMarker, styles.topRightMarker]} />
+          <View style={[styles.cornerMarker, styles.bottomLeftMarker]} />
+          <View style={[styles.cornerMarker, styles.bottomRightMarker]} />
 
-        <View style={styles.safeBottomHeaderSpacer}>
-          <Text style={styles.subInstructionText}>Ensure text is bright, legible, and clear</Text>
+          {/* Animated Laser Scanning Line */}
+          {scanning && (
+            <Animated.View style={[styles.laserLineContainer, laserStyle]}>
+              <View style={styles.laserGlow} />
+              <View style={styles.laserCore} />
+            </Animated.View>
+          )}
         </View>
+
+        <View style={styles.safeBottomHeaderSpacer} />
       </View>
 
+      {/* Bottom Shutter Controls */}
       <View style={styles.actionControlContainer}>
         {scanning ? (
           <View style={styles.loadingBlock}>
-            <ActivityIndicator size="small" color="#FFFFFF" />
-            <Text style={styles.loadingText}>Analyzing receipt nodes...</Text>
+            <ActivityIndicator size="small" color="#10B981" />
+            <Text style={styles.loadingText}>Extracting receipt data via Gemini...</Text>
           </View>
         ) : (
           <TouchableOpacity 
@@ -296,13 +403,13 @@ const styles = StyleSheet.create({
     width: '100%',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: Platform.OS === 'android' ? 50 : 0,
+    paddingTop: Platform.OS === 'android' ? 50 : 10,
   },
   utilityRoundButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(30, 41, 59, 0.7)', 
+    backgroundColor: 'rgba(15, 23, 42, 0.6)', 
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
@@ -312,6 +419,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderColor: '#10B981'
   },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+    gap: 8,
+  },
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+  },
+  instructionText: { 
+    color: '#FFFFFF', 
+    fontSize: 13, 
+    fontWeight: '600', 
+    letterSpacing: 0.2,
+  },
   overlayContainer: { 
     position: 'absolute',
     top: 0,
@@ -320,62 +450,133 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'space-between', 
     alignItems: 'center', 
-    backgroundColor: 'rgba(15, 23, 42, 0.45)', 
+    backgroundColor: 'rgba(3, 7, 18, 0.55)', 
     paddingHorizontal: 20,
     paddingBottom: 110,
   },
-  instructionText: { 
-    color: '#FFFFFF', 
-    fontSize: 15, 
-    fontWeight: '600', 
-    textAlign: 'center',
-    letterSpacing: -0.3,
-    flex: 1,
-    marginHorizontal: 10
-  },
   scanTargetBox: { 
-    width: width * 0.78, 
-    height: width * 1.15, 
-    borderWidth: 2, 
-    borderColor: '#10B981', 
-    borderRadius: 24, 
-    backgroundColor: 'transparent' 
+    width: width * 0.82, 
+    height: width * 1.2, 
+    borderWidth: 1.5, 
+    borderColor: 'rgba(16, 185, 129, 0.4)', 
+    borderRadius: 28, 
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
+    position: 'relative'
   },
-  safeBottomHeaderSpacer: { marginBottom: 50 },
+  cornerMarker: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    borderColor: '#10B981',
+    borderWidth: 3,
+  },
+  topLeftMarker: {
+    top: -2,
+    left: -2,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 18,
+  },
+  topRightMarker: {
+    top: -2,
+    right: -2,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+    borderTopRightRadius: 18,
+  },
+  bottomLeftMarker: {
+    bottom: -2,
+    left: -2,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 18,
+  },
+  bottomRightMarker: {
+    bottom: -2,
+    right: -2,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+    borderBottomRightRadius: 18,
+  },
+  laserLineContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  laserCore: {
+    width: '90%',
+    height: 3,
+    backgroundColor: '#34D399',
+    borderRadius: 2,
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  laserGlow: {
+    position: 'absolute',
+    width: '100%',
+    height: 16,
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+  },
+  safeBottomHeaderSpacer: { marginBottom: 10 },
   subInstructionText: { 
     color: '#94A3B8', 
     fontSize: 13, 
     textAlign: 'center', 
-    fontWeight: '500' 
+    fontWeight: '500',
+    letterSpacing: -0.2
   },
   actionControlContainer: { 
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.85)', 
-    paddingTop: 20,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 28, 
+    backgroundColor: 'rgba(3, 7, 18, 0.9)', 
+    paddingTop: 24,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 28, 
     alignItems: 'center', 
-    justifyContent: 'center' 
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)'
   },
   outerCaptureRing: { 
-    width: 76, 
-    height: 76, 
-    borderRadius: 38, 
+    width: 78, 
+    height: 78, 
+    borderRadius: 39, 
     borderWidth: 4, 
     borderColor: '#FFFFFF', 
     justifyContent: 'center', 
-    alignItems: 'center' 
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5
   },
   innerCaptureSolid: { 
-    width: 56, 
-    height: 56, 
-    borderRadius: 28, 
+    width: 60, 
+    height: 60, 
+    borderRadius: 30, 
     backgroundColor: '#10B981' 
   },
-  loadingBlock: { alignItems: 'center', flexDirection: 'row', gap: 10 },
-  loadingText: { color: '#FFFFFF', fontSize: 14, fontWeight: '500', letterSpacing: -0.1 },
+  loadingBlock: { 
+    alignItems: 'center', 
+    flexDirection: 'row', 
+    gap: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)'
+  },
+  loadingText: { color: '#E2E8F0', fontSize: 13, fontWeight: '600', letterSpacing: -0.2 },
   permissionIconCircle: { 
     width: 64, 
     height: 64, 

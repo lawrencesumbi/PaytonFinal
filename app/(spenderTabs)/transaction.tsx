@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,6 +10,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,7 +31,7 @@ interface Transaction {
   description: string;
   spent_at: string;
   photo_url?: string | null;
-  allowance_id?: string | null; // Added allowance_id
+  allowance_id?: string | null;
   categories: {
     name: string;
     icon: keyof typeof Ionicons.glyphMap;
@@ -51,6 +52,7 @@ function TransactionsScreenContent() {
   const scrollViewRef = useRef<ScrollView>(null);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -63,7 +65,7 @@ function TransactionsScreenContent() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  const [allowanceIdInput, setAllowanceIdInput] = useState<string | null>(null); // Optional state if you want to manage allowance_id via UI/input
+  const [allowanceIdInput, setAllowanceIdInput] = useState<string | null>(null);
 
   // Full-screen Image Viewer State
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
@@ -120,9 +122,9 @@ function TransactionsScreenContent() {
     }
   };
 
-  const fetchTransactions = useCallback(async () => {
+  const fetchTransactions = useCallback(async (isRefresh = false) => {
     try {
-      setLoading(true);
+      if (!isRefresh) setLoading(true);
       await fetchCategories();
 
       const { data, error } = await supabase
@@ -155,7 +157,7 @@ function TransactionsScreenContent() {
           description: expense.description,
           spent_at: expense.spent_at,
           photo_url: expense.photo_url || null,
-          allowance_id: expense.allowance_id || null, // Include allowance_id here
+          allowance_id: expense.allowance_id || null,
           categories: {
             name: rawCategory?.name || 'Uncategorized',
             icon: rawCategory?.icon || 'receipt-outline',
@@ -169,11 +171,21 @@ function TransactionsScreenContent() {
       console.error('Fetch Transactions Error:', error.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchTransactions();
+  // 1. Automatic update data every time the user focuses/navigates to this page
+  useFocusEffect(
+    useCallback(() => {
+      fetchTransactions();
+    }, [fetchTransactions])
+  );
+
+  // 2. Pull-to-refresh handler
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchTransactions(true);
   }, [fetchTransactions]);
 
   const handleSaveExpense = async () => {
@@ -200,7 +212,6 @@ function TransactionsScreenContent() {
         return;
       }
 
-      // Awtomatikong kuhaon ang pinakabag-o nga allowance ID ni spender
       let targetAllowanceId = allowanceIdInput;
       if (!targetAllowanceId) {
         const { data: latestAllowance } = await supabase
@@ -234,7 +245,7 @@ function TransactionsScreenContent() {
           description: descriptionInput.trim(),
           category_id: selectedCategory.id,
           user_id: user.id,
-          allowance_id: targetAllowanceId || null, // Diri na masulod ang ID automatic
+          allowance_id: targetAllowanceId || null,
           spent_at: new Date().toISOString(),
         });
 
@@ -354,7 +365,7 @@ function TransactionsScreenContent() {
         </View>
       </View>
 
-      {/* TRANSACTION LIST */}
+      {/* TRANSACTION LIST WITH PULL-TO-REFRESH */}
       <ScrollView 
         ref={scrollViewRef}
         style={styles.scrollContent}
@@ -362,6 +373,14 @@ function TransactionsScreenContent() {
         onScroll={handleScroll}
         scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: 80, paddingTop: 16 }}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            tintColor="#1F4F59" 
+            colors={['#1F4F59']} 
+          />
+        }
       >
         <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
           <View style={styles.searchContainer}>
@@ -422,7 +441,6 @@ function TransactionsScreenContent() {
                       <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }} numberOfLines={1}>
                         {expense.description}
                       </Text>
-                      {/* Photo Indicator Icon */}
                       {expense.photo_url ? (
                         <TouchableOpacity 
                           onPress={() => setSelectedImageUri(expense.photo_url!)}
