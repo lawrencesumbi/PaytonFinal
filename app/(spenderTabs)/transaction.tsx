@@ -175,21 +175,20 @@ function TransactionsScreenContent() {
     }
   }, []);
 
-  // 1. Automatic update data every time the user focuses/navigates to this page
   useFocusEffect(
     useCallback(() => {
       fetchTransactions();
     }, [fetchTransactions])
   );
 
-  // 2. Pull-to-refresh handler
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchTransactions(true);
   }, [fetchTransactions]);
 
   const handleSaveExpense = async () => {
-    if (!amountInput || isNaN(Number(amountInput)) || Number(amountInput) <= 0) {
+    const numericAmount = parseFloat(amountInput);
+    if (!amountInput || isNaN(numericAmount) || numericAmount <= 0) {
       alert('Please enter a valid amount');
       return;
     }
@@ -212,26 +211,68 @@ function TransactionsScreenContent() {
         return;
       }
 
+      // 1. Fetch the latest active allowance
       let targetAllowanceId = allowanceIdInput;
-      if (!targetAllowanceId) {
+      let currentAllowance: any = null;
+
+      if (targetAllowanceId) {
+        const { data: specificAllowance } = await supabase
+          .from('allowances')
+          .select('*')
+          .eq('id', targetAllowanceId)
+          .single();
+        currentAllowance = specificAllowance;
+      }
+
+      if (!currentAllowance) {
         const { data: latestAllowance } = await supabase
           .from('allowances')
-          .select('id')
+          .select('*')
           .eq('spender_id', user.id)
           .order('received_at', { ascending: false })
           .limit(1)
           .single();
 
         if (latestAllowance) {
+          currentAllowance = latestAllowance;
           targetAllowanceId = latestAllowance.id;
         }
+      }
+
+      // Rule 1: Prevent saving if there is no allowance available
+      if (!currentAllowance) {
+        alert('Cannot save expense: No active allowance found.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Calculate current remaining balance for this allowance
+      // Sum up existing expenses tied to this allowance (excluding current editing item if editing)
+      let expensesQuery = supabase
+        .from('expenses')
+        .select('amount')
+        .eq('allowance_id', targetAllowanceId);
+
+      if (editingTransaction) {
+        expensesQuery = expensesQuery.neq('id', editingTransaction.id);
+      }
+
+      const { data: existingExpenses } = await expensesQuery;
+      const totalSpent = (existingExpenses || []).reduce((sum, item) => sum + Number(item.amount), 0);
+      const remainingBalance = Number(currentAllowance.amount) - totalSpent;
+
+      // Rule 2: Prevent saving if the amount exceeds the remaining allowance balance
+      if (numericAmount > remainingBalance) {
+        alert(`Expense exceeds remaining allowance balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
+        setIsSubmitting(false);
+        return;
       }
 
       if (editingTransaction) {
         const { error } = await supabase
           .from('expenses')
           .update({
-            amount: parseFloat(amountInput),
+            amount: numericAmount,
             description: descriptionInput.trim(),
             category_id: selectedCategory.id,
             allowance_id: targetAllowanceId || null,
@@ -241,7 +282,7 @@ function TransactionsScreenContent() {
         if (error) throw error;
       } else {
         const { error } = await supabase.from('expenses').insert({
-          amount: parseFloat(amountInput),
+          amount: numericAmount,
           description: descriptionInput.trim(),
           category_id: selectedCategory.id,
           user_id: user.id,
@@ -402,7 +443,7 @@ function TransactionsScreenContent() {
             <View style={styles.emptyIconContainer}>
               <Ionicons name="receipt-outline" size={28} color="#94A3B8" />
             </View>
-            <Text style={styles.emptyText}>No Transactions Yet</Text>
+            <Text style={styles.emptyText}>No Transactions Found</Text>
           </View>
         ) : (
           <View style={{ paddingHorizontal: 20, gap: 8 }}>

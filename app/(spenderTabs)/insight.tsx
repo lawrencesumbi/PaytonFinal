@@ -87,7 +87,7 @@ export default function InsightScreen() {
 
             if (dbError) throw dbError;
             if (!metrics || !metrics.has_active_allowance) {
-                throw new Error(isPersonal ? 'No active income period found.' : 'No active income found for this period.');
+                throw new Error(isPersonal ? 'No active income period found.' : 'No active allowance found for this period.');
             }
 
             const model = genAI.getGenerativeModel({ 
