@@ -147,6 +147,7 @@ interface ReminderItem {
   amount: number;
   due_date: string;
   status: string;
+  category_id?: string | null; // <--- Add this line
   categories?: {
     name?: string;
     icon?: string;
@@ -377,10 +378,11 @@ export default function SpenderHomeScreen() {
           amount,
           due_date,
           status,
+          category_id,
           categories ( name, icon )
         `)
         .eq('user_id', user.id)
-        .eq('status', 'pending')
+        .in('status', ['pending', 'paid'])
         .order('due_date', { ascending: true });
 
       if (duesError) throw duesError;
@@ -492,6 +494,41 @@ export default function SpenderHomeScreen() {
     );
   };
 
+  const handleSettleReminder = async (reminder: ReminderItem) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // 1. Update reminder status to 'paid'
+      const { error: updateError } = await supabase
+        .from('reminders')
+        .update({ status: 'paid' })
+        .eq('id', reminder.id);
+
+      if (updateError) throw updateError;
+
+      // 2. Insert record into the expenses table
+      const { error: expenseError } = await supabase
+        .from('expenses')
+        .insert({
+          user_id: user.id,
+          description: reminder.title,
+          amount: reminder.amount,
+          category_id: reminder.category_id || null,
+          allowance_id: summary?.allowanceId || null,
+          spent_at: new Date().toISOString(),
+        });
+
+      if (expenseError) throw expenseError;
+
+      Alert.alert('Success', `"${reminder.title}" has been settled and recorded as an expense.`);
+      fetchDashboardData();
+    } catch (error: unknown) {
+      console.error('Error settling reminder:', extractErrorMessage(error));
+      alert('Failed to settle reminder.');
+    }
+  };
+
   if (loading) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: COLORS.bg }]}>
@@ -506,7 +543,7 @@ export default function SpenderHomeScreen() {
     : 0;
 
   const hasPendingOnDate = (dateStr: string) => {
-    return upcomingDues.some(due => due.due_date === dateStr);
+    return upcomingDues.some(due => due.due_date === dateStr && due.status === 'pending');
   };
 
   const handleDatePress = (dateStr: string) => {
@@ -603,7 +640,7 @@ export default function SpenderHomeScreen() {
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Upcoming Dues</Text>
             <TouchableOpacity onPress={() => setAddModalVisible(true)}>
-              <Text style={styles.seeAllText}>+ Add Reminders</Text>
+              <Text style={styles.seeAllText}>+ Set Reminders</Text>
             </TouchableOpacity>
           </View>
 
@@ -846,7 +883,8 @@ export default function SpenderHomeScreen() {
                   <Text style={styles.modalTitle}>Scheduled Dues</Text>
                   <Text style={styles.modalSubtitle}>{formatReadableDate(selectedDate)}</Text>
                 </View>
-                {filteredDues.length > 0 && (
+                {/* Only show the days remaining/overdue badge if there are pending dues or if not all items are paid */}
+                {filteredDues.length > 0 && filteredDues.some(d => d.status === 'pending') && (
                   <View style={[
                     styles.dueBadgeHome, 
                     { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
@@ -877,30 +915,52 @@ export default function SpenderHomeScreen() {
                 filteredDues.map((due, index) => {
                   const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
                   const categoryIcon = due.categories?.icon || 'pricetag-outline';
+                  const isPaid = due.status === 'paid';
 
                   return (
                     <View
                       key={due.id}
-                      style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
+                      style={[styles.reminderCardHome, { backgroundColor: cardBgColor, opacity: isPaid ? 0.75 : 1 }]}
                     >
                       <View style={styles.calendarBadgeHome}>
                         <Ionicons name={categoryIcon as any} size={22} color={COLORS.deepTeal} />
                       </View>
 
                       <View style={styles.cardContentHome}>
-                        <Text style={styles.reminderTitleHome}>{due.title}</Text>
+                        <Text style={[styles.reminderTitleHome, isPaid && { textDecorationLine: 'line-through', color: COLORS.textMuted }]}>
+                          {due.title}
+                        </Text>
                         <Text style={styles.reminderSubHome}>
                           ₱{Number(due.amount).toFixed(2)}
                         </Text>
                       </View>
 
-                      <TouchableOpacity 
-                        style={styles.deleteButtonHome} 
-                        onPress={() => handleDeleteReminder(due.id, due.title)}
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons name="trash-outline" size={18} color="#DC2626" />
-                      </TouchableOpacity>
+                      {/* Conditional Actions or Paid Badge */}
+                      {isPaid ? (
+                        <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(126, 160, 14, 0.15)', borderRadius: 8 }}>
+                          <Text style={{ color: COLORS.olive, fontWeight: '600', fontSize: 13 }}>Paid</Text>
+                        </View>
+                      ) : (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          {/* Settle Button */}
+                          <TouchableOpacity 
+                            style={[styles.deleteButtonHome, { backgroundColor: 'rgba(31, 79, 89, 0.1)' }]} 
+                            onPress={() => handleSettleReminder(due)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="checkmark-outline" size={18} color={COLORS.deepTeal} />
+                          </TouchableOpacity>
+
+                          {/* Delete Button */}
+                          <TouchableOpacity 
+                            style={styles.deleteButtonHome} 
+                            onPress={() => handleDeleteReminder(due.id, due.title)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   );
                 })
