@@ -57,7 +57,7 @@ type ActiveSplit = {
 
 export default function SplitScreen() {
   const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
   // Default Array States
@@ -92,6 +92,8 @@ export default function SplitScreen() {
   const [friendImageUri, setFriendImageUri] = useState<string | null>(null);
 
   const [myProfile, setMyProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
+
+  const [saving, setSaving] = useState(false);
 
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
@@ -419,131 +421,134 @@ export default function SplitScreen() {
   };
 
   const handleCreateSplitDirectly = async () => {
-    const numericAmount = parseFloat(amount);
-    if (!description.trim() || isNaN(numericAmount) || numericAmount <= 0) {
-      showAlert('Invalid Input', 'Please enter a valid description and amount.');
-      return;
-    }
+  if (loading) return; // Prevent double taps
 
-    if ((selectedFriends?.length || 0) === 0) {
-      showAlert('Select Friends', 'Please select at least one friend to split with.');
-      return;
-    }
+  const numericAmount = parseFloat(amount);
+  if (!description.trim() || isNaN(numericAmount) || numericAmount <= 0) {
+    showAlert('Invalid Input', 'Please enter a valid description and amount.');
+    return;
+  }
 
-    let calculatedFriendsPayload: { friend_id: string; owed_amount: number }[] = [];
-    let ownerShare = 0;
+  if ((selectedFriends?.length || 0) === 0) {
+    showAlert('Select Friends', 'Please select at least one friend to split with.');
+    return;
+  }
 
-    if (splitType === 'EQUAL') {
-      const totalParticipants = selectedFriends.length + 1;
-      const share = parseFloat((numericAmount / totalParticipants).toFixed(2));
-      ownerShare = share;
-      calculatedFriendsPayload = selectedFriends.map((fId) => ({
-        friend_id: fId,
-        owed_amount: share,
-      }));
-    } else {
-      let customSum = 0;
-      for (const fId of selectedFriends) {
-        const val = parseFloat(customShares[fId] || '0');
-        if (isNaN(val) || val < 0) {
-          showAlert('Invalid Share', 'Please enter valid custom amounts for selected friends.');
-          return;
-        }
-        customSum += val;
-        calculatedFriendsPayload.push({
-          friend_id: fId,
-          owed_amount: val,
-        });
-      }
+  let calculatedFriendsPayload: { friend_id: string; owed_amount: number }[] = [];
+  let ownerShare = 0;
 
-      if (customSum > numericAmount) {
-        showAlert('Math Error', 'The sum of friend shares cannot exceed total amount.');
+  if (splitType === 'EQUAL') {
+    const totalParticipants = selectedFriends.length + 1;
+    const share = parseFloat((numericAmount / totalParticipants).toFixed(2));
+    ownerShare = share;
+    calculatedFriendsPayload = selectedFriends.map((fId) => ({
+      friend_id: fId,
+      owed_amount: share,
+    }));
+  } else {
+    let customSum = 0;
+    for (const fId of selectedFriends) {
+      const val = parseFloat(customShares[fId] || '0');
+      if (isNaN(val) || val < 0) {
+        showAlert('Invalid Share', 'Please enter valid custom amounts for selected friends.');
         return;
       }
-      ownerShare = parseFloat((numericAmount - customSum).toFixed(2));
+      customSum += val;
+      calculatedFriendsPayload.push({
+        friend_id: fId,
+        owed_amount: val,
+      });
     }
 
-    setLoading(true);
+    if (customSum > numericAmount) {
+      showAlert('Math Error', 'The sum of friend shares cannot exceed total amount.');
+      return;
+    }
+    ownerShare = parseFloat((numericAmount - customSum).toFixed(2));
+  }
 
-    try {
-      // 1. Fetch the user's most recent allowance dynamically
-      let activeAllowanceId = null;
-      const { data: latestAllowance, error: allowFetchErr } = await supabase
-        .from('allowances')
-        .select('id')
-        .eq('spender_id', user.id)
-        .eq('is_archived', false) // Optional: ensure it's not archived
-        .order('received_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+  // Turn loading on right before performing network/async operations
+  setLoading(true);
 
-      if (!allowFetchErr && latestAllowance) {
-        activeAllowanceId = latestAllowance.id;
-      }
+  try {
+    // 1. Fetch the user's most recent allowance dynamically
+    let activeAllowanceId = null;
+    const { data: latestAllowance, error: allowFetchErr } = await supabase
+      .from('allowances')
+      .select('id')
+      .eq('spender_id', user.id)
+      .eq('is_archived', false) // Optional: ensure it's not archived
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      // 2. Insert into split_expenses table
-      const { data: splitExp, error: splitExpErr } = await supabase
-        .from('split_expenses')
-        .insert([
-          {
-            user_id: user.id,
-            description: description.trim(),
-            total_amount: numericAmount,
-            personal_share: ownerShare,
-            created_at: new Date().toISOString(),
-            split_type: splitType,
-            category_id: selectedCategoryId, // <-- Added category_id here
-          },
-        ])
-        .select()
-        .single();
+    if (!allowFetchErr && latestAllowance) {
+      activeAllowanceId = latestAllowance.id;
+    }
 
-      if (splitExpErr) throw splitExpErr;
-
-      const friendInserts = calculatedFriendsPayload.map((f: any) => ({
-        split_expense_id: splitExp.id,
-        friend_id: f.friend_id,
-        owed_amount: f.owed_amount,
-        status: 'unpaid',
-        updated_at: new Date().toISOString(),
-      }));
-
-      const { error: friendsErr } = await supabase.from('split_friends').insert(friendInserts);
-      if (friendsErr) throw friendsErr;
-
-      // 3. Insert into general expenses table using category_id, fetched allowance_id, and spent_at[cite: 2, 3]
-      const { error: expenseErr } = await supabase.from('expenses').insert([
+    // 2. Insert into split_expenses table
+    const { data: splitExp, error: splitExpErr } = await supabase
+      .from('split_expenses')
+      .insert([
         {
           user_id: user.id,
-          amount: numericAmount,
           description: description.trim(),
-          category_id: selectedCategoryId,
-          allowance_id: activeAllowanceId,
-          spent_at: new Date().toISOString(),
+          total_amount: numericAmount,
+          personal_share: ownerShare,
+          created_at: new Date().toISOString(),
+          split_type: splitType,
+          category_id: selectedCategoryId, // <-- Added category_id here
         },
-      ]);
+      ])
+      .select()
+      .single();
 
-      if (expenseErr) console.error('Failed to log in expenses table:', expenseErr.message);
+    if (splitExpErr) throw splitExpErr;
 
-      // 4. Send email notifications
-      await sendNewSplitEmails(
-        splitExp,
-        calculatedFriendsPayload,
-        numericAmount,
-        description.trim(),
-        myProfile?.full_name
-      );
+    const friendInserts = calculatedFriendsPayload.map((f: any) => ({
+      split_expense_id: splitExp.id,
+      friend_id: f.friend_id,
+      owed_amount: f.owed_amount,
+      status: 'unpaid',
+      updated_at: new Date().toISOString(),
+    }));
 
-      showAlert('Success', 'Split expense saved, logged to expenses, and emails sent!');
-      setFormVisible(false);
-      resetForm();
-      fetchData(user.id);
-    } catch (err: any) {
-      showAlert('Error', err.message || 'Failed to process split.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    const { error: friendsErr } = await supabase.from('split_friends').insert(friendInserts);
+    if (friendsErr) throw friendsErr;
+
+    // 3. Insert into general expenses table using category_id, fetched allowance_id, and spent_at
+    const { error: expenseErr } = await supabase.from('expenses').insert([
+      {
+        user_id: user.id,
+        amount: numericAmount,
+        description: description.trim(),
+        category_id: selectedCategoryId,
+        allowance_id: activeAllowanceId,
+        spent_at: new Date().toISOString(),
+      },
+    ]);
+
+    if (expenseErr) console.error('Failed to log in expenses table:', expenseErr.message);
+
+    // 4. Send email notifications
+    await sendNewSplitEmails(
+      splitExp,
+      calculatedFriendsPayload,
+      numericAmount,
+      description.trim(),
+      myProfile?.full_name
+    );
+
+    showAlert('Success', 'Split expense saved, logged to expenses, and emails sent!');
+    setFormVisible(false);
+    resetForm();
+    fetchData(user.id);
+  } catch (err: any) {
+    showAlert('Error', err.message || 'Failed to process split.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleInitiateSettleFriend = (friendShare: ActiveSplitFriend) => {
     setSelectedFriendToSettle(friendShare);
@@ -1128,9 +1133,25 @@ export default function SplitScreen() {
                 </View>
               )}
 
-              <TouchableOpacity style={styles.submitBtn} onPress={handleCreateSplitDirectly}>
-                <Text style={styles.submitBtnText}>Confirm & Save Split</Text>
-                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+              <TouchableOpacity 
+                style={[
+                  styles.submitBtn, 
+                  loading && { opacity: 0.7 }
+                ]} 
+                onPress={handleCreateSplitDirectly}
+                disabled={loading}
+              >
+                {loading ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.submitBtnText}>Saving...</Text>
+                  </View>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <Text style={styles.submitBtnText}>Confirm & Save Split</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                  </View>
+                )}
               </TouchableOpacity>
             </ScrollView>
           </View>
