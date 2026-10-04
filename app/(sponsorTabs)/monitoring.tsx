@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   ScrollView,
@@ -41,6 +40,14 @@ interface ExpenseItem {
   };
 }
 
+interface CustomAlertConfig {
+  visible: boolean;
+  title: string;
+  message: string;
+  type: 'archive' | 'delete' | 'error';
+  onConfirm: () => void;
+}
+
 const COLORS = {
   deepTeal: '#1F4F59',
   headerBg: '#133D44',
@@ -68,6 +75,19 @@ export default function MonitoringScreen() {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
+
+  // Custom Alert State
+  const [alertConfig, setAlertConfig] = useState<CustomAlertConfig>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'archive',
+    onConfirm: () => {},
+  });
+
+  const hideAlert = () => {
+    setAlertConfig((prev) => ({ ...prev, visible: false }));
+  };
 
   const fetchMonitoringData = async () => {
     if (!spenderId) return;
@@ -129,42 +149,56 @@ export default function MonitoringScreen() {
   );
 
   const handleArchiveAllowance = (allowanceId: string) => {
-    Alert.alert('Archive Allowance', 'Are you sure you want to archive this allowance?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Archive',
-        onPress: async () => {
-          const { error } = await supabase
-            .from('allowances')
-            .update({ is_archived: true })
-            .eq('id', allowanceId);
+    setAlertConfig({
+      visible: true,
+      title: 'Archive Allowance',
+      message: 'This allowance will be moved to archives and hidden from active tracking. You can restore it later if needed.',
+      type: 'archive',
+      onConfirm: async () => {
+        hideAlert();
+        const { error } = await supabase
+          .from('allowances')
+          .update({ is_archived: true })
+          .eq('id', allowanceId);
 
-          if (error) {
-            Alert.alert('Error', 'Failed to archive allowance.');
-          } else {
-            fetchMonitoringData();
-          }
-        },
+        if (error) {
+          setAlertConfig({
+            visible: true,
+            title: 'Action Failed',
+            message: 'Unable to archive the allowance right now. Please try again.',
+            type: 'error',
+            onConfirm: hideAlert,
+          });
+        } else {
+          fetchMonitoringData();
+        }
       },
-    ]);
+    });
   };
 
   const handleDeleteAllowance = (allowanceId: string) => {
-    Alert.alert('Delete Allowance', 'Are you sure you want to remove this allowance item?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          const { error } = await supabase.from('allowances').delete().eq('id', allowanceId);
-          if (error) {
-            Alert.alert('Error', 'Failed to delete allowance.');
-          } else {
-            fetchMonitoringData();
-          }
-        },
+    setAlertConfig({
+      visible: true,
+      title: 'Delete Allowance',
+      message: 'This action is permanent and cannot be undone. Associated tracking records may be affected.',
+      type: 'delete',
+      onConfirm: async () => {
+        hideAlert();
+        const { error } = await supabase.from('allowances').delete().eq('id', allowanceId);
+        
+        if (error) {
+          setAlertConfig({
+            visible: true,
+            title: 'Action Failed',
+            message: 'Unable to delete the allowance item right now.',
+            type: 'error',
+            onConfirm: hideAlert,
+          });
+        } else {
+          fetchMonitoringData();
+        }
       },
-    ]);
+    });
   };
 
   const formatDateTime = (dateStr: string) => {
@@ -396,6 +430,63 @@ export default function MonitoringScreen() {
                   resizeMode="contain" 
                 />
               ) : null}
+            </View>
+          </Modal>
+
+          {/* MODERN CUSTOM ALERT MODAL */}
+          <Modal
+            visible={alertConfig.visible}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={hideAlert}
+          >
+            <View style={styles.alertOverlay}>
+              <View style={styles.alertContainer}>
+                <View style={[
+                  styles.alertIconBadge, 
+                  alertConfig.type === 'delete' && styles.alertIconBadgeDanger,
+                  alertConfig.type === 'error' && styles.alertIconBadgeDanger
+                ]}>
+                  <Ionicons 
+                    name={
+                      alertConfig.type === 'archive' ? 'archive-outline' :
+                      alertConfig.type === 'delete' ? 'trash-outline' : 'alert-circle-outline'
+                    } 
+                    size={22} 
+                    color={alertConfig.type === 'archive' ? COLORS.deepTeal : COLORS.danger} 
+                  />
+                </View>
+
+                <Text style={styles.alertTitle}>{alertConfig.title}</Text>
+                <Text style={styles.alertMessage}>{alertConfig.message}</Text>
+
+                <View style={styles.alertButtonRow}>
+                  {alertConfig.type !== 'error' && (
+                    <TouchableOpacity 
+                      style={styles.alertCancelButton} 
+                      onPress={hideAlert}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.alertCancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity 
+                    style={[
+                      styles.alertConfirmButton,
+                      (alertConfig.type === 'delete' || alertConfig.type === 'error') && styles.alertConfirmButtonDanger,
+                      alertConfig.type === 'error' && { flex: 1 }
+                    ]} 
+                    onPress={alertConfig.onConfirm}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.alertConfirmButtonText}>
+                      {alertConfig.type === 'archive' ? 'Archive' : 
+                       alertConfig.type === 'delete' ? 'Delete' : 'Okay'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
           </Modal>
 
@@ -638,11 +729,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     gap: 3,
   },
-  photoIndicatorText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: COLORS.deepTeal,
-  },
 
   // Empty state & modals
   emptyExpensesBox: {
@@ -680,5 +766,89 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: 20,
-  }
+  },
+
+  // Custom Modern Alert Styles
+  alertOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(19, 61, 68, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  alertContainer: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: COLORS.card,
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 5,
+  },
+  alertIconBadge: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: COLORS.tintSubtle,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  alertIconBadgeDanger: {
+    backgroundColor: '#FEF2F2',
+  },
+  alertTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  alertMessage: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 24,
+  },
+  alertButtonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  alertCancelButton: {
+    flex: 1,
+    backgroundColor: COLORS.tintSubtle,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alertCancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
+  alertConfirmButton: {
+    flex: 1,
+    backgroundColor: COLORS.deepTeal,
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alertConfirmButtonDanger: {
+    backgroundColor: COLORS.danger,
+  },
+  alertConfirmButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
 });
