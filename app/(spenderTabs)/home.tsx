@@ -936,13 +936,13 @@ export default function SpenderHomeScreen() {
                       </View>
 
                       {/* Conditional Actions or Paid Badge */}
-                      {isPaid ? (
-                        <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(126, 160, 14, 0.15)', borderRadius: 8 }}>
-                          <Text style={{ color: COLORS.olive, fontWeight: '600', fontSize: 13 }}>Paid</Text>
-                        </View>
-                      ) : (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          {/* Settle Button */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {isPaid ? (
+                          <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(126, 160, 14, 0.15)', borderRadius: 8, marginRight: 4 }}>
+                            <Text style={{ color: COLORS.olive, fontWeight: '600', fontSize: 13 }}>Paid</Text>
+                          </View>
+                        ) : (
+                          /* Settle Button (Only shown when not paid) */
                           <TouchableOpacity 
                             style={[styles.deleteButtonHome, { backgroundColor: 'rgba(31, 79, 89, 0.1)' }]} 
                             onPress={() => handleSettleReminder(due)}
@@ -950,17 +950,17 @@ export default function SpenderHomeScreen() {
                           >
                             <Ionicons name="checkmark-outline" size={18} color={COLORS.deepTeal} />
                           </TouchableOpacity>
+                        )}
 
-                          {/* Delete Button */}
-                          <TouchableOpacity 
-                            style={styles.deleteButtonHome} 
-                            onPress={() => handleDeleteReminder(due.id, due.title)}
-                            activeOpacity={0.7}
-                          >
-                            <Ionicons name="trash-outline" size={18} color="#DC2626" />
-                          </TouchableOpacity>
-                        </View>
-                      )}
+                        {/* Delete Button (Always shown) */}
+                        <TouchableOpacity 
+                          style={styles.deleteButtonHome} 
+                          onPress={() => handleDeleteReminder(due.id, due.title)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   );
                 })

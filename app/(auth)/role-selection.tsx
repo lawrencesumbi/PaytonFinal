@@ -22,7 +22,7 @@ export default function RoleSelectionScreen() {
 
   const pairedRoles: { type: Role; description: string; icon: any }[] = [
     { type: 'Spender', description: 'Receive allowance from sponsor and log daily expenses.', icon: 'credit-card' },
-    { type: 'Sponsor', description: 'Allocate spender allowances and monitor expense real-time.', icon: 'shield' },
+    { type: 'Sponsor', description: 'Allocate spender allowances and monitor their expenses real-time.', icon: 'shield' },
   ];
 
   const handleSelect = (role: Role) => {
