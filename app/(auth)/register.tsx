@@ -29,6 +29,14 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Error state for each input field
+  const [errors, setErrors] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  });
+
   // Helper function to direct users after successful authentication
   const navigateBasedOnRole = async (userId: string) => {
     const { data: profile, error: profileError } = await supabase
@@ -38,7 +46,6 @@ export default function RegisterScreen() {
       .maybeSingle();
 
     if (profileError || !profile) {
-      // New registered user via OAuth might not have a role set yet
       router.replace('/role-selection');
       return;
     }
@@ -61,18 +68,55 @@ export default function RegisterScreen() {
     }
   };
 
-  // 1. Email/Password Signup Handler
+  // 1. Email/Password Signup Handler with Inline Validation
   const handleRegister = async () => {
     const trimmedEmail = email.trim();
     const trimmedFullName = fullName.trim();
 
-    if (!trimmedFullName || !trimmedEmail || !password || !confirmPassword) {
-      Alert.alert("Error", "Please fill out all fields.");
-      return;
+    let newErrors = {
+      fullName: '',
+      email: '',
+      password: '',
+      confirmPassword: '',
+    };
+
+    let hasError = false;
+
+    // Regex for basic valid email format checking
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!trimmedFullName) {
+      newErrors.fullName = 'Full Name cannot be blank.';
+      hasError = true;
     }
 
-    if (password !== confirmPassword) {
-      Alert.alert("Error", "Passwords do not match.");
+    if (!trimmedEmail) {
+      newErrors.email = 'Email address cannot be blank.';
+      hasError = true;
+    } else if (!emailRegex.test(trimmedEmail)) {
+      newErrors.email = 'Please enter a valid email address.';
+      hasError = true;
+    }
+
+    if (!password) {
+      newErrors.password = 'Password cannot be blank.';
+      hasError = true;
+    } else if (password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters long.';
+      hasError = true;
+    }
+
+    if (!confirmPassword) {
+      newErrors.confirmPassword = 'Confirm password cannot be blank.';
+      hasError = true;
+    } else if (password !== confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match.';
+      hasError = true;
+    }
+
+    setErrors(newErrors);
+
+    if (hasError) {
       return;
     }
 
@@ -90,14 +134,18 @@ export default function RegisterScreen() {
       });
 
       if (error) {
-        Alert.alert("Signup Failed", error.message);
-      } else {
-        // Kung na-authenticate na dayon ang user (depende sa Supabase settings nimo)
-        if (data?.user) {
-          await navigateBasedOnRole(data.user.id);
+        // Parse Supabase error message to assign inline if it targets email or password
+        const msg = error.message.toLowerCase();
+        if (msg.includes('email') || msg.includes('already registered')) {
+          setErrors(prev => ({ ...prev, email: error.message }));
+        } else if (msg.includes('password')) {
+          setErrors(prev => ({ ...prev, password: error.message }));
         } else {
-          router.replace('/role-selection');
+          Alert.alert("Signup Failed", error.message);
         }
+      } else {
+        // Redirect to the verify-email screen
+        router.push('/verify-email');
       }
     } catch (e: any) {
       Alert.alert("Error", e.message || "An unexpected error occurred.");
@@ -190,74 +238,102 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.form}>
-            <View style={styles.inputWrapper}>
-              <Feather name="user" color="#085334" size={20} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Full Name"
-                placeholderTextColor="#A0AEC0"
-                value={fullName}
-                onChangeText={setFullName}
-                autoCapitalize="words"
-                editable={!isLoading}
-              />
+            {/* Full Name Field */}
+            <View style={styles.inputContainer}>
+              <View style={[styles.inputWrapper, errors.fullName ? styles.inputErrorBorder : null]}>
+                <Feather name="user" color={errors.fullName ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Full Name"
+                  placeholderTextColor="#A0AEC0"
+                  value={fullName}
+                  onChangeText={(text) => {
+                    setFullName(text);
+                    if (errors.fullName) setErrors(prev => ({ ...prev, fullName: '' }));
+                  }}
+                  autoCapitalize="words"
+                  editable={!isLoading}
+                />
+              </View>
+              {errors.fullName ? <Text style={styles.errorText}>{errors.fullName}</Text> : null}
             </View>
 
-            <View style={styles.inputWrapper}>
-              <Feather name="mail" color="#085334" size={20} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Email Address"
-                placeholderTextColor="#A0AEC0"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!isLoading}
-              />
+            {/* Email Address Field */}
+            <View style={styles.inputContainer}>
+              <View style={[styles.inputWrapper, errors.email ? styles.inputErrorBorder : null]}>
+                <Feather name="mail" color={errors.email ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email Address"
+                  placeholderTextColor="#A0AEC0"
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    if (errors.email) setErrors(prev => ({ ...prev, email: '' }));
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!isLoading}
+                />
+              </View>
+              {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
             </View>
 
-            <View style={styles.inputWrapper}>
-              <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                placeholderTextColor="#A0AEC0"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                editable={!isLoading}
-              />
-              <TouchableOpacity
-                onPress={() => setShowPassword(!showPassword)}
-                style={styles.eyeIcon}
-                disabled={isLoading}
-              >
-                <Feather name={showPassword ? 'eye-off' : 'eye'} color="#718096" size={20} />
-              </TouchableOpacity>
+            {/* Password Field */}
+            <View style={styles.inputContainer}>
+              <View style={[styles.inputWrapper, errors.password ? styles.inputErrorBorder : null]}>
+                <Feather name="lock" color={errors.password ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  placeholderTextColor="#A0AEC0"
+                  value={password}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
+                  }}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  editable={!isLoading}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.eyeIcon}
+                  disabled={isLoading}
+                >
+                  <Feather name={showPassword ? 'eye-off' : 'eye'} color="#718096" size={20} />
+                </TouchableOpacity>
+              </View>
+              {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
             </View>
 
-            <View style={styles.inputWrapper}>
-              <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Confirm Password"
-                placeholderTextColor="#A0AEC0"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                editable={!isLoading}
-              />
-              <TouchableOpacity
-                onPress={() => setShowPassword(!showPassword)}
-                style={styles.eyeIcon}
-                disabled={isLoading}
-              >
-                <Feather name={showPassword ? 'eye-off' : 'eye'} color="#718096" size={20} />
-              </TouchableOpacity>
+            {/* Confirm Password Field */}
+            <View style={styles.inputContainer}>
+              <View style={[styles.inputWrapper, errors.confirmPassword ? styles.inputErrorBorder : null]}>
+                <Feather name="lock" color={errors.confirmPassword ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Confirm Password"
+                  placeholderTextColor="#A0AEC0"
+                  value={confirmPassword}
+                  onChangeText={(text) => {
+                    setConfirmPassword(text);
+                    if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                  }}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  editable={!isLoading}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword(!showPassword)}
+                  style={styles.eyeIcon}
+                  disabled={isLoading}
+                >
+                  <Feather name={showPassword ? 'eye-off' : 'eye'} color="#718096" size={20} />
+                </TouchableOpacity>
+              </View>
+              {errors.confirmPassword ? <Text style={styles.errorText}>{errors.confirmPassword}</Text> : null}
             </View>
 
             <TouchableOpacity 
@@ -274,10 +350,10 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.dividerContainer}>
-                      <View style={styles.dividerLine} />
-                      <Text style={styles.dividerText}>Or</Text>
-                      <View style={styles.dividerLine} />
-                    </View>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>Or</Text>
+            <View style={styles.dividerLine} />
+          </View>
 
           <View style={styles.socialContainer}>
             <TouchableOpacity 
@@ -344,6 +420,9 @@ const styles = StyleSheet.create({
     width: '100%', 
     marginBottom: 20,
   },
+  inputContainer: {
+    marginBottom: 10,
+  },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -351,11 +430,20 @@ const styles = StyleSheet.create({
     borderRadius: 30, 
     paddingHorizontal: 20,
     height: 58,
-    marginBottom: 18,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 4,
+  },
+  inputErrorBorder: {
+    borderWidth: 1.5,
+    borderColor: '#E53E3E',
+  },
+  errorText: {
+    color: '#E53E3E',
+    fontSize: 12,
+    marginTop: 6,
+    marginLeft: 20,
   },
   inputIcon: {
     marginRight: 12,
@@ -386,21 +474,21 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     fontWeight: '600',
   },
-dividerContainer: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  marginVertical: 20,
-},
-dividerLine: {
-  flex: 1,
-  height: 1,
-  backgroundColor: '#E2E8F0', // Light border color matching your social buttons
-},
-dividerText: {
-  color: '#0c9c6c',
-  fontSize: 14,
-  marginHorizontal: 12, // Spacing between lines and text
-},
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  dividerText: {
+    color: '#0c9c6c',
+    fontSize: 14,
+    marginHorizontal: 12,
+  },
   socialContainer: {
     gap: 12,
     marginBottom: 32,
