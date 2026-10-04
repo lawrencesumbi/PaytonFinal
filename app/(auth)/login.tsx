@@ -5,6 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -202,6 +203,11 @@ export default function LoginScreen() {
       >
         <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
           <View style={styles.headerContainer}>
+            <Image 
+              source={require('../../assets/images/pin.jpg')} 
+              style={styles.logoImage} 
+              resizeMode="contain"
+            />
             <Text style={styles.title}>
               Welcome to <Text style={styles.brandText}>Payton</Text>
             </Text>
@@ -335,6 +341,13 @@ const styles = StyleSheet.create({
   },
   headerContainer: { 
     marginBottom: 30,
+    alignItems: 'center',
+  },
+  logoImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    marginBottom: 16,
   },
   title: { 
     fontSize: 34, 
@@ -342,6 +355,7 @@ const styles = StyleSheet.create({
     color: '#000000', 
     lineHeight: 42,
     marginBottom: 12, 
+    textAlign: 'center',
   },
   brandText: {
     color: '#276916', 
@@ -350,6 +364,7 @@ const styles = StyleSheet.create({
     fontSize: 13, 
     color: '#0e9b59',
     lineHeight: 18,
+    textAlign: 'center',
   },
   form: { 
     width: '100%', 
@@ -363,7 +378,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     height: 58,
     marginBottom: 6,
-    elevation: 0,
     borderWidth: 1,
     borderColor: 'transparent',
   },
@@ -405,7 +419,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 6,
-    elevation: 3,
   },
   buttonText: { 
     color: '#FFFFFF', 
@@ -439,7 +452,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: 'transparent',
   },
   socialIcon: {
     marginRight: 10,
