@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   Modal,
@@ -50,7 +49,6 @@ const getLocalDateString = (year: number, monthIndex: number, day: number) => {
   return `${y}-${m}-${date}`;
 };
 
-// Helper function to format YYYY-MM-DD into "Month DD, YYYY"
 const formatDisplayDate = (dateStr: string) => {
   if (!dateStr) return '';
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -63,7 +61,6 @@ const formatDisplayDate = (dateStr: string) => {
   });
 };
 
-// Helper function to format a date range cleanly (e.g., "September 01 - 07, 2026")
 const formatDisplayDateRange = (startStr: string, endStr: string) => {
   if (!startStr) return '';
   if (startStr === endStr) return formatDisplayDate(startStr);
@@ -157,6 +154,13 @@ export default function AllowanceScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Modern Feedback Banner State
+  const [feedback, setFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+
+  const showNotice = (type: 'error' | 'success', message: string) => {
+    setFeedback({ type, message });
+  };
+
   // Modal State for Member Selection
   const [modalVisible, setModalVisible] = useState(false);
   const [connectedMembers, setConnectedMembers] = useState<SpenderMember[]>([]);
@@ -190,6 +194,7 @@ export default function AllowanceScreen() {
     setTempStartDate(null);
     setTempEndDate(null);
     setCurrentCalendarDate(new Date());
+    setFeedback(null);
   };
 
   useFocusEffect(
@@ -225,7 +230,7 @@ export default function AllowanceScreen() {
 
       setConnectedMembers(formattedMembers);
     } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to fetch members.");
+      showNotice('error', error.message || 'Failed to fetch members.');
     } finally {
       setLoadingMembers(false);
     }
@@ -244,18 +249,18 @@ export default function AllowanceScreen() {
 
   const handleSaveAllowance = async () => {
     if (!selectedSpender) {
-      Alert.alert("Member Required", "Please select a member first.");
+      showNotice('error', 'Please select a member to allocate allowance.');
       return;
     }
 
     const parsedAmount = parseFloat(amount);
     if (!allowanceName.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert("Required Fields", "Please provide a valid name and positive amount.");
+      showNotice('error', 'Please provide a valid name and a positive amount.');
       return;
     }
 
     if (!startDate.trim() || !endDate.trim()) {
-      Alert.alert("Required Dates", "Please provide both start and end dates.");
+      showNotice('error', 'Please specify both coverage start and end dates.');
       return;
     }
 
@@ -278,10 +283,13 @@ export default function AllowanceScreen() {
         .insert([payload]);
 
       if (error) throw error;
-      Alert.alert("Success 🎉", "Allowance allocated successfully!");
-      router.replace('/(sponsorTabs)/home');
+      
+      showNotice('success', 'Allowance allocated successfully!');
+      setTimeout(() => {
+        router.replace('/(sponsorTabs)/home');
+      }, 800);
     } catch (e: any) { 
-      Alert.alert("Error", e.message); 
+      showNotice('error', e.message || 'Something went wrong. Please try again.'); 
     } finally { 
       setLoading(false); 
     }
@@ -313,7 +321,30 @@ export default function AllowanceScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Target Member</Text>
+          {/* Modern Feedback Banner */}
+          {feedback && (
+            <View style={[
+              styles.bannerContainer, 
+              feedback.type === 'success' ? styles.bannerSuccess : styles.bannerError
+            ]}>
+              <Ionicons 
+                name={feedback.type === 'success' ? 'checkmark-circle' : 'alert-circle'} 
+                size={18} 
+                color={feedback.type === 'success' ? '#047857' : COLORS.danger} 
+              />
+              <Text style={[
+                styles.bannerText,
+                feedback.type === 'success' ? styles.bannerTextSuccess : styles.bannerTextError
+              ]}>
+                {feedback.message}
+              </Text>
+              <TouchableOpacity onPress={() => setFeedback(null)} style={styles.bannerClose}>
+                <Ionicons name="close" size={14} color={feedback.type === 'success' ? '#047857' : COLORS.danger} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <Text style={[styles.sectionTitle, feedback ? { marginTop: 16 } : {}]}>Target Member</Text>
           {selectedSpender ? (
             <View style={styles.selectedSpenderCard}>
               <View style={styles.avatarContainer}>
@@ -486,7 +517,8 @@ export default function AllowanceScreen() {
                       disabled={isPending}
                       onPress={() => {
                         if (isPending) {
-                          Alert.alert("Pending Connection", "Spender hasn't accepted your link request yet.");
+                          showNotice('error', "Spender hasn't accepted your link request yet.");
+                          setModalVisible(false);
                           return;
                         }
                         setSelectedSpender({
@@ -542,7 +574,6 @@ export default function AllowanceScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Added Line Divider */}
             <View style={styles.modalDivider} />
 
             <View style={styles.calendarNavRow}>
@@ -1068,8 +1099,40 @@ const styles = StyleSheet.create({
   },
   modalDivider: {
     height: 1,
-    backgroundColor: '#E5E7EB', // Adjust color to match your theme (e.g., COLORS.border)
+    backgroundColor: '#E5E7EB',
     width: '100%',
     marginBottom: 10,
+  },
+  bannerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    marginBottom: 4,
+    gap: 10,
+    borderWidth: 1,
+  },
+  bannerError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FEE2E2',
+  },
+  bannerSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#D1FAE5',
+  },
+  bannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  bannerTextError: {
+    color: '#991B1B',
+  },
+  bannerTextSuccess: {
+    color: '#065F46',
+  },
+  bannerClose: {
+    padding: 2,
   },
 });
