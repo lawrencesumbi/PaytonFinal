@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -77,11 +76,13 @@ export default function HomeScreen() {
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [spenderEmail, setSpenderEmail] = useState('');
   const [submittingSpender, setSubmittingSpender] = useState(false);
+  const [addModalMessage, setAddModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   // Modal States for Deleting Spender Connection
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [spenderToDelete, setSpenderToDelete] = useState<ConnectedSpender | null>(null);
   const [deletingSpender, setDeletingSpender] = useState(false);
+  const [deleteModalMessage, setDeleteModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   const fetchDashboardData = async (isRefreshing = false) => {
     try {
@@ -96,21 +97,21 @@ export default function HomeScreen() {
         .single();
       setSponsorProfile(profile);
 
-      // 1. Fetch ALL allowances (without start_date and end_date)
+      // 1. Fetch ALL allowances
       const { data: allowancesData, error: allowancesError } = await supabase
-  .from('allowances')
-  .select(`
-    id, 
-    allowance_name, 
-    amount, 
-    spender_id, 
-    received_at,
-    profiles!allowances_spender_id_fkey (id, full_name, avatar_url),
-    expenses!expenses_allowance_id_fkey (amount)
-  `)
-  .eq('sponsor_id', user.id)
-  .eq('is_archived', false) // <--- Add this line here
-  .order('received_at', { ascending: false });
+        .from('allowances')
+        .select(`
+          id, 
+          allowance_name, 
+          amount, 
+          spender_id, 
+          received_at,
+          profiles!allowances_spender_id_fkey (id, full_name, avatar_url),
+          expenses!expenses_allowance_id_fkey (amount)
+        `)
+        .eq('sponsor_id', user.id)
+        .eq('is_archived', false)
+        .order('received_at', { ascending: false });
 
       if (allowancesError) throw allowancesError;
 
@@ -145,7 +146,6 @@ export default function HomeScreen() {
       const spenderCardMap = new Map<string, SpenderAllowanceCardData>();
 
       (allowancesData || []).forEach((item: any) => {
-        
         const allowanceAmount = Number(item.amount);
         const spentForAllowance = (item.expenses || []).reduce(
           (sum: number, exp: { amount: number }) => sum + Number(exp.amount),
@@ -211,12 +211,15 @@ export default function HomeScreen() {
 
   const handleCloseAddModal = () => {
     setSpenderEmail('');
+    setAddModalMessage(null);
     setIsAddModalVisible(false);
   };
 
   const handleAddSpenderSubmit = async () => {
+    setAddModalMessage(null);
+
     if (!spenderEmail.trim()) {
-      Alert.alert('Error', 'Please enter a valid email address.');
+      setAddModalMessage({ type: 'error', text: 'Please enter a valid email address.' });
       return;
     }
 
@@ -232,17 +235,17 @@ export default function HomeScreen() {
         .single();
 
       if (profileError || !targetProfile) {
-        Alert.alert('Not Found', 'No user account found with this email address.');
+        setAddModalMessage({ type: 'error', text: 'No user account found with this email address.' });
         return;
       }
 
       if (targetProfile.id === user.id) {
-        Alert.alert('Invalid Action', 'You cannot connect your own account as a spender.');
+        setAddModalMessage({ type: 'error', text: 'You cannot connect your own account as a spender.' });
         return;
       }
 
-      if (targetProfile.role !== 'spender') {
-        Alert.alert('Invalid Role', 'This account is not registered as a spender.');
+      if (targetProfile.role !== 'Spender') {
+        setAddModalMessage({ type: 'error', text: 'This account is not registered as a spender.' });
         return;
       }
 
@@ -256,12 +259,9 @@ export default function HomeScreen() {
 
       if (existingConnection) {
         if (existingConnection.sponsor_id === user.id) {
-          Alert.alert('Already Connected', 'This spender is already connected to your account.');
+          setAddModalMessage({ type: 'error', text: 'This spender is already connected to your account.' });
         } else {
-          Alert.alert(
-            'Connection Unavailable',
-            'This spender is already connected to another sponsor and cannot be linked.'
-          );
+          setAddModalMessage({ type: 'error', text: 'This spender is already connected to another sponsor.' });
         }
         return;
       }
@@ -276,12 +276,16 @@ export default function HomeScreen() {
 
       if (insertError) throw insertError;
 
-      Alert.alert('Success', 'Spender connected successfully!');
-      setSpenderEmail('');
-      setIsAddModalVisible(false);
-      fetchDashboardData(true);
+      setAddModalMessage({ type: 'success', text: 'Spender connected successfully!' });
+      setTimeout(() => {
+        setSpenderEmail('');
+        setAddModalMessage(null);
+        setIsAddModalVisible(false);
+        fetchDashboardData(true);
+      }, 1200);
+
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to connect spender.');
+      setAddModalMessage({ type: 'error', text: e.message || 'Failed to connect spender.' });
     } finally {
       setSubmittingSpender(false);
     }
@@ -289,6 +293,7 @@ export default function HomeScreen() {
 
   const handleDeleteSpenderConfirm = async () => {
     if (!spenderToDelete) return;
+    setDeleteModalMessage(null);
 
     try {
       setDeletingSpender(true);
@@ -303,12 +308,16 @@ export default function HomeScreen() {
 
       if (error) throw error;
 
-      Alert.alert('Success', `${spenderToDelete.full_name} has been disconnected.`);
-      setIsDeleteModalVisible(false);
-      setSpenderToDelete(null);
-      fetchDashboardData(true);
+      setDeleteModalMessage({ type: 'success', text: `${spenderToDelete.full_name} has been disconnected.` });
+      setTimeout(() => {
+        setIsDeleteModalVisible(false);
+        setSpenderToDelete(null);
+        setDeleteModalMessage(null);
+        fetchDashboardData(true);
+      }, 1200);
+
     } catch (e: any) {
-      Alert.alert('Error', e.message || 'Failed to remove spender.');
+      setDeleteModalMessage({ type: 'error', text: e.message || 'Failed to remove spender.' });
     } finally {
       setDeletingSpender(false);
     }
@@ -525,8 +534,6 @@ export default function HomeScreen() {
                         </View>
                       </View>
                     </View>
-
-                    
                   </View>
 
                   <View style={styles.cardDivider} />
@@ -588,6 +595,25 @@ export default function HomeScreen() {
               Enter your spender's registered account email address to connect them.
             </Text>
 
+            {addModalMessage && (
+              <View style={[
+                styles.inlineBanner, 
+                addModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
+              ]}>
+                <Ionicons 
+                  name={addModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
+                  size={16} 
+                  color={addModalMessage.type === 'success' ? '#15803d' : COLORS.danger} 
+                />
+                <Text style={[
+                  styles.bannerText, 
+                  { color: addModalMessage.type === 'success' ? '#15803d' : COLORS.danger }
+                ]}>
+                  {addModalMessage.text}
+                </Text>
+              </View>
+            )}
+
             <TextInput
               style={styles.modalInput}
               placeholder="spender@email.com"
@@ -644,6 +670,25 @@ export default function HomeScreen() {
             <Text style={styles.modalSubtitle}>
               Are you sure you want to remove <Text style={{ fontWeight: '700', color: COLORS.darkOlive }}>{spenderToDelete?.full_name}</Text>? This will disconnect them from your account.
             </Text>
+
+            {deleteModalMessage && (
+              <View style={[
+                styles.inlineBanner, 
+                deleteModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
+              ]}>
+                <Ionicons 
+                  name={deleteModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
+                  size={16} 
+                  color={deleteModalMessage.type === 'success' ? '#15803d' : COLORS.danger} 
+                />
+                <Text style={[
+                  styles.bannerText, 
+                  { color: deleteModalMessage.type === 'success' ? '#15803d' : COLORS.danger }
+                ]}>
+                  {deleteModalMessage.text}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
@@ -912,20 +957,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontWeight: '500',
   },
-  cardActionIcons: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  iconCircleBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#F4F8F4',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
   cardDivider: {
     height: 1,
     backgroundColor: COLORS.borderLight,
@@ -1051,6 +1082,30 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginBottom: 16,
     lineHeight: 16,
+  },
+  inlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  bannerError: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+  },
+  bannerSuccess: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+    bannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
   },
   modalInput: {
     borderWidth: 1,

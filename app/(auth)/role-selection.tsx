@@ -176,7 +176,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 2,
     zIndex: 10,
   },
   headerTextContainer: {
@@ -204,11 +203,11 @@ const styles = StyleSheet.create({
   roleCard: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF',
     padding: 16, borderRadius: 22, borderWidth: 2, borderColor: '#E2E8F0',
-    shadowColor: '#1e293b', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 4,
+    shadowColor: '#1e293b', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, 
   },
   selectedCard: { 
     borderColor: '#166534', backgroundColor: '#FFFFFF',
-    shadowColor: '#166534', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 15, elevation: 8,
+    shadowColor: '#166534', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 15,
   },
   iconBox: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   selectedIconBox: { backgroundColor: '#DCFCE7' },
@@ -224,7 +223,7 @@ const styles = StyleSheet.create({
   },
   primaryButton: { 
     backgroundColor: '#166534', height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#166534', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 6,
+    shadowColor: '#166534', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10, 
   },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
 });
