@@ -95,6 +95,11 @@ export default function SplitScreen() {
 
   const [saving, setSaving] = useState(false);
 
+  const [formMessage, setFormMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
+
+  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
+  const [manageModalVisible, setManageModalVisible] = useState(false);
+
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
   };
@@ -289,59 +294,68 @@ export default function SplitScreen() {
   };
 
   const handleSaveFriend = async () => {
-    if (!newFriendName.trim() || !user) return;
+  if (!newFriendName.trim() || !user) {
+    setFormMessage({ text: "Please enter your friend's name.", type: 'error' });
+    return;
+  }
 
-    try {
-      setLoading(true);
-      let uploadedAvatarUrl = editingFriend?.avatar_url || null;
+  try {
+    setLoading(true);
+    setFormMessage(null); // Clear any existing messages
+    let uploadedAvatarUrl = editingFriend?.avatar_url || null;
 
-      if (friendImageUri && !friendImageUri.startsWith('http')) {
-        uploadedAvatarUrl = await uploadAvatarToSupabase(friendImageUri);
-      }
-
-      const friendDataPayload = {
-        user_id: user.id,
-        full_name: newFriendName.trim(),
-        email: newFriendEmail.trim() ? newFriendEmail.trim().toLowerCase() : null,
-        avatar_url: uploadedAvatarUrl,
-      };
-
-      if (editingFriend) {
-        const { data, error } = await supabase
-          .from('friends')
-          .update(friendDataPayload)
-          .eq('id', editingFriend.id)
-          .select()
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          setFriends((prev) => (prev || []).map((f) => (f.id === editingFriend.id ? data : f)));
-        }
-      } else {
-        const { data, error } = await supabase
-          .from('friends')
-          .insert([friendDataPayload])
-          .select()
-          .single();
-
-        if (error) throw error;
-        if (data) {
-          setFriends((prev) => [...(prev || []), data]);
-        }
-      }
-
-      setEditingFriend(null);
-      setNewFriendName('');
-      setNewFriendEmail('');
-      setFriendImageUri(null);
-      setAddFriendModalVisible(false);
-    } catch (err: any) {
-      showAlert('Error', err.message || 'Failed to save friend.');
-    } finally {
-      setLoading(false);
+    if (friendImageUri && !friendImageUri.startsWith('http')) {
+      uploadedAvatarUrl = await uploadAvatarToSupabase(friendImageUri);
     }
-  };
+
+    const friendDataPayload = {
+      user_id: user.id,
+      full_name: newFriendName.trim(),
+      email: newFriendEmail.trim() ? newFriendEmail.trim().toLowerCase() : null,
+      avatar_url: uploadedAvatarUrl,
+    };
+
+    if (editingFriend) {
+      const { data, error } = await supabase
+        .from('friends')
+        .update(friendDataPayload)
+        .eq('id', editingFriend.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setFriends((prev) => (prev || []).map((f) => (f.id === editingFriend.id ? data : f)));
+      }
+    } else {
+      const { data, error } = await supabase
+        .from('friends')
+        .insert([friendDataPayload])
+        .select()
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        setFriends((prev) => [...(prev || []), data]);
+      }
+    }
+
+    // Success reset
+    setEditingFriend(null);
+    setNewFriendName('');
+    setNewFriendEmail('');
+    setFriendImageUri(null);
+    setFormMessage(null);
+    setAddFriendModalVisible(false);
+  } catch (err: any) {
+    setFormMessage({ 
+      text: err.message || 'Failed to save friend. Please try again.', 
+      type: 'error' 
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleDeleteFriend = async (friendId: string) => {
     try {
@@ -360,23 +374,9 @@ export default function SplitScreen() {
   };
 
   const handleFriendPress = (friend: Friend) => {
-    Alert.alert(
-      "Manage Friend",
-      `What would you like to do with ${friend.full_name}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Edit", 
-          onPress: () => openEditModal(friend)
-        },
-        { 
-          text: "Delete", 
-          style: "destructive", 
-          onPress: () => handleDeleteFriend(friend.id)
-        }
-      ]
-    );
-  };
+  setSelectedFriend(friend);
+  setManageModalVisible(true);
+};
 
   const openEditModal = (friend: Friend) => {
     setEditingFriend(friend);
@@ -1159,70 +1159,165 @@ export default function SplitScreen() {
       </Modal>
 
       {/* ADD / EDIT FRIEND MODAL */}
-      <Modal visible={addFriendModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlayCenter}>
-          <View style={styles.alertModalContainer}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editingFriend ? "Edit Friend" : "Add New Friend"}
-              </Text>
-              <TouchableOpacity 
-                style={styles.closeCircle} 
-                onPress={() => {
-                  setAddFriendModalVisible(false);
-                  setEditingFriend(null);
-                  setNewFriendName('');
-                  setNewFriendEmail('');
-                  setFriendImageUri(null);
-                }}
-              >
-                <Ionicons name="close" size={18} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
+<Modal visible={addFriendModalVisible} animationType="fade" transparent>
+  <View style={styles.modalOverlayCenter}>
+    <View style={styles.alertModalContainer}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>
+          {editingFriend ? "Edit Friend" : "Add New Friend"}
+        </Text>
+        <TouchableOpacity 
+          style={styles.closeCircle} 
+          onPress={() => {
+            setAddFriendModalVisible(false);
+            setEditingFriend(null);
+            setNewFriendName('');
+            setNewFriendEmail('');
+            setFriendImageUri(null);
+            setFormMessage(null); // Clear message on close
+          }}
+        >
+          <Ionicons name="close" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
 
-            <TextInput
-              style={[styles.input, { marginTop: 12 }]}
-              placeholder="Friend's Full Name"
-              placeholderTextColor={colors.textFaint}
-              value={newFriendName}
-              onChangeText={setNewFriendName}
-            />
-
-            <TextInput
-              style={[styles.input, { marginTop: 12 }]}
-              placeholder="Friend's Email"
-              placeholderTextColor={colors.textFaint}
-              value={newFriendEmail}
-              onChangeText={setNewFriendEmail}
-            />
-
-            <View style={{ alignItems: 'center', marginVertical: 10 }}>
-              <Image
-                source={
-                  friendImageUri
-                    ? { uri: friendImageUri }
-                    : require('../../assets/images/default.png')
-                }
-                style={{ width: 80, height: 80, borderRadius: 40, marginBottom: 10 }}
-              />
-              <View style={{ flexDirection: 'row', gap: 10 }}>
-                <TouchableOpacity onPress={() => pickImage(false)} style={{ padding: 6, backgroundColor: '#eee', borderRadius: 5 }}>
-                  <Text>Pick from Gallery</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => pickImage(true)} style={{ padding: 6, backgroundColor: '#eee', borderRadius: 5 }}>
-                  <Text>Take Photo</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            
-            <TouchableOpacity style={styles.submitBtn} onPress={handleSaveFriend}>
-              <Text style={styles.submitBtnText}>
-                {editingFriend ? "Update Friend" : "Save Friend"}
-              </Text>
-            </TouchableOpacity>
-          </View>
+      {/* --- INLINE MESSAGE BANNER --- */}
+      {formMessage && (
+        <View style={[
+          styles.inlineMessageContainer, 
+          formMessage.type === 'error' ? styles.errorBanner : styles.successBanner
+        ]}>
+          <Ionicons 
+            name={formMessage.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+            size={18} 
+            color={formMessage.type === 'error' ? '#D32F2F' : '#2E7D32'} 
+            style={{ marginRight: 6 }}
+          />
+          <Text style={[
+            styles.inlineMessageText, 
+            formMessage.type === 'error' ? styles.errorText : styles.successText
+          ]}>
+            {formMessage.text}
+          </Text>
         </View>
-      </Modal>
+      )}
+
+      <TextInput
+        style={[styles.input, { marginTop: 12 }]}
+        placeholder="Friend's Full Name"
+        placeholderTextColor={colors.textFaint}
+        value={newFriendName}
+        onChangeText={setNewFriendName}
+      />
+
+      <TextInput
+        style={[styles.input, { marginTop: 12 }]}
+        placeholder="Friend's Email"
+        placeholderTextColor={colors.textFaint}
+        value={newFriendEmail}
+        onChangeText={setNewFriendEmail}
+      />
+
+      <View style={{ alignItems: 'center', marginVertical: 10 }}>
+        <Image
+          source={
+            friendImageUri
+              ? { uri: friendImageUri }
+              : require('../../assets/images/default.png')
+          }
+          style={{ width: 80, height: 80, borderRadius: 40, marginBottom: 10 }}
+        />
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <TouchableOpacity onPress={() => pickImage(false)} style={{ padding: 6, backgroundColor: '#eee', borderRadius: 5 }}>
+            <Text>Pick from Gallery</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => pickImage(true)} style={{ padding: 6, backgroundColor: '#eee', borderRadius: 5 }}>
+            <Text>Take Photo</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      
+      <TouchableOpacity 
+        style={[styles.submitBtn, loading && { opacity: 0.7 }]} 
+        onPress={handleSaveFriend}
+        disabled={loading}
+      >
+        <Text style={styles.submitBtnText}>
+          {loading ? "Saving..." : (editingFriend ? "Update Friend" : "Save Friend")}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
+
+{/* MANAGE FRIEND ACTION MODAL */}
+<Modal visible={manageModalVisible} animationType="fade" transparent>
+  <View style={styles.modalOverlayCenter}>
+    <View style={styles.alertModalContainer}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>Manage Friend</Text>
+        <TouchableOpacity 
+          style={styles.closeCircle} 
+          onPress={() => {
+            setManageModalVisible(false);
+            setSelectedFriend(null);
+          }}
+        >
+          <Ionicons name="close" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      {selectedFriend && (
+        <View style={styles.manageContentContainer}>
+          {/* Friend Profile Snippet */}
+          <View style={styles.manageProfileRow}>
+            <Image
+              source={
+                selectedFriend.avatar_url
+                  ? { uri: selectedFriend.avatar_url }
+                  : require('../../assets/images/default.png')
+              }
+              style={{ width: 50, height: 50, borderRadius: 25, marginRight: 12 }}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.manageFriendName}>{selectedFriend.full_name}</Text>
+              <Text style={styles.manageFriendEmail} numberOfLines={1}>
+                {selectedFriend.email || 'No email provided'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <TouchableOpacity 
+            style={styles.actionOptionBtn} 
+            onPress={() => {
+              const friendToEdit = selectedFriend;
+              setManageModalVisible(false);
+              setSelectedFriend(null);
+              openEditModal(friendToEdit);
+            }}
+          >
+            <Ionicons name="pencil-outline" size={20} color={colors.textDark || '#333'} style={{ marginRight: 10 }} />
+            <Text style={styles.actionOptionText}>Edit Friend Details</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.actionOptionBtn, styles.deleteOptionBtn]} 
+            onPress={() => {
+              const friendId = selectedFriend.id;
+              setManageModalVisible(false);
+              setSelectedFriend(null);
+              handleDeleteFriend(friendId);
+            }}
+          >
+            <Ionicons name="trash-outline" size={20} color="#D32F2F" style={{ marginRight: 10 }} />
+            <Text style={[styles.actionOptionText, styles.deleteOptionText]}>Delete Friend</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  </View>
+</Modal>
 
       {/* PAYMENT ENTRY INPUT MODAL FOR MARK PAID */}
       <Modal visible={settleAmountModalVisible} animationType="fade" transparent>

@@ -435,7 +435,7 @@ export const styles = StyleSheet.create({
   alertModalContainer: {
     width: '100%',
     maxWidth: 400,
-    maxHeight: '80%',
+    maxHeight: '100%',
     backgroundColor: colors.surface,
     borderRadius: 24,
     padding: 24,
@@ -855,5 +855,78 @@ horizontalChecklist: {
   paddingVertical: 4,
   paddingRight: 16,
   marginBottom: 16,
+},
+// Add inside your StyleSheet.create({})
+inlineMessageContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRadius: 8,
+  marginTop: 12,
+},
+errorBanner: {
+  backgroundColor: '#FFEBEE', // Soft modern light red
+  borderWidth: 1,
+  borderColor: '#FFCDD2',
+},
+successBanner: {
+  backgroundColor: '#E8F5E9', // Soft modern light green
+  borderWidth: 1,
+  borderColor: '#C8E6C9',
+},
+inlineMessageText: {
+  fontSize: 13,
+  flex: 1,
+},
+errorText: {
+  color: '#C62828',
+  fontWeight: '500',
+},
+successText: {
+  color: '#2E7D32',
+  fontWeight: '500',
+},
+// Add inside your StyleSheet.create({})
+manageContentContainer: {
+  marginTop: 12,
+},
+manageProfileRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingBottom: 16,
+  borderBottomWidth: 1,
+  borderBottomColor: '#F0F0F0',
+  marginBottom: 12,
+},
+manageFriendName: {
+  fontSize: 16,
+  fontWeight: '600',
+  color: colors.textDark || '#111',
+},
+manageFriendEmail: {
+  fontSize: 13,
+  color: colors.textMuted || '#666',
+  marginTop: 2,
+},
+actionOptionBtn: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingVertical: 14,
+  paddingHorizontal: 12,
+  borderRadius: 10,
+  backgroundColor: '#F8F9FA',
+  marginTop: 8,
+},
+deleteOptionBtn: {
+  backgroundColor: '#FFEBEE',
+},
+actionOptionText: {
+  fontSize: 15,
+  fontWeight: '500',
+  color: colors.textDark || '#333',
+},
+deleteOptionText: {
+  color: '#C62828',
 },
 });
