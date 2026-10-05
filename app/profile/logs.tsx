@@ -73,19 +73,21 @@ export default function ActivityLogsScreen() {
         return { title: 'User Login', icon: 'log-in-outline' };
       case 'USER_LOGOUT':
         return { title: 'User Logout', icon: 'log-out-outline' };
-      case 'PASSWORD_RESET':
+      case 'PASSWORD_UPDATE':
         return { title: 'Password Updated', icon: 'key-outline' };
-      case 'PROFILE_UPDATE':
+      case 'UPDATE_PROFILE':
         return { title: 'Profile Updated', icon: 'person-outline' };
+      case 'UPDATE_AVATAR':
+        return { title: 'Avatar Updated', icon: 'image-outline' };
       default:
         return { title: action.replace(/_/g, ' '), icon: 'document-text-outline' };
     }
   };
 
-  // Helper to replace any standard email address string with "You have been"
+  // Helper to replace any standard email address string with "You"
   const anonymizeEmail = (text: string) => {
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-    return text.replace(emailRegex, 'You have been');
+    return text.replace(emailRegex, 'You');
   };
 
   // Format timestamp nicely

@@ -101,7 +101,7 @@ export default function SpenderProfileScreen() {
         await supabase.from('logs').insert({
           user_id: user.id,
           action: 'USER_LOGOUT',
-          details: `${user.email} successfully signed out.`,
+          details: `${user.email} signed out successfully.`,
         });
       }
 

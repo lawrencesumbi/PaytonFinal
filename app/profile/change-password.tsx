@@ -31,6 +31,21 @@ export default function ChangePasswordScreen() {
   // Inline message state
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
 
+  // Helper function to insert logs into Supabase
+  const logActivity = async (userId: string, action: string, details: string) => {
+    try {
+      await supabase.from('logs').insert([
+        {
+          user_id: userId,
+          action: action,
+          details: details,
+        }
+      ]);
+    } catch (logError) {
+      console.error('Failed to write log:', logError);
+    }
+  };
+
   const handleChangePassword = async () => {
     // Clear previous inline messages on new submission attempt
     setMessage(null);
@@ -51,9 +66,9 @@ export default function ChangePasswordScreen() {
     try {
       setIsUpdating(true);
 
-      // 1. Get current user's email
+      // 1. Get current user's info & session id
       const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user?.email) {
+      if (userError || !user?.email || !user?.id) {
         throw new Error('Unable to identify the current user session. Please log in again.');
       }
 
@@ -64,6 +79,8 @@ export default function ChangePasswordScreen() {
       });
 
       if (signInError) {
+        // Log failed password change attempt due to incorrect old password
+        await logActivity(user.id, 'PASSWORD_UPDATE_FAILED', `${user.email} entered an incorrect current password.`);
         throw new Error('The current password you entered is incorrect.');
       }
 
@@ -73,8 +90,14 @@ export default function ChangePasswordScreen() {
       });
       if (updateError) throw updateError;
 
+      // Log successful password change before signing out
+      await logActivity(user.id, 'PASSWORD_UPDATE', `${user.email} updated password successfully.`);
+
       // 4. Log out the user automatically after a successful update
       await supabase.auth.signOut();
+      
+      // Log automatic sign out
+      await logActivity(user.id, 'USER_LOGOUT', `${user.email} signed out successfully.`);
 
       setMessage({ 
         type: 'success', 

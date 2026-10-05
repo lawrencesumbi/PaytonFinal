@@ -48,6 +48,21 @@ export default function PersonalDetailsScreen() {
     }, 4000); // Auto-dismiss after 4 seconds
   };
 
+  // Helper function to log user actions to the Supabase logs table
+  const logActivity = async (userId: string, action: string, details: string) => {
+    try {
+      await supabase.from('logs').insert([
+        {
+          user_id: userId,
+          action,
+          details,
+        },
+      ]);
+    } catch (err) {
+      console.error('Failed to log activity:', err);
+    }
+  };
+
   useEffect(() => {
     fetchProfileData();
   }, []);
@@ -130,6 +145,10 @@ export default function PersonalDetailsScreen() {
       if (dbError) throw dbError;
 
       setAvatarUrl(publicUrl);
+      
+      // Log avatar update activity
+      await logActivity(user.id, 'UPDATE_AVATAR', `${email} updated profile picture.`);
+
       showToast('success', 'Profile photo updated successfully.');
 
     } catch (error: any) {
@@ -156,6 +175,9 @@ export default function PersonalDetailsScreen() {
         .eq('id', user.id);
 
       if (error) throw error;
+
+      // Log profile details update activity
+      await logActivity(user.id, 'UPDATE_PROFILE', `${email} updated personal details (Full Name: ${fullName}).`);
 
       showToast('success', 'Your profile details have been saved.');
       setTimeout(() => router.back(), 1000); // Slight delay so user sees success toast
