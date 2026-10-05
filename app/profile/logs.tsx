@@ -70,7 +70,9 @@ export default function ActivityLogsScreen() {
     switch (action) {
       case 'USER_LOGIN':
       case 'OAUTH_LOGIN':
-        return { title: 'USER LOGIN', icon: 'shield-checkmark-outline' };
+        return { title: 'User Login', icon: 'log-in-outline' };
+      case 'USER_LOGOUT':
+        return { title: 'User Logout', icon: 'log-out-outline' };
       case 'PASSWORD_RESET':
         return { title: 'Password Updated', icon: 'key-outline' };
       case 'PROFILE_UPDATE':
@@ -78,6 +80,12 @@ export default function ActivityLogsScreen() {
       default:
         return { title: action.replace(/_/g, ' '), icon: 'document-text-outline' };
     }
+  };
+
+  // Helper to replace any standard email address string with "You have been"
+  const anonymizeEmail = (text: string) => {
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+    return text.replace(emailRegex, 'You have been');
   };
 
   // Format timestamp nicely
@@ -91,13 +99,14 @@ export default function ActivityLogsScreen() {
     });
   };
 
-  // Filter logs based on search query (matches against mapped title or description details)
+  // Filter logs based on search query
   const filteredLogs = logs.filter((item) => {
     const meta = getLogMeta(item.action);
     const query = searchQuery.toLowerCase();
+    const processedDetails = anonymizeEmail(item.details).toLowerCase();
     return (
       meta.title.toLowerCase().includes(query) ||
-      item.details.toLowerCase().includes(query) ||
+      processedDetails.includes(query) ||
       item.action.toLowerCase().includes(query)
     );
   });
@@ -165,7 +174,7 @@ export default function ActivityLogsScreen() {
                     <Text style={styles.logTitle}>{meta.title}</Text>
                     <Text style={styles.logTime}>{formatTimestamp(item.created_at)}</Text>
                   </View>
-                  <Text style={styles.logDesc}>{item.details}</Text>
+                  <Text style={styles.logDesc}>{anonymizeEmail(item.details)}</Text>
                 </View>
               </View>
             );
