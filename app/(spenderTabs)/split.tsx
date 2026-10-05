@@ -315,6 +315,8 @@ export default function SplitScreen() {
       avatar_url: uploadedAvatarUrl,
     };
 
+    let actionType = editingFriend ? "updated" : "added";
+
     if (editingFriend) {
       const { data, error } = await supabase
         .from('friends')
@@ -340,20 +342,29 @@ export default function SplitScreen() {
       }
     }
 
-    // Success reset
-    setEditingFriend(null);
-    setNewFriendName('');
-    setNewFriendEmail('');
-    setFriendImageUri(null);
-    setFormMessage(null);
-    setAddFriendModalVisible(false);
+    // Success feedback
+    setFormMessage({ 
+      text: `Friend successfully ${actionType}!`, 
+      type: 'success' 
+    });
+
+    // Wait 1.2 seconds, then reset everything including loading
+    setTimeout(() => {
+      setEditingFriend(null);
+      setNewFriendName('');
+      setNewFriendEmail('');
+      setFriendImageUri(null);
+      setFormMessage(null);
+      setAddFriendModalVisible(false);
+      setLoading(false); // <--- Turn off loading here!
+    }, 1200);
+
   } catch (err: any) {
     setFormMessage({ 
       text: err.message || 'Failed to save friend. Please try again.', 
       type: 'error' 
     });
-  } finally {
-    setLoading(false);
+    setLoading(false); // <--- Turn off loading on error too
   }
 };
 
