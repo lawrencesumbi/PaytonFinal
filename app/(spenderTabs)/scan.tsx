@@ -8,8 +8,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
+  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -25,10 +25,22 @@ import Animated, {
 } from 'react-native-reanimated';
 import { supabase } from '../../lib/supabase';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 const genAI = new GoogleGenerativeAI(apiKey);
+
+interface AlertConfig {
+  visible: boolean;
+  title: string;
+  message: string;
+  type: 'success' | 'warning' | 'error' | 'info';
+  buttons: {
+    text: string;
+    style?: 'default' | 'cancel' | 'destructive';
+    onPress: () => void;
+  }[];
+}
 
 export default function ScanReceiptScreen() {
   const router = useRouter();
@@ -43,6 +55,15 @@ export default function ScanReceiptScreen() {
   const [flash, setFlash] = useState<FlashMode>('off');
   const [torchOn, setTorchOn] = useState<boolean>(false);
   const cameraRef = useRef<any>(null);
+
+  // Modern Custom Alert State
+  const [alertConfig, setAlertConfig] = useState<AlertConfig>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+    buttons: [],
+  });
 
   // Laser animation value for scanning effect
   const scanAnim = useSharedValue(0);
@@ -118,7 +139,7 @@ export default function ScanReceiptScreen() {
         setFrozenPhoto(photo.uri);
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-3.5-flash-lite",
+          model: "gemini-2.5-flash",
           generationConfig: {
             responseMimeType: "application/json",
           }
@@ -161,13 +182,24 @@ export default function ScanReceiptScreen() {
         const totalAmount = extractedInfo.amount || 0;
         const matchedCategory = extractedInfo.category || 'Food';
 
-        Alert.alert(
-          "Scan Complete 🎉",
-          `Merchant: ${merchantName}\nAmount: ₱${Number(totalAmount).toFixed(2)}\nCategory: ${matchedCategory}`,
-          [
+        setAlertConfig({
+          visible: true,
+          title: "Scan Complete",
+          message: `${merchantName} • ₱${Number(totalAmount).toFixed(2)}\nCategory: ${matchedCategory}`,
+          type: 'success',
+          buttons: [
+            {
+              text: "Try Again",
+              style: "cancel",
+              onPress: () => {
+                setAlertConfig(prev => ({ ...prev, visible: false }));
+                setFrozenPhoto(null);
+              }
+            },
             {
               text: "Log Expense",
               onPress: async () => {
+                setAlertConfig(prev => ({ ...prev, visible: false }));
                 try {
                   const { data: { user }, error: userError } = await supabase.auth.getUser();
                   if (userError || !user) throw new Error("You must be logged in to log expenses.");
@@ -185,7 +217,13 @@ export default function ScanReceiptScreen() {
                       .single();
 
                     if (!latestAllowance) {
-                      Alert.alert("No Allowance Found ❌", "No active allowance was detected for your account. Please set up an allowance before logging expenses.");
+                      setAlertConfig({
+                        visible: true,
+                        title: "No Allowance Found",
+                        message: "No active allowance was detected for your account. Please set up an allowance before logging expenses.",
+                        type: 'warning',
+                        buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+                      });
                       setFrozenPhoto(null);
                       return;
                     }
@@ -199,7 +237,13 @@ export default function ScanReceiptScreen() {
                       .single();
 
                     if (!specificAllowance) {
-                      Alert.alert("No Allowance Found ❌", "No allowance was detected for this transaction.");
+                      setAlertConfig({
+                        visible: true,
+                        title: "No Allowance Found",
+                        message: "No allowance was detected for this transaction.",
+                        type: 'warning',
+                        buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+                      });
                       setFrozenPhoto(null);
                       return;
                     }
@@ -228,10 +272,13 @@ export default function ScanReceiptScreen() {
 
                   // Check if expense amount is greater than remaining allowance
                   if (Number(totalAmount) > remainingAllowance) {
-                    Alert.alert(
-                      "Budget Exceeded ⚠️",
-                      `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your remaining allowance balance (₱${remainingAllowance.toFixed(2)}).`
-                    );
+                    setAlertConfig({
+                      visible: true,
+                      title: "Budget Exceeded",
+                      message: `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your remaining allowance balance (₱${remainingAllowance.toFixed(2)}).`,
+                      type: 'warning',
+                      buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+                    });
                     setFrozenPhoto(null);
                     return;
                   }
@@ -274,36 +321,63 @@ export default function ScanReceiptScreen() {
                   
                   if (insertError) throw insertError;
 
-                  Alert.alert("Success", "Expense and receipt logged successfully!");
-                  router.replace('/transaction');
+                  setAlertConfig({
+                    visible: true,
+                    title: "Success",
+                    message: "Expense and receipt logged successfully!",
+                    type: 'success',
+                    buttons: [{ text: "Done", onPress: () => {
+                      setAlertConfig(prev => ({ ...prev, visible: false }));
+                      router.replace('/transaction');
+                    }}]
+                  });
                 } catch (dbError: any) {
                   console.error("Database/Storage Log Error:", dbError);
-                  Alert.alert("Error", dbError.message || "Could not save the expense or upload the receipt.");
+                  setAlertConfig({
+                    visible: true,
+                    title: "Error",
+                    message: dbError.message || "Could not save the expense or upload the receipt.",
+                    type: 'error',
+                    buttons: [{ text: "Dismiss", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+                  });
                 } finally {
                   setFrozenPhoto(null);
                 }
               }
-            },
-            { 
-              text: "Try Again", 
-              style: "cancel",
-              onPress: () => setFrozenPhoto(null)
             }
           ]
-        );
+        });
 
       } catch (error: any) {
         console.error("Gemini Scan Error:", error);
-        Alert.alert(
-          "Scan Failed ❌", 
-          "Gemini could not read or structuralize the text nodes accurately. Make sure the receipt matches the green framing borders."
-        );
+        setAlertConfig({
+          visible: true,
+          title: "Scan Failed",
+          message: "Gemini could not read or structuralize the text nodes accurately. Make sure the receipt matches the green framing borders.",
+          type: 'error',
+          buttons: [{ text: "Try Again", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+        });
         setFrozenPhoto(null);
       } finally {
         setScanning(false);
       }
     }
   };
+
+  const getAlertIconConfig = () => {
+    switch (alertConfig.type) {
+      case 'success':
+        return { name: 'checkmark-circle' as const, color: '#10B981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'warning':
+        return { name: 'warning' as const, color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.15)' };
+      case 'error':
+        return { name: 'alert-circle' as const, color: '#EF4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      default:
+        return { name: 'information-circle' as const, color: '#3B82F6', bg: 'rgba(59, 130, 246, 0.15)' };
+    }
+  };
+
+  const alertIcon = getAlertIconConfig();
 
   return (
     <View style={styles.container}>
@@ -390,6 +464,47 @@ export default function ScanReceiptScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Modern Custom Alert Modal */}
+      <Modal transparent visible={alertConfig.visible} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.alertContainer}>
+            <View style={[styles.iconContainer, { backgroundColor: alertIcon.bg }]}>
+              <Ionicons name={alertIcon.name} size={28} color={alertIcon.color} />
+            </View>
+
+            <Text style={styles.alertTitle}>{alertConfig.title}</Text>
+            <Text style={styles.alertMessage}>{alertConfig.message}</Text>
+
+            <View style={styles.buttonGroup}>
+              {alertConfig.buttons.map((btn, index) => {
+                const isCancel = btn.style === 'cancel';
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.alertButton,
+                      isCancel ? styles.cancelButton : styles.primaryButton,
+                      alertConfig.buttons.length > 1 && { flex: 1 },
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={btn.onPress}
+                  >
+                    <Text
+                      style={[
+                        styles.buttonText,
+                        isCancel ? styles.cancelButtonText : styles.primaryButtonText,
+                      ]}
+                    >
+                      {btn.text}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -525,13 +640,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52, 211, 153, 0.15)',
   },
   safeBottomHeaderSpacer: { marginBottom: 10 },
-  subInstructionText: { 
-    color: '#94A3B8', 
-    fontSize: 13, 
-    textAlign: 'center', 
-    fontWeight: '500',
-    letterSpacing: -0.2
-  },
   actionControlContainer: { 
     position: 'absolute',
     bottom: 0,
@@ -591,5 +699,88 @@ const styles = StyleSheet.create({
   permissionTitle: { fontSize: 20, fontWeight: '700', color: '#1E293B', textAlign: 'center', letterSpacing: -0.4 },
   permissionDescription: { fontSize: 14, color: '#64748B', textAlign: 'center', marginTop: 8, lineHeight: 22, fontWeight: '400' },
   grantPermissionBtn: { backgroundColor: '#1E293B', paddingVertical: 14, paddingHorizontal: 28, borderRadius: 16, marginTop: 28 },
-  grantPermissionBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 }
+  grantPermissionBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+
+  // Custom Alert Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(3, 7, 18, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  alertContainer: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#0F172A',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  iconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  alertTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F8FAFC',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.3,
+  },
+  alertMessage: {
+    fontSize: 14,
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  buttonGroup: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  alertButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButton: {
+    backgroundColor: '#10B981',
+    flex: 1,
+  },
+  primaryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    flex: 1,
+  },
+  cancelButtonText: {
+    color: '#E2E8F0',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  buttonText: {
+    fontSize: 14,
+    fontWeight: '600',
+  }
 });
