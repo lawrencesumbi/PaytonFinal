@@ -102,8 +102,9 @@ export default function SplitScreen() {
 
   // Add this near your other state declarations
   const [friendToDelete, setFriendToDelete] = useState<any | null>(null);
-
   const [deleteMessage, setDeleteMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const [splitFormMessage, setSplitFormMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
@@ -426,17 +427,20 @@ const confirmDeleteFriend = (friendId: string) => {
     setCustomShares((prev) => ({ ...prev, [friendId]: val }));
   };
 
-  const handleCreateSplitDirectly = async () => {
+const handleCreateSplitDirectly = async () => {
   if (loading) return; // Prevent double taps
+
+  // Clear any existing messages
+  setSplitFormMessage(null);
 
   const numericAmount = parseFloat(amount);
   if (!description.trim() || isNaN(numericAmount) || numericAmount <= 0) {
-    showAlert('Invalid Input', 'Please enter a valid description and amount.');
+    setSplitFormMessage({ text: 'Please enter a valid description and amount.', type: 'error' });
     return;
   }
 
   if ((selectedFriends?.length || 0) === 0) {
-    showAlert('Select Friends', 'Please select at least one friend to split with.');
+    setSplitFormMessage({ text: 'Please select at least one friend to split with.', type: 'error' });
     return;
   }
 
@@ -456,7 +460,7 @@ const confirmDeleteFriend = (friendId: string) => {
     for (const fId of selectedFriends) {
       const val = parseFloat(customShares[fId] || '0');
       if (isNaN(val) || val < 0) {
-        showAlert('Invalid Share', 'Please enter valid custom amounts for selected friends.');
+        setSplitFormMessage({ text: 'Please enter valid custom amounts for selected friends.', type: 'error' });
         return;
       }
       customSum += val;
@@ -467,7 +471,7 @@ const confirmDeleteFriend = (friendId: string) => {
     }
 
     if (customSum > numericAmount) {
-      showAlert('Math Error', 'The sum of friend shares cannot exceed total amount.');
+      setSplitFormMessage({ text: 'The sum of friend shares cannot exceed total amount.', type: 'error' });
       return;
     }
     ownerShare = parseFloat((numericAmount - customSum).toFixed(2));
@@ -545,13 +549,23 @@ const confirmDeleteFriend = (friendId: string) => {
       myProfile?.full_name
     );
 
-    showAlert('Success', 'Split expense saved, logged to expenses, and emails sent!');
-    setFormVisible(false);
-    resetForm();
-    fetchData(user.id);
+    // Show success inline message
+    setSplitFormMessage({ text: 'Split expense saved, logged to expenses, and emails sent!', type: 'success' });
+
+    // Delay closing the modal so the user can see the success banner
+    setTimeout(() => {
+      setFormVisible(false);
+      resetForm();
+      fetchData(user.id);
+      setSplitFormMessage(null);
+      setLoading(false);
+    }, 1200);
+
   } catch (err: any) {
-    showAlert('Error', err.message || 'Failed to process split.');
-  } finally {
+    setSplitFormMessage({ 
+      text: err.message || 'Failed to process split.', 
+      type: 'error' 
+    });
     setLoading(false);
   }
 };
@@ -1026,6 +1040,7 @@ const confirmDeleteFriend = (friendId: string) => {
                   setAmount('');
                   setSelectedFriends([]);
                   setCustomShares({});
+                  setSplitFormMessage(null); // Clear message on close
                 }}
               >
                 <Ionicons name="close" size={23} color={colors.headerDarker} />
@@ -1033,6 +1048,29 @@ const confirmDeleteFriend = (friendId: string) => {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+              
+              {/* --- INLINE MESSAGE BANNER --- */}
+        {splitFormMessage && (
+          <View style={[
+            styles.inlineMessageContainer, 
+            splitFormMessage.type === 'error' ? styles.errorBanner : styles.successBanner,
+            { marginBottom: 16 }
+          ]}>
+            <Ionicons 
+              name={splitFormMessage.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+              size={18} 
+              color={splitFormMessage.type === 'error' ? '#D32F2F' : '#2E7D32'} 
+              style={{ marginRight: 6 }}
+            />
+            <Text style={[
+              styles.inlineMessageText, 
+              splitFormMessage.type === 'error' ? styles.errorText : styles.successText
+            ]}>
+              {splitFormMessage.text}
+            </Text>
+          </View>
+        )}
+              
               {/* 1. Total Amount First & Big */}
               <Text style={styles.label}>Total Amount (₱)</Text>
               <TextInput
