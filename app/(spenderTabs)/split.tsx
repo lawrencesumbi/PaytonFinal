@@ -106,6 +106,10 @@ export default function SplitScreen() {
 
   const [splitFormMessage, setSplitFormMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
+  const [splitToDelete, setSplitToDelete] = useState<any | null>(null);
+
+  const [splitDeleteMessage, setSplitDeleteMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
   };
@@ -394,23 +398,36 @@ const confirmDeleteFriend = (friendId: string) => {
   };
 
   const handleDeleteSplit = async (splitId: string) => {
-    try {
-      setLoading(true);
-      const { error } = await supabase
-        .from('split_expenses')
-        .delete()
-        .eq('id', splitId);
+  try {
+    setLoading(true);
+    setSplitDeleteMessage(null); // Clear any previous message
 
-      if (error) throw error;
+    const { error } = await supabase
+      .from('split_expenses')
+      .delete()
+      .eq('id', splitId);
 
-      setActiveSplits((prev) => prev.filter((s) => s.id !== splitId));
-      showAlert('Success', 'Split expense deleted successfully.');
-    } catch (err: any) {
-      showAlert('Error', err.message || 'Failed to delete split.');
-    } finally {
-      setLoading(false);
-    }
-  };
+    if (error) throw error;
+
+    setActiveSplits((prev) => prev.filter((s) => s.id !== splitId));
+    
+    // Show inline success message
+    setSplitDeleteMessage({ text: 'Split expense deleted successfully.', type: 'success' });
+    
+    // Auto-clear message after 3 seconds
+    setTimeout(() => {
+      setSplitDeleteMessage(null);
+    }, 3000);
+
+  } catch (err: any) {
+    setSplitDeleteMessage({ 
+      text: err.message || 'Failed to delete split.', 
+      type: 'error' 
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   const toggleSelectFriend = (friendId: string) => {
     if (selectedFriends.includes(friendId)) {
@@ -813,6 +830,29 @@ const handleCreateSplitDirectly = async () => {
                 </Text>
               </View>
             )}
+
+            {/* --- INLINE SPLIT DELETE MESSAGE BANNER --- */}
+            {splitDeleteMessage && (
+              <View style={[
+                styles.inlineMessageContainer, 
+                splitDeleteMessage.type === 'error' ? styles.errorBanner : styles.successBanner,
+                { marginBottom: 12 }
+              ]}>
+                <Ionicons 
+                  name={splitDeleteMessage.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+                  size={18} 
+                  color={splitDeleteMessage.type === 'error' ? '#D32F2F' : '#2E7D32'} 
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[
+                  styles.inlineMessageText, 
+                  splitDeleteMessage.type === 'error' ? styles.errorText : styles.successText
+                ]}>
+                  {splitDeleteMessage.text}
+                </Text>
+              </View>
+            )}
+            
             <View style={styles.sectionTitleRow}>
               <Text style={styles.sectionTitle}>Friends List</Text>
               <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
@@ -895,28 +935,15 @@ const handleCreateSplitDirectly = async () => {
                     </View>
 
                     <View style={styles.rightActionsContainer}>
-                      <View style={styles.iconButtonsRow}>
-                        <TouchableOpacity
-                          style={styles.actionIconButton}
-                          onPress={() => {
-                            Alert.alert(
-                              "Delete Split",
-                              "Are you sure you want to delete this split expense?",
-                              [
-                                { text: "Cancel", style: "cancel" },
-                                { 
-                                  text: "Delete", 
-                                  style: "destructive", 
-                                  onPress: () => handleDeleteSplit(item.id) 
-                                },
-                              ]
-                            );
-                          }}
-                        >
-                          <Ionicons name="trash-outline" size={18} color={'#ff5252'} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
+  <View style={styles.iconButtonsRow}>
+    <TouchableOpacity
+      style={styles.actionIconButton}
+      onPress={() => setSplitToDelete(item)} // <--- Triggers confirmation modal
+    >
+      <Ionicons name="trash-outline" size={18} color={'#ff5252'} />
+    </TouchableOpacity>
+  </View>
+</View>
                   </View>
 
                   <View style={{ height: 1, backgroundColor: '#f1f1f1', marginTop: 10, marginBottom: 7 }} />
@@ -1222,6 +1249,69 @@ const handleCreateSplitDirectly = async () => {
           </View>
         </View>
       </Modal>
+
+{/* --- MODERN SPLIT DELETE CONFIRMATION MODAL --- */}
+<Modal visible={!!splitToDelete} animationType="fade" transparent>
+  <View style={styles.modalOverlayCenter}>
+    <View style={[styles.alertModalContainer, { width: '85%', maxWidth: 360, alignItems: 'center', paddingVertical: 24 }]}>
+      
+      {/* Warning Icon Badge */}
+      <View style={{ 
+        width: 56, 
+        height: 56, 
+        borderRadius: 28, 
+        backgroundColor: '#FFEBEE', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginBottom: 16 
+      }}>
+        <Ionicons name="warning-outline" size={28} color="#D32F2F" />
+      </View>
+
+      {/* Title & Description */}
+      <Text style={[styles.modalTitle, { textAlign: 'center', marginBottom: 8 }]}>
+        Delete Split Expense?
+      </Text>
+      <Text style={{ textAlign: 'center', color: colors.textMuted || '#666', fontSize: 14, marginBottom: 24, paddingHorizontal: 10 }}>
+        Are you sure you want to delete <Text style={{ fontWeight: '600', color: colors.textDark || '#333' }}>"{splitToDelete?.description}"</Text>? This action cannot be undone.
+      </Text>
+
+      {/* Action Buttons */}
+      <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+        <TouchableOpacity 
+          style={{ 
+            flex: 1, 
+            paddingVertical: 12, 
+            borderRadius: 8, 
+            backgroundColor: '#F5F5F5', 
+            alignItems: 'center' 
+          }}
+          onPress={() => setSplitToDelete(null)}
+        >
+          <Text style={{ fontWeight: '600', color: '#333' }}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={{ 
+            flex: 1, 
+            paddingVertical: 12, 
+            borderRadius: 8, 
+            backgroundColor: '#D32F2F', 
+            alignItems: 'center' 
+          }}
+          onPress={async () => {
+            const idToDelete = splitToDelete.id;
+            setSplitToDelete(null); // Close modal
+            await handleDeleteSplit(idToDelete); // Call your existing delete handler
+          }}
+        >
+          <Text style={{ fontWeight: '600', color: '#FFF' }}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+
+    </View>
+  </View>
+</Modal>
 
       {/* ADD / EDIT FRIEND MODAL */}
 <Modal visible={addFriendModalVisible} animationType="fade" transparent>
