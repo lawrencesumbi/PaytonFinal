@@ -32,12 +32,11 @@ export default function ChangePasswordScreen() {
   const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
 
   // Helper function to insert logs into Supabase
-  const logActivity = async (userId: string, action: string, details: string) => {
+  const logActivity = async (userId: string, details: string) => {
     try {
       await supabase.from('logs').insert([
         {
           user_id: userId,
-          action: action,
           details: details,
         }
       ]);
@@ -54,8 +53,8 @@ export default function ChangePasswordScreen() {
       setMessage({ type: 'error', text: 'Please fill in all fields to proceed.' });
       return;
     }
-    if (newPassword.length < 6) {
-      setMessage({ type: 'error', text: 'Your new password must be at least 6 characters long.' });
+    if (newPassword.length < 8) {
+      setMessage({ type: 'error', text: 'Your new password must be at least 8 characters long.' });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -80,7 +79,7 @@ export default function ChangePasswordScreen() {
 
       if (signInError) {
         // Log failed password change attempt due to incorrect old password
-        await logActivity(user.id, 'PASSWORD_UPDATE_FAILED', `${user.email} entered an incorrect current password.`);
+        await logActivity(user.id, `entered an incorrect current password.`);
         throw new Error('The current password you entered is incorrect.');
       }
 
@@ -91,13 +90,13 @@ export default function ChangePasswordScreen() {
       if (updateError) throw updateError;
 
       // Log successful password change before signing out
-      await logActivity(user.id, 'PASSWORD_UPDATE', `${user.email} updated password successfully.`);
+      await logActivity(user.id, `updated password successfully.`);
 
       // 4. Log out the user automatically after a successful update
       await supabase.auth.signOut();
       
       // Log automatic sign out
-      await logActivity(user.id, 'USER_LOGOUT', `${user.email} signed out successfully.`);
+      await logActivity(user.id, `signed out successfully.`);
 
       setMessage({ 
         type: 'success', 
@@ -184,7 +183,7 @@ export default function ChangePasswordScreen() {
                 style={styles.pillTextInputInside} 
                 value={newPassword} 
                 onChangeText={setNewPassword} 
-                placeholder="Min. 6 characters"
+                placeholder="Min. 8 characters"
                 secureTextEntry={!showNewPassword}
                 placeholderTextColor="#94A3B8"
               />

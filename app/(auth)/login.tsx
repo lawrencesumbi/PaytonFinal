@@ -32,13 +32,12 @@ export default function LoginScreen() {
   const [passwordError, setPasswordError] = useState('');
   const [generalError, setGeneralError] = useState('');
 
-  // Helper function to insert logs into your simple logs table
-  const logActivity = async (userId: string | null, action: string, details: string) => {
+  // Helper function to insert logs into your simple logs table (without action)
+  const logActivity = async (userId: string | null, details: string) => {
     try {
       if (!userId) return; // Don't log if we don't have a user ID yet
       await supabase.from('logs').insert({
         user_id: userId,
-        action: action,
         details: details,
       });
     } catch (err) {
@@ -112,7 +111,7 @@ export default function LoginScreen() {
 
       if (authData?.user) { 
         // Log successful login with email-focused details
-        await logActivity(authData.user.id, 'USER_LOGIN', `${trimmedEmail} successfully signed in.`);
+        await logActivity(authData.user.id, `signed in successfully.`);
         await navigateBasedOnRole(authData.user.id);
       }
     } catch (e: any) {
@@ -183,7 +182,7 @@ export default function LoginScreen() {
           const { data: authUser } = await supabase.auth.getUser();
           if (authUser?.user) {
             // Log successful OAuth sign in
-            await logActivity(authUser.user.id, 'OAUTH_LOGIN', `User signed in via ${provider}`);
+            await logActivity(authUser.user.id, `User signed in via ${provider}`);
             await navigateBasedOnRole(authUser.user.id);
           }
         }

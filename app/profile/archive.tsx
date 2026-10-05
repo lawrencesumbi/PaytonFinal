@@ -14,6 +14,7 @@ export default function ArchiveScreen() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   
   // Search state for associated expenses
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,6 +46,8 @@ export default function ArchiveScreen() {
       setLoading(true);
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) return;
+
+      setCurrentUserId(user.id);
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -115,7 +118,6 @@ export default function ArchiveScreen() {
     setLoadingExpenses(false);
   };
 
-  // Trigger Modern Delete Confirmation Dialog
   const confirmDeleteItem = (item: any) => {
     const itemName = item.allowance_name || item.source_name;
     setDialogConfig({
@@ -127,7 +129,6 @@ export default function ArchiveScreen() {
     });
   };
 
-  // Trigger Modern Unarchive Confirmation Dialog
   const confirmUnarchiveItem = (item: any) => {
     const isIncome = !!item.source_name;
     if (isIncome) return;
@@ -141,12 +142,13 @@ export default function ArchiveScreen() {
     });
   };
 
-  // Execute Action from Custom Dialog
   const handleExecuteDialogAction = async () => {
     const { type, itemToProcess } = dialogConfig;
     if (!itemToProcess) return;
 
     try {
+      const itemName = itemToProcess.allowance_name || itemToProcess.source_name;
+
       if (type === 'delete') {
         const isIncome = !!itemToProcess.source_name;
         const tableName = isIncome ? 'income' : 'allowances';
@@ -159,6 +161,14 @@ export default function ArchiveScreen() {
         if (error) {
           showErrorDialog('Deletion Failed', error.message);
         } else {
+          // Insert log for deletion
+          if (currentUserId) {
+            await supabase.from('logs').insert({
+              user_id: currentUserId,
+              details: `deleted archived record "${itemName}" (${tableName}).`,
+            });
+          }
+
           setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
           closeDialog();
         }
@@ -171,6 +181,14 @@ export default function ArchiveScreen() {
         if (error) {
           showErrorDialog('Restoration Failed', error.message);
         } else {
+          // Insert log for restoration / unarchiving
+          if (currentUserId) {
+            await supabase.from('logs').insert({
+              user_id: currentUserId,
+              details: `restored record "${itemName}" from archive.`,
+            });
+          }
+
           setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
           closeDialog();
         }

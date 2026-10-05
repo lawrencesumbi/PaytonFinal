@@ -100,8 +100,7 @@ export default function PersonalProfileScreen() {
       if (user) {
         await supabase.from('logs').insert({
           user_id: user.id,
-          action: 'USER_LOGOUT',
-          details: `${user.email} signed out successfully .`,
+          details: `signed out successfully .`,
         });
       }
 
