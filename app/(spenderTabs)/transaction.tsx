@@ -4,7 +4,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   NativeScrollEvent,
@@ -67,6 +66,15 @@ function TransactionsScreenContent() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [allowanceIdInput, setAllowanceIdInput] = useState<string | null>(null);
 
+  // Inline Modal Feedback States
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalSuccess, setModalSuccess] = useState<string | null>(null);
+
+  // Custom Modern Delete Confirmation States
+  const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Full-screen Image Viewer State
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
@@ -89,6 +97,8 @@ function TransactionsScreenContent() {
     setSelectedCategory(null);
     setEditingTransaction(null);
     setAllowanceIdInput(null);
+    setModalError(null);
+    setModalSuccess(null);
     setIsAddModalVisible(false);
   };
 
@@ -97,6 +107,8 @@ function TransactionsScreenContent() {
     setAmountInput(expense.amount.toString());
     setDescriptionInput(expense.description);
     setAllowanceIdInput(expense.allowance_id || null);
+    setModalError(null);
+    setModalSuccess(null);
     
     const matchedCat = categories.find(cat => cat.name === expense.categories.name);
     setSelectedCategory(matchedCat || null);
@@ -191,17 +203,20 @@ function TransactionsScreenContent() {
   }, [fetchTransactions]);
 
   const handleSaveExpense = async () => {
+    setModalError(null);
+    setModalSuccess(null);
+
     const numericAmount = parseFloat(amountInput);
     if (!amountInput || isNaN(numericAmount) || numericAmount <= 0) {
-      alert('Please enter a valid amount');
+      setModalError('Please enter a valid amount.');
       return;
     }
     if (!descriptionInput.trim()) {
-      alert('Please enter a description');
+      setModalError('Please enter a description.');
       return;
     }
     if (!selectedCategory) {
-      alert('Please select a category');
+      setModalError('Please select a category.');
       return;
     }
 
@@ -210,12 +225,11 @@ function TransactionsScreenContent() {
 
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
-        alert('You must be logged in to manage expenses.');
+        setModalError('You must be logged in to manage expenses.');
         setIsSubmitting(false);
         return;
       }
 
-      // 1. Fetch the latest active allowance
       let targetAllowanceId = allowanceIdInput;
       let currentAllowance: any = null;
 
@@ -243,15 +257,12 @@ function TransactionsScreenContent() {
         }
       }
 
-      // Rule 1: Prevent saving if there is no allowance available
       if (!currentAllowance) {
-        alert('Cannot save expense: No active allowance found.');
+        setModalError('Cannot save expense: No active allowance found.');
         setIsSubmitting(false);
         return;
       }
 
-      // Calculate current remaining balance for this allowance
-      // Sum up existing expenses tied to this allowance (excluding current editing item if editing)
       let expensesQuery = supabase
         .from('expenses')
         .select('amount')
@@ -265,9 +276,8 @@ function TransactionsScreenContent() {
       const totalSpent = (existingExpenses || []).reduce((sum, item) => sum + Number(item.amount), 0);
       const remainingBalance = Number(currentAllowance.amount) - totalSpent;
 
-      // Rule 2: Prevent saving if the amount exceeds the remaining allowance balance
       if (numericAmount > remainingBalance) {
-        alert(`Expense exceeds remaining allowance balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
+        setModalError(`Expense exceeds remaining allowance balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
         setIsSubmitting(false);
         return;
       }
@@ -297,42 +307,44 @@ function TransactionsScreenContent() {
         if (error) throw error;
       }
 
-      handleCloseModal();
-      fetchTransactions();
+      setModalSuccess(editingTransaction ? 'Expense updated successfully!' : 'Expense saved successfully!');
+      setTimeout(() => {
+        handleCloseModal();
+        fetchTransactions();
+      }, 700);
+
     } catch (err: any) {
       console.error('Error saving expense:', err.message);
-      alert('Failed to save expense: ' + err.message);
+      setModalError('Failed to save expense: ' + err.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDeleteExpense = (id: string) => {
-    Alert.alert(
-      'Delete Transaction',
-      'Are you sure you want to delete this transaction? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('expenses')
-                .delete()
-                .eq('id', id);
+  const confirmDeleteExpense = (expense: Transaction) => {
+    setTransactionToDelete(expense);
+    setIsDeleteModalVisible(true);
+  };
 
-              if (error) throw error;
-              fetchTransactions();
-            } catch (err: any) {
-              console.error('Error deleting expense:', err.message);
-              alert('Failed to delete expense: ' + err.message);
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteExpense = async () => {
+    if (!transactionToDelete) return;
+
+    try {
+      setIsDeleting(true);
+      const { error } = await supabase
+        .from('expenses')
+        .delete()
+        .eq('id', transactionToDelete.id);
+
+      if (error) throw error;
+      setIsDeleteModalVisible(false);
+      setTransactionToDelete(null);
+      fetchTransactions();
+    } catch (err: any) {
+      console.error('Error deleting expense:', err.message);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filteredTransactions = useMemo(() => {
@@ -505,7 +517,7 @@ function TransactionsScreenContent() {
                       -₱{(expense.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </Text>
                     <TouchableOpacity 
-                      onPress={() => handleDeleteExpense(expense.id)}
+                      onPress={() => confirmDeleteExpense(expense)}
                       style={styles.deleteIconButton}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
@@ -536,6 +548,20 @@ function TransactionsScreenContent() {
                 <Ionicons name="close" size={24} color="#64748B" />
               </TouchableOpacity>
             </View>
+
+            {modalError && (
+              <View style={styles.inlineErrorContainer}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" style={{ marginRight: 6 }} />
+                <Text style={styles.inlineErrorText}>{modalError}</Text>
+              </View>
+            )}
+
+            {modalSuccess && (
+              <View style={styles.inlineSuccessContainer}>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#16A34A" style={{ marginRight: 6 }} />
+                <Text style={styles.inlineSuccessText}>{modalSuccess}</Text>
+              </View>
+            )}
 
             <View style={styles.calcInputContainer}>
               <TextInput
@@ -601,6 +627,51 @@ function TransactionsScreenContent() {
         </View>
       </Modal>
 
+      {/* MODERN DELETE CONFIRMATION MODAL */}
+      <Modal
+        visible={isDeleteModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsDeleteModalVisible(false)}
+      >
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteModalCard}>
+            <View style={styles.deleteIconBadge}>
+              <Ionicons name="trash-outline" size={24} color="#DC2626" />
+            </View>
+
+            <Text style={styles.deleteModalTitle}>Delete Transaction</Text>
+            <Text style={styles.deleteModalMessage}>
+              Are you sure you want to delete <Text style={{ fontWeight: '700', color: '#1E293B' }}>"{transactionToDelete?.description}"</Text>? This action cannot be undone.
+            </Text>
+
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                style={styles.cancelDeleteButton}
+                activeOpacity={0.7}
+                onPress={() => setIsDeleteModalVisible(false)}
+                disabled={isDeleting}
+              >
+                <Text style={styles.cancelDeleteButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.confirmDeleteButton, isDeleting && { opacity: 0.7 }]}
+                activeOpacity={0.8}
+                onPress={handleDeleteExpense}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.confirmDeleteButtonText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* FULL-SCREEN IMAGE VIEWER MODAL */}
       <Modal
         visible={!!selectedImageUri}
@@ -653,8 +724,12 @@ const styles = StyleSheet.create({
   quickFormTrigger: { width: 38, height: 38, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.12)', justifyContent: 'center', alignItems: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, paddingBottom: 40 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B' },
+  inlineErrorContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FCA5A5', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, marginBottom: 16 },
+  inlineErrorText: { flex: 1, color: '#DC2626', fontSize: 12, fontWeight: '600' },
+  inlineSuccessContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#86EFAC', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, marginBottom: 16 },
+  inlineSuccessText: { flex: 1, color: '#16A34A', fontSize: 12, fontWeight: '600' },
   calcInputContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', paddingVertical: 12, marginBottom: 20 },
   calcInput: { fontSize: 36, fontWeight: '700', color: '#1E293B', minWidth: 140, textAlign: 'center' },
   inputGroup: { marginBottom: 16 },
@@ -665,6 +740,19 @@ const styles = StyleSheet.create({
   submitButton: { backgroundColor: '#1F4F59', borderRadius: 14, height: 50, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
   submitButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   deleteIconButton: { padding: 4, justifyContent: 'center', alignItems: 'center' },
+  
+  // Modern Delete Modal Styles
+  deleteModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
+  deleteModalCard: { width: '100%', maxWidth: 340, backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10 },
+  deleteIconBadge: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  deleteModalTitle: { fontSize: 18, fontWeight: '700', color: '#1E293B', marginBottom: 8, textAlign: 'center' },
+  deleteModalMessage: { fontSize: 13, fontWeight: '400', color: '#64748B', textAlign: 'center', lineHeight: 18, marginBottom: 24 },
+  deleteModalActions: { flexDirection: 'row', width: '100%', gap: 12 },
+  cancelDeleteButton: { flex: 1, height: 46, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center' },
+  cancelDeleteButtonText: { fontSize: 14, fontWeight: '600', color: '#475569' },
+  confirmDeleteButton: { flex: 1, height: 46, borderRadius: 12, backgroundColor: '#DC2626', justifyContent: 'center', alignItems: 'center' },
+  confirmDeleteButtonText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+
   imageModalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.9)', justifyContent: 'center', alignItems: 'center' },
   fullScreenImage: { width: '90%', height: '80%' },
   closeImageButton: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 10 }
