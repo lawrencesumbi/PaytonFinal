@@ -100,6 +100,11 @@ export default function SplitScreen() {
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [manageModalVisible, setManageModalVisible] = useState(false);
 
+  // Add this near your other state declarations
+  const [friendToDelete, setFriendToDelete] = useState<any | null>(null);
+
+  const [deleteMessage, setDeleteMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
   };
@@ -156,7 +161,7 @@ export default function SplitScreen() {
         .from('friends')
         .select('id, full_name, email, avatar_url')
         .eq('user_id', userId)
-        .order('full_name', { ascending: true });
+        .order('created_at', { ascending: true });
 
       if (friendsErr) console.error('Friends fetch error:', friendsErr.message);
       setFriends(friendsData || []);
@@ -368,21 +373,11 @@ export default function SplitScreen() {
   }
 };
 
-  const handleDeleteFriend = async (friendId: string) => {
-    try {
-      const { error } = await supabase
-        .from('friends')
-        .delete()
-        .eq('id', friendId);
-
-      if (error) throw error;
-
-      setFriends((prev) => prev.filter((f) => f.id !== friendId));
-      showAlert('Success', 'Friend deleted successfully.');
-    } catch (err: any) {
-      showAlert('Error', err.message || 'Failed to delete friend.');
-    }
-  };
+const confirmDeleteFriend = (friendId: string) => {
+  // Optional: Find the friend object if you want to show their name in the confirmation dialog
+  const friend = friends.find(f => f.id === friendId);
+  setFriendToDelete(friend);
+};
 
   const handleFriendPress = (friend: Friend) => {
   setSelectedFriend(friend);
@@ -783,6 +778,27 @@ export default function SplitScreen() {
 
           {/* FRIENDS SECTION */}
           <View style={styles.friendsSection}>
+            {/* --- INLINE DELETE MESSAGE BANNER --- */}
+            {deleteMessage && (
+              <View style={[
+                styles.inlineMessageContainer, 
+                deleteMessage.type === 'error' ? styles.errorBanner : styles.successBanner,
+                { marginBottom: 12 }
+              ]}>
+                <Ionicons 
+                  name={deleteMessage.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+                  size={18} 
+                  color={deleteMessage.type === 'error' ? '#D32F2F' : '#2E7D32'} 
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[
+                  styles.inlineMessageText, 
+                  deleteMessage.type === 'error' ? styles.errorText : styles.successText
+                ]}>
+                  {deleteMessage.text}
+                </Text>
+              </View>
+            )}
             <View style={styles.sectionTitleRow}>
               <Text style={styles.sectionTitle}>Friends List</Text>
               <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
@@ -1318,7 +1334,7 @@ export default function SplitScreen() {
               const friendId = selectedFriend.id;
               setManageModalVisible(false);
               setSelectedFriend(null);
-              handleDeleteFriend(friendId);
+              confirmDeleteFriend(friendId); // <--- Triggers modern confirmation modal instead
             }}
           >
             <Ionicons name="trash-outline" size={20} color="#D32F2F" style={{ marginRight: 10 }} />
@@ -1326,6 +1342,94 @@ export default function SplitScreen() {
           </TouchableOpacity>
         </View>
       )}
+    </View>
+  </View>
+</Modal>
+
+{/* --- MODERN DELETE CONFIRMATION MODAL --- */}
+<Modal visible={!!friendToDelete} animationType="fade" transparent>
+  <View style={styles.modalOverlayCenter}>
+    <View style={[styles.alertModalContainer, { width: '85%', maxWidth: 360, alignItems: 'center', paddingVertical: 24 }]}>
+      
+      {/* Warning Icon Badge */}
+      <View style={{ 
+        width: 56, 
+        height: 56, 
+        borderRadius: 28, 
+        backgroundColor: '#FFEBEE', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        marginBottom: 16 
+      }}>
+        <Ionicons name="warning-outline" size={28} color="#D32F2F" />
+      </View>
+
+      {/* Title & Description */}
+      <Text style={[styles.modalTitle, { textAlign: 'center', marginBottom: 8 }]}>
+        Delete Friend?
+      </Text>
+      <Text style={{ textAlign: 'center', color: colors.textMuted || '#666', fontSize: 14, marginBottom: 24, paddingHorizontal: 10 }}>
+        Are you sure you want to delete <Text style={{ fontWeight: '600', color: colors.textDark || '#333' }}>{friendToDelete?.full_name}</Text>? This action cannot be undone.
+      </Text>
+
+      {/* Action Buttons */}
+      <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+        <TouchableOpacity 
+          style={{ 
+            flex: 1, 
+            paddingVertical: 12, 
+            borderRadius: 8, 
+            backgroundColor: '#F5F5F5', 
+            alignItems: 'center' 
+          }}
+          onPress={() => setFriendToDelete(null)}
+        >
+          <Text style={{ fontWeight: '600', color: '#333' }}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+  style={{ 
+    flex: 1, 
+    paddingVertical: 12, 
+    borderRadius: 8, 
+    backgroundColor: '#D32F2F', 
+    alignItems: 'center' 
+  }}
+  onPress={async () => {
+    const idToDelete = friendToDelete.id;
+    setFriendToDelete(null); // Close confirmation modal
+    
+    try {
+      const { error } = await supabase
+        .from('friends')
+        .delete()
+        .eq('id', idToDelete);
+
+      if (error) throw error;
+
+      // Update state
+      setFriends((prev) => prev.filter((f) => f.id !== idToDelete));
+      
+      // Show inline success message
+      setDeleteMessage({ text: 'Friend deleted successfully.', type: 'success' });
+      
+      // Auto-clear message after 3 seconds
+      setTimeout(() => {
+        setDeleteMessage(null);
+      }, 3000);
+
+    } catch (err: any) {
+      setDeleteMessage({ 
+        text: err.message || 'Failed to delete friend.', 
+        type: 'error' 
+      });
+    }
+  }}
+>
+  <Text style={{ fontWeight: '600', color: '#FFF' }}>Delete</Text>
+</TouchableOpacity>
+      </View>
+
     </View>
   </View>
 </Modal>
