@@ -86,12 +86,12 @@ export default function RegisterScreen() {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!trimmedFullName) {
-      newErrors.fullName = 'Full Name cannot be blank.';
+      newErrors.fullName = 'Full Name is a required field.';
       hasError = true;
     }
 
     if (!trimmedEmail) {
-      newErrors.email = 'Email address cannot be blank.';
+      newErrors.email = 'Email address is a required field.';
       hasError = true;
     } else if (!emailRegex.test(trimmedEmail)) {
       newErrors.email = 'Please enter a valid email address.';
@@ -99,7 +99,7 @@ export default function RegisterScreen() {
     }
 
     if (!password) {
-      newErrors.password = 'Password cannot be blank.';
+      newErrors.password = 'Password is a required field.';
       hasError = true;
     } else if (password.length < 8) {
       newErrors.password = 'Password must be at least 8 characters long.';
@@ -107,7 +107,7 @@ export default function RegisterScreen() {
     }
 
     if (!confirmPassword) {
-      newErrors.confirmPassword = 'Confirm password cannot be blank.';
+      newErrors.confirmPassword = 'Confirm password is a required field.';
       hasError = true;
     } else if (password !== confirmPassword) {
       newErrors.confirmPassword = 'Passwords do not match.';

@@ -117,7 +117,7 @@ function generateDateRange() {
   const dates = [];
   const today = new Date();
   
-  for (let i = -30; i <= 30; i++) {
+  for (let i = -7; i <= 7; i++) {
     const d = new Date();
     d.setDate(today.getDate() + i);
     dates.push({

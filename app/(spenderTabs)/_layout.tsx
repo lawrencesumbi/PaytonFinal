@@ -230,39 +230,7 @@ export default function SpenderLayout() {
 
         {/* Hidden routes */}
         <Tabs.Screen name="profile" options={{ href: null }} />
-        <Tabs.Screen name="budget" options={{ href: null }} />
-        <Tabs.Screen name="reminders" options={{ href: null }} />
-        <Tabs.Screen name="statistics" options={{ href: null }} />
-        <Tabs.Screen name="invitations" options={{ href: null }} />
-        <Tabs.Screen name="Budgetcategorydetails" options={{ href: null }} />
       </Tabs>
-
-
-{/* 
-      {!shouldHideAiButton && (
-        <View style={styles.aiContainer}>
-          <Animated.View style={[styles.speechBubble, animatedBubbleStyle]}>
-            <Text style={styles.speechBubbleText}>{currentMessage}</Text>
-            <View style={styles.speechBubbleArrow} />
-          </Animated.View>
-
-          <Animated.View style={animatedButtonStyle}>
-            <TouchableOpacity
-              style={styles.floatingAiButton}
-              onPress={() => router.push("/insight")}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={require("../../assets/images/coachpayton.png")}
-                style={styles.paytonLogo}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      )}
-
-*/}
 
     </>
   );
