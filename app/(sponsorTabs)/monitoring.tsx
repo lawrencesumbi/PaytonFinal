@@ -148,11 +148,11 @@ export default function MonitoringScreen() {
     }, [spenderId])
   );
 
-  const handleArchiveAllowance = (allowanceId: string) => {
+const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
     setAlertConfig({
       visible: true,
       title: 'Archive Allowance',
-      message: 'This allowance will be moved to archives and hidden from active tracking. You can restore it later if needed.',
+      message: `This allowance ("${allowanceName}") will be moved to archives and hidden from active tracking. You can restore it later if needed.`,
       type: 'archive',
       onConfirm: async () => {
         hideAlert();
@@ -170,12 +170,11 @@ export default function MonitoringScreen() {
             onConfirm: hideAlert,
           });
         } else {
-          // Fetch current user and log the archiving action matching your logs table schema
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
             await supabase.from('logs').insert({
               user_id: user.id,
-              details: `archived allowance record (ID: ${allowanceId}).`,
+              details: `archived allowance record ("${allowanceName}").`,
             });
           }
 
@@ -185,11 +184,11 @@ export default function MonitoringScreen() {
     });
   };
 
-  const handleDeleteAllowance = (allowanceId: string) => {
+  const handleDeleteAllowance = (allowanceId: string, allowanceName: string) => {
     setAlertConfig({
       visible: true,
       title: 'Delete Allowance',
-      message: 'This action is permanent and cannot be undone. Associated tracking records may be affected.',
+      message: `This action is permanent and cannot be undone for "${allowanceName}". Associated tracking records may be affected.`,
       type: 'delete',
       onConfirm: async () => {
         hideAlert();
@@ -204,12 +203,11 @@ export default function MonitoringScreen() {
             onConfirm: hideAlert,
           });
         } else {
-          // Fetch current user and log the deletion action matching your logs table schema
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
             await supabase.from('logs').insert({
               user_id: user.id,
-              details: `deleted allowance record (ID: ${allowanceId}).`,
+              details: `deleted allowance record ("${allowanceName}").`,
             });
           }
 
@@ -328,11 +326,11 @@ export default function MonitoringScreen() {
                           +₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </Text>
                         
-                        <TouchableOpacity onPress={() => handleArchiveAllowance(item.id)} style={styles.actionBtn}>
+                        <TouchableOpacity onPress={() => handleArchiveAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
                           <Ionicons name="archive-outline" size={15} color={COLORS.deepTeal} />
                         </TouchableOpacity>
 
-                        <TouchableOpacity onPress={() => handleDeleteAllowance(item.id)} style={styles.actionBtn}>
+                        <TouchableOpacity onPress={() => handleDeleteAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
                           <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
                         </TouchableOpacity>
                       </View>
