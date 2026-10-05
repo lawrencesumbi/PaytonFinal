@@ -183,7 +183,6 @@ export default function SponsorTabsLayout() {
           }}
         />
 
-        <Tabs.Screen name="members" options={{ href: null }} />
         <Tabs.Screen name="monitoring" options={{ href: null }} />
 
       </Tabs>

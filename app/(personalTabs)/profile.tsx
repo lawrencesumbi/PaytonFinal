@@ -1,8 +1,8 @@
 // app/(personalTabs)/profile.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -50,9 +50,12 @@ export default function PersonalProfileScreen() {
   const [role, setRole] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchProfile();
-  }, []);
+  // Automatically fetch profile data every time the screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+    }, [])
+  );
 
   const fetchProfile = async () => {
     try {
@@ -323,11 +326,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#ffb8b8',       
-    marginTop: 30,          
+    marginTop: 30,            
     marginHorizontal: 24,      
   },
   modernLogoutText: {
-    color: '#EF4444',          
+    color: '#EF4444',            
     fontSize: 15,
     fontWeight: '700',
     letterSpacing: 0.5,

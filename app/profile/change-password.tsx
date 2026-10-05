@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,8 @@ import {
 import { colors } from '../(spenderTabs)/profile';
 import { supabase } from '../../lib/supabase';
 
+type MessageType = 'error' | 'success' | null;
+
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const [oldPassword, setOldPassword] = useState('');
@@ -27,17 +28,23 @@ export default function ChangePasswordScreen() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // Inline message state
+  const [message, setMessage] = useState<{ type: MessageType; text: string } | null>(null);
+
   const handleChangePassword = async () => {
+    // Clear previous inline messages on new submission attempt
+    setMessage(null);
+
     if (!oldPassword || !newPassword || !confirmPassword) {
-      Alert.alert("Error", "Please fill in all fields.");
+      setMessage({ type: 'error', text: 'Please fill in all fields to proceed.' });
       return;
     }
     if (newPassword.length < 6) {
-      Alert.alert("Error", "New password must be at least 6 characters.");
+      setMessage({ type: 'error', text: 'Your new password must be at least 6 characters long.' });
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert("Error", "New passwords do not match.");
+      setMessage({ type: 'error', text: 'New passwords do not match. Please verify.' });
       return;
     }
 
@@ -47,7 +54,7 @@ export default function ChangePasswordScreen() {
       // 1. Get current user's email
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user?.email) {
-        throw new Error("Unable to identify the current user. Please log in again.");
+        throw new Error('Unable to identify the current user session. Please log in again.');
       }
 
       // 2. Verify old password via sign-in
@@ -57,7 +64,7 @@ export default function ChangePasswordScreen() {
       });
 
       if (signInError) {
-        throw new Error("Current password is incorrect.");
+        throw new Error('The current password you entered is incorrect.');
       }
 
       // 3. Update password
@@ -69,21 +76,18 @@ export default function ChangePasswordScreen() {
       // 4. Log out the user automatically after a successful update
       await supabase.auth.signOut();
 
-      Alert.alert(
-        "Password Updated", 
-        "Your password has been changed successfully. Please log in with your new password.",
-        [
-          { 
-            text: "OK", 
-            onPress: () => {
-              // Adjust route path if your login screen is located elsewhere (e.g., '/' or '/login')
-              router.replace('/'); 
-            } 
-          }
-        ]
-      );
+      setMessage({ 
+        type: 'success', 
+        text: 'Password updated successfully! Redirecting to login...' 
+      });
+
+      // Delay navigation slightly so the user can read the success message
+      setTimeout(() => {
+        router.replace('/');
+      }, 1500);
+
     } catch (error: any) {
-      Alert.alert("Update Failed", error.message);
+      setMessage({ type: 'error', text: error.message || 'An unexpected error occurred.' });
     } finally {
       setIsUpdating(false);
     }
@@ -108,6 +112,27 @@ export default function ChangePasswordScreen() {
             Enter your current password and a new password to keep your Payton account secure.
           </Text>
         </View>
+
+        {/* Modern Inline Alert Banner */}
+        {message && (
+          <View style={[
+            styles.alertBanner, 
+            message.type === 'success' ? styles.alertSuccess : styles.alertError
+          ]}>
+            <Ionicons 
+              name={message.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
+              size={18} 
+              color={message.type === 'success' ? '#065F46' : '#991B1B'} 
+              style={styles.alertIcon}
+            />
+            <Text style={[
+              styles.alertText, 
+              message.type === 'success' ? styles.alertTextSuccess : styles.alertTextError
+            ]}>
+              {message.text}
+            </Text>
+          </View>
+        )}
 
         <View style={styles.formCardContainer}>
           {/* Current Password Input */}
@@ -210,9 +235,44 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5 
   },
   editScrollContent: { paddingBottom: 24, flexGrow: 1 },
-  instructionContainer: { paddingHorizontal: 24, marginTop: 24, marginBottom: 20 },
+  instructionContainer: { paddingHorizontal: 24, marginTop: 24, marginBottom: 16 },
   instructionText: { fontSize: 14, color: '#64748B', lineHeight: 20, fontWeight: '400' },
   
+  // Inline Alert Styles
+  alertBanner: {
+    marginHorizontal: 24,
+    marginBottom: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  alertError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FEE2E2',
+  },
+  alertSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#D1FAE5',
+  },
+  alertIcon: {
+    marginRight: 10,
+  },
+  alertText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  alertTextError: {
+    color: '#991B1B',
+  },
+  alertTextSuccess: {
+    color: '#065F46',
+  },
+
   formCardContainer: { paddingHorizontal: 24, gap: 24 },
   pillInputBlock: { gap: 8 },
   pillInputLabel: { fontSize: 13, fontWeight: '500', color: '#94A3B8' },

@@ -7,7 +7,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Platform,
   ScrollView,
@@ -21,6 +20,14 @@ import {
 import { colors } from '../(spenderTabs)/profile';
 import { supabase } from '../../lib/supabase';
 
+// Type for modern feedback messages
+type ToastType = 'success' | 'error' | 'info';
+
+interface ToastMessage {
+  type: ToastType;
+  message: string;
+}
+
 export default function PersonalDetailsScreen() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
@@ -30,6 +37,16 @@ export default function PersonalDetailsScreen() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+  // Modern toast state instead of jarring native alerts
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+
+  const showToast = (type: ToastType, message: string) => {
+    setToast({ type, message });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000); // Auto-dismiss after 4 seconds
+  };
 
   useEffect(() => {
     fetchProfileData();
@@ -56,7 +73,7 @@ export default function PersonalDetailsScreen() {
         setAvatarUrl(profile.avatar_url || null);
       }
     } catch (error: any) {
-      Alert.alert("Error", error.message);
+      showToast('error', error.message || 'Unable to retrieve your profile information.');
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +83,7 @@ export default function PersonalDetailsScreen() {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Payton needs gallery access to upload a profile photo.');
+        showToast('info', 'Gallery access is required to update your profile photo.');
         return;
       }
 
@@ -82,7 +99,7 @@ export default function PersonalDetailsScreen() {
 
       const asset = result.assets[0];
       if (!asset.base64) {
-        Alert.alert("Error", "Could not process image data stream.");
+        showToast('error', 'Failed to process image data. Please try another photo.');
         return;
       }
 
@@ -113,10 +130,10 @@ export default function PersonalDetailsScreen() {
       if (dbError) throw dbError;
 
       setAvatarUrl(publicUrl);
-      Alert.alert("Success", "Profile photo updated successfully!");
+      showToast('success', 'Profile photo updated successfully.');
 
     } catch (error: any) {
-      Alert.alert("Upload Failed", error.message);
+      showToast('error', error.message || 'Photo upload failed. Please try again.');
     } finally {
       setIsUploadingImage(false);
     }
@@ -124,7 +141,7 @@ export default function PersonalDetailsScreen() {
 
   const handleUpdateProfile = async () => {
     if (!fullName.trim()) {
-      Alert.alert("Validation Error", "Full Name cannot be blank.");
+      showToast('error', 'Full Name cannot be empty.');
       return;
     }
 
@@ -140,10 +157,10 @@ export default function PersonalDetailsScreen() {
 
       if (error) throw error;
 
-      Alert.alert("Success", "Account information updated successfully!");
-      router.back();
+      showToast('success', 'Your profile details have been saved.');
+      setTimeout(() => router.back(), 1000); // Slight delay so user sees success toast
     } catch (error: any) {
-      Alert.alert("Update Failed", error.message);
+      showToast('error', error.message || 'Failed to update profile. Please try again.');
     } finally {
       setIsUpdating(false);
     }
@@ -168,6 +185,23 @@ export default function PersonalDetailsScreen() {
         <Text style={styles.headerTitleCentered}>Personal Details</Text>
         <View style={{ width: 20 }} />
       </View>
+
+      {/* Modern Inline Toast Notification */}
+      {toast && (
+        <View style={[
+          styles.toastContainer, 
+          toast.type === 'success' && styles.toastSuccess,
+          toast.type === 'error' && styles.toastError,
+          toast.type === 'info' && styles.toastInfo,
+        ]}>
+          <Ionicons 
+            name={toast.type === 'success' ? 'checkmark-circle' : toast.type === 'error' ? 'alert-circle' : 'information-circle'} 
+            size={18} 
+            color="#FFFFFF" 
+          />
+          <Text style={styles.toastText}>{toast.message}</Text>
+        </View>
+      )}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.editScrollContent}>
         <View style={styles.avatarEditContainer}>
@@ -243,6 +277,28 @@ const styles = StyleSheet.create({
   },
   backBtnTouchable: { width: 20 },
   headerTitleCentered: { flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '800', color: '#ffffff', letterSpacing: -0.5 },
+  
+  // Toast Styling
+  toastContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 24,
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  toastSuccess: { backgroundColor: '#10B981' },
+  toastError: { backgroundColor: '#EF4444' },
+  toastInfo: { backgroundColor: '#3B82F6' },
+  toastText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', flex: 1 },
+
   editScrollContent: { paddingBottom: 24, flexGrow: 1 },
   avatarEditContainer: { alignItems: 'center', marginTop: 24, marginBottom: 40, position: 'relative' },
   avatarRing: { 

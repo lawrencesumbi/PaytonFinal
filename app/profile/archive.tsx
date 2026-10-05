@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors } from '../(spenderTabs)/profile';
 import { supabase } from '../../lib/supabase';
 
@@ -20,6 +20,21 @@ export default function ArchiveScreen() {
   
   // Fullscreen photo modal state
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+
+  // Modern Custom Action Dialog State
+  const [dialogConfig, setDialogConfig] = useState<{
+    visible: boolean;
+    type: 'delete' | 'unarchive' | 'error';
+    title: string;
+    message: string;
+    itemToProcess: any | null;
+  }>({
+    visible: false,
+    type: 'delete',
+    title: '',
+    message: '',
+    itemToProcess: null,
+  });
 
   useEffect(() => {
     fetchArchivedData();
@@ -100,74 +115,90 @@ export default function ArchiveScreen() {
     setLoadingExpenses(false);
   };
 
-  // Function to handle deletion of allowance or income record
-  const handleDeleteItem = (item: any) => {
-    const isIncome = !!item.source_name;
-    const tableName = isIncome ? 'income' : 'allowances';
+  // Trigger Modern Delete Confirmation Dialog
+  const confirmDeleteItem = (item: any) => {
     const itemName = item.allowance_name || item.source_name;
-
-    Alert.alert(
-      'Delete Record',
-      `Are you sure you want to delete "${itemName}"? This action cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from(tableName)
-                .delete()
-                .eq('id', item.id);
-
-              if (error) {
-                Alert.alert('Error', error.message);
-              } else {
-                setInactiveItems((prev) => prev.filter((i) => i.id !== item.id));
-              }
-            } catch (err) {
-              console.error('Error deleting item:', err);
-              Alert.alert('Error', 'An unexpected error occurred while deleting.');
-            }
-          },
-        },
-      ]
-    );
+    setDialogConfig({
+      visible: true,
+      type: 'delete',
+      title: 'Delete Record',
+      message: `Are you sure you want to delete "${itemName}"? This action is permanent and cannot be undone.`,
+      itemToProcess: item,
+    });
   };
 
-  // Function to handle unarchiving an allowance
-  const handleUnarchiveItem = (item: any) => {
+  // Trigger Modern Unarchive Confirmation Dialog
+  const confirmUnarchiveItem = (item: any) => {
     const isIncome = !!item.source_name;
     if (isIncome) return;
 
-    Alert.alert(
-      'Unarchive Allowance',
-      `Are you sure you want to restore "${item.allowance_name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Restore',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('allowances')
-                .update({ is_archived: false })
-                .eq('id', item.id);
+    setDialogConfig({
+      visible: true,
+      type: 'unarchive',
+      title: 'Restore Allowance',
+      message: `Do you want to restore "${item.allowance_name}" back to active budgets?`,
+      itemToProcess: item,
+    });
+  };
 
-              if (error) {
-                Alert.alert('Error', error.message);
-              } else {
-                setInactiveItems((prev) => prev.filter((i) => i.id !== item.id));
-              }
-            } catch (err) {
-              console.error('Error unarchiving item:', err);
-              Alert.alert('Error', 'An unexpected error occurred while unarchiving.');
-            }
-          },
-        },
-      ]
-    );
+  // Execute Action from Custom Dialog
+  const handleExecuteDialogAction = async () => {
+    const { type, itemToProcess } = dialogConfig;
+    if (!itemToProcess) return;
+
+    try {
+      if (type === 'delete') {
+        const isIncome = !!itemToProcess.source_name;
+        const tableName = isIncome ? 'income' : 'allowances';
+
+        const { error } = await supabase
+          .from(tableName)
+          .delete()
+          .eq('id', itemToProcess.id);
+
+        if (error) {
+          showErrorDialog('Deletion Failed', error.message);
+        } else {
+          setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
+          closeDialog();
+        }
+      } else if (type === 'unarchive') {
+        const { error } = await supabase
+          .from('allowances')
+          .update({ is_archived: false })
+          .eq('id', itemToProcess.id);
+
+        if (error) {
+          showErrorDialog('Restoration Failed', error.message);
+        } else {
+          setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
+          closeDialog();
+        }
+      }
+    } catch (err) {
+      console.error('Error executing dialog action:', err);
+      showErrorDialog('Unexpected Error', 'An unexpected error occurred while processing your request.');
+    }
+  };
+
+  const showErrorDialog = (title: string, message: string) => {
+    setDialogConfig({
+      visible: true,
+      type: 'error',
+      title,
+      message,
+      itemToProcess: null,
+    });
+  };
+
+  const closeDialog = () => {
+    setDialogConfig({
+      visible: false,
+      type: 'delete',
+      title: '',
+      message: '',
+      itemToProcess: null,
+    });
   };
 
   const handleBackToArchiveList = () => {
@@ -437,7 +468,7 @@ export default function ArchiveScreen() {
                 {!item.source_name && userRole !== 'Spender' && (
                   <TouchableOpacity 
                     style={styles.unarchiveBtn} 
-                    onPress={() => handleUnarchiveItem(item)}
+                    onPress={() => confirmUnarchiveItem(item)}
                   >
                     <Ionicons name="arrow-undo-outline" size={16} color="#0f766e" />
                   </TouchableOpacity>
@@ -446,7 +477,7 @@ export default function ArchiveScreen() {
                 {userRole !== 'Spender' && (
                   <TouchableOpacity 
                     style={styles.deleteBtn} 
-                    onPress={() => handleDeleteItem(item)}
+                    onPress={() => confirmDeleteItem(item)}
                   >
                     <Ionicons name="trash-outline" size={16} color="#ef4444" />
                   </TouchableOpacity>
@@ -456,6 +487,55 @@ export default function ArchiveScreen() {
           )}
         />
       )}
+
+      {/* Modern Custom Alert Dialog Modal */}
+      <Modal visible={dialogConfig.visible} transparent={true} animationType="fade">
+        <View style={styles.dialogOverlay}>
+          <View style={styles.dialogContainer}>
+            <View style={[
+              styles.dialogIconContainer, 
+              { backgroundColor: dialogConfig.type === 'delete' || dialogConfig.type === 'error' ? '#fef2f2' : '#e6f4f1' }
+            ]}>
+              <Ionicons 
+                name={
+                  dialogConfig.type === 'delete' ? 'trash-outline' : 
+                  dialogConfig.type === 'unarchive' ? 'arrow-undo-outline' : 'alert-circle-outline'
+                } 
+                size={24} 
+                color={dialogConfig.type === 'delete' || dialogConfig.type === 'error' ? '#ef4444' : '#0f766e'} 
+              />
+            </View>
+
+            <Text style={styles.dialogTitle}>{dialogConfig.title}</Text>
+            <Text style={styles.dialogMessage}>{dialogConfig.message}</Text>
+
+            <View style={styles.dialogButtonRow}>
+              {dialogConfig.type !== 'error' ? (
+                <>
+                  <TouchableOpacity style={styles.dialogCancelButton} onPress={closeDialog}>
+                    <Text style={styles.dialogCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[
+                      styles.dialogConfirmButton, 
+                      { backgroundColor: dialogConfig.type === 'delete' ? '#ef4444' : '#0f766e' }
+                    ]} 
+                    onPress={handleExecuteDialogAction}
+                  >
+                    <Text style={styles.dialogConfirmText}>
+                      {dialogConfig.type === 'delete' ? 'Delete' : 'Restore'}
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={[styles.dialogConfirmButton, { backgroundColor: '#173D45', flex: 1 }]} onPress={closeDialog}>
+                  <Text style={styles.dialogConfirmText}>Okay</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Fullscreen Photo Modal */}
       <Modal visible={!!selectedPhoto} transparent={true} animationType="fade">
@@ -784,6 +864,77 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#ef4444',
+  },
+  // Custom Dialog Modal Styles
+  dialogOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  dialogContainer: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 5,
+  },
+  dialogIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  dialogTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  dialogMessage: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  dialogButtonRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  dialogCancelButton: {
+    flex: 1,
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  dialogCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  dialogConfirmButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  dialogConfirmText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   modalBackground: {
     flex: 1,
