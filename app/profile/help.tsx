@@ -150,7 +150,7 @@ export default function HelpScreen() {
                   </View>
                   <View>
                     <Text style={styles.chatTitle}>Ask Payton</Text>
-                    <Text style={styles.chatSubtitle}>Financial Advisor & System Support</Text>
+                    <Text style={styles.chatSubtitle}>AI Assistant & System Support</Text>
                   </View>
                 </View>
                 <TouchableOpacity onPress={() => setChatVisible(false)} style={styles.closeBtn}>

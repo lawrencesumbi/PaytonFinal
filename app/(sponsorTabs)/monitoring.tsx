@@ -170,6 +170,15 @@ export default function MonitoringScreen() {
             onConfirm: hideAlert,
           });
         } else {
+          // Fetch current user and log the archiving action matching your logs table schema
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            await supabase.from('logs').insert({
+              user_id: user.id,
+              details: `archived allowance record (ID: ${allowanceId}).`,
+            });
+          }
+
           fetchMonitoringData();
         }
       },
@@ -195,6 +204,15 @@ export default function MonitoringScreen() {
             onConfirm: hideAlert,
           });
         } else {
+          // Fetch current user and log the deletion action matching your logs table schema
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            await supabase.from('logs').insert({
+              user_id: user.id,
+              details: `deleted allowance record (ID: ${allowanceId}).`,
+            });
+          }
+
           fetchMonitoringData();
         }
       },

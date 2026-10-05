@@ -284,6 +284,12 @@ export default function AllowanceScreen() {
 
       if (error) throw error;
       
+      // Log the successful allowance creation matching your logs table schema
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `allocated allowance "${allowanceName.trim()}" (${parsedAmount}) for spender "${selectedSpender.name || selectedSpender.id}".`,
+      });
+
       showNotice('success', 'Allowance allocated successfully!');
       setTimeout(() => {
         router.replace('/(sponsorTabs)/home');

@@ -182,7 +182,7 @@ export default function LoginScreen() {
           const { data: authUser } = await supabase.auth.getUser();
           if (authUser?.user) {
             // Log successful OAuth sign in
-            await logActivity(authUser.user.id, `User signed in via ${provider}`);
+            await logActivity(authUser.user.id, `signed in via ${provider}.`);
             await navigateBasedOnRole(authUser.user.id);
           }
         }

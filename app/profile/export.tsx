@@ -52,8 +52,6 @@ export default function ExportScreen() {
       setUserRole(role);
 
       if (role === 'Sponsor') {
-        // Fetch spenders linked to this sponsor (adjust table/relation names to match your DB schema if needed)
-        // Usually, allowances table connects sponsor_id to spender_id
         const { data: allowancesData, error: allowancesError } = await supabase
           .from('allowances')
           .select('spender_id, profiles:spender_id(id, full_name, email)')
@@ -61,7 +59,6 @@ export default function ExportScreen() {
 
         if (allowancesError) throw allowancesError;
 
-        // Extract unique spenders
         const uniqueSpendersMap = new Map();
         allowancesData?.forEach((item: any) => {
           if (item.profiles) {
@@ -106,7 +103,6 @@ export default function ExportScreen() {
     }
   };
 
-  // Fetch allowances when a sponsor changes the selected spender
   const fetchAllowancesForSpender = async (spenderId: string, sponsorId: string) => {
     try {
       setLoadingAllowances(true);
@@ -139,9 +135,8 @@ export default function ExportScreen() {
     try {
       let csvContent = "";
       let fileName = "statement_ledger.csv";
+      let logDetails = "exported financial statement CSV.";
 
-      // Helper function to format the timestamp into "Month Day, Year, HH:MM:SS"
-      // Helper function to format the timestamp cleanly without special space characters
       const formatSpentAt = (dateString: string) => {
         if (!dateString) return "";
         const date = new Date(dateString);
@@ -161,13 +156,12 @@ export default function ExportScreen() {
         const seconds = String(date.getSeconds()).padStart(2, '0');
         const ampm = hours >= 12 ? 'PM' : 'AM';
         
-        hours = hours % 12 || 12; // the hour '0' should be '12'
+        hours = hours % 12 || 12;
         const formattedHours = String(hours).padStart(2, '0');
 
         return `${month} ${day}, ${year} at ${formattedHours}:${minutes}:${seconds} ${ampm}`;
       };
 
-      // Helper to sanitize file names (removes spaces and special characters)
       const sanitizeFileName = (name: string) => {
         return name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
       };
@@ -184,14 +178,12 @@ export default function ExportScreen() {
           return;
         }
 
-        // Fetch spender details for the filename
         const { data: spenderProfile } = await supabase
           .from('profiles')
           .select('full_name, email')
           .eq('id', selectedSpenderId)
           .single();
 
-        // Fetch allowance name
         const { data: allowanceData } = await supabase
           .from('allowances')
           .select('allowance_name')
@@ -201,6 +193,7 @@ export default function ExportScreen() {
         const spenderName = sanitizeFileName(spenderProfile?.full_name || spenderProfile?.email || 'spender');
         const allowanceName = sanitizeFileName(allowanceData?.allowance_name || 'allowance');
         fileName = `${spenderName}_${allowanceName}.csv`;
+        logDetails = `exported CSV statement for spender "${spenderProfile?.full_name || spenderProfile?.email}" (${allowanceData?.allowance_name || 'allowance'}).`;
 
         const { data: expenses, error } = await supabase
           .from('expenses')
@@ -222,14 +215,12 @@ export default function ExportScreen() {
           return;
         }
 
-        // Fetch current user's profile name
         const { data: userProfile } = await supabase
           .from('profiles')
           .select('full_name, email')
           .eq('id', userId)
           .single();
 
-        // Fetch allowance name
         const { data: allowanceData } = await supabase
           .from('allowances')
           .select('allowance_name')
@@ -239,6 +230,7 @@ export default function ExportScreen() {
         const userName = sanitizeFileName(userProfile?.full_name || userProfile?.email || 'user');
         const allowanceName = sanitizeFileName(allowanceData?.allowance_name || 'allowance');
         fileName = `${userName}_${allowanceName}.csv`;
+        logDetails = `exported CSV statement for allowance "${allowanceData?.allowance_name || 'allowance'}".`;
 
         const { data: expenses, error } = await supabase
           .from('expenses')
@@ -260,14 +252,12 @@ export default function ExportScreen() {
           return;
         }
 
-        // Fetch current user's profile name
         const { data: userProfile } = await supabase
           .from('profiles')
           .select('full_name, email')
           .eq('id', userId)
           .single();
 
-        // Fetch income source name
         const { data: incomeDataObj } = await supabase
           .from('income')
           .select('source_name')
@@ -277,6 +267,7 @@ export default function ExportScreen() {
         const userName = sanitizeFileName(userProfile?.full_name || userProfile?.email || 'user');
         const incomeName = sanitizeFileName(incomeDataObj?.source_name || 'income');
         fileName = `${userName}_${incomeName}.csv`;
+        logDetails = `exported CSV statement for income source "${incomeDataObj?.source_name || 'income'}".`;
 
         const { data: expenses, error } = await supabase
           .from('expenses')
@@ -304,6 +295,14 @@ export default function ExportScreen() {
       } else {
         Alert.alert("Success", `File generated successfully at: ${file.uri}`);
       }
+
+      // Insert log into the Supabase 'logs' table
+      await supabase.from('logs').insert([
+        {
+          user_id: userId,
+          details: logDetails,
+        }
+      ]);
 
     } catch (error: any) {
       console.error("Export error:", error.message);

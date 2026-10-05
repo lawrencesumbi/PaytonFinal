@@ -37,6 +37,19 @@ export default function RegisterScreen() {
     confirmPassword: '',
   });
 
+  // Helper function to insert logs into your simple logs table (without action)
+  const logActivity = async (userId: string | null, details: string) => {
+    try {
+      if (!userId) return; // Don't log if we don't have a user ID yet
+      await supabase.from('logs').insert({
+        user_id: userId,
+        details: details,
+      });
+    } catch (err) {
+      console.error('Failed to write log:', err);
+    }
+  };
+
   // Helper function to direct users after successful authentication
   const navigateBasedOnRole = async (userId: string) => {
     const { data: profile, error: profileError } = await supabase
@@ -210,6 +223,7 @@ export default function RegisterScreen() {
 
           const { data: authUser } = await supabase.auth.getUser();
           if (authUser?.user) {
+            await logActivity(authUser.user.id, `signed in via ${provider}.`);
             await navigateBasedOnRole(authUser.user.id);
           }
         }

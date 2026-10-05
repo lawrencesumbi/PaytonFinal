@@ -276,6 +276,12 @@ export default function HomeScreen() {
 
       if (insertError) throw insertError;
 
+      // Log the successful connection action matching your logs table schema
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `connected spender "${targetProfile.full_name || spenderEmail}".`,
+      });
+
       setAddModalMessage({ type: 'success', text: 'Spender connected successfully!' });
       setTimeout(() => {
         setSpenderEmail('');
@@ -307,6 +313,12 @@ export default function HomeScreen() {
         .eq('spender_id', spenderToDelete.id);
 
       if (error) throw error;
+
+      // Log the successful disconnection action matching your logs table schema
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `disconnected spender "${spenderToDelete.full_name}".`,
+      });
 
       setDeleteModalMessage({ type: 'success', text: `${spenderToDelete.full_name} has been disconnected.` });
       setTimeout(() => {
