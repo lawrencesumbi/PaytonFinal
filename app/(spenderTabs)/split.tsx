@@ -96,6 +96,9 @@ export default function SplitScreen() {
   const [splitToDelete, setSplitToDelete] = useState<any | null>(null);
   const [splitDeleteMessage, setSplitDeleteMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [reminderMessage, setReminderMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  // Add this state with your other messages:
+  const [settleModalMessage, setSettleModalMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [settleActionMessage, setSettleActionMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
@@ -581,92 +584,102 @@ const handleCreateSplitDirectly = async () => {
   };
 
   const handleConfirmSettlePayment = async () => {
-    if (!user || !selectedFriendToSettle) return;
+  if (!user || !selectedFriendToSettle) return;
 
-    const paidVal = parseFloat(paymentInputAmount);
-    if (isNaN(paidVal) || paidVal <= 0) {
-      showAlert('Invalid Amount', 'Please enter a valid amount paid.');
-      return;
-    }
+  // Clear previous modal messages
+  setSettleModalMessage(null);
 
-    setSettleAmountModalVisible(false);
-    setLoading(true);
+  const paidVal = parseFloat(paymentInputAmount);
+  if (isNaN(paidVal) || paidVal <= 0) {
+    // Show error inline inside the modal instead of an alert popup
+    setSettleModalMessage({ text: 'Please enter a valid amount paid.', type: 'error' });
+    return;
+  }
 
-    try {
-      const friendName = selectedFriendToSettle.friends?.full_name || 'Friend';
-      const currentOwed = selectedFriendToSettle.owed_amount || 0;
-      const newOwed = Math.max(0, currentOwed - paidVal);
-      const isFullyPaid = newOwed === 0;
+  // Close the modal and turn loading on
+  setSettleAmountModalVisible(false);
+  setLoading(true);
 
-      // 1. Update split_friends table
-      const { error: updateFriendErr } = await supabase
-        .from('split_friends')
-        .update({
-          owed_amount: parseFloat(newOwed.toFixed(2)),
-          status: isFullyPaid ? 'paid' : 'unpaid',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', selectedFriendToSettle.id);
+  try {
+    const friendName = selectedFriendToSettle.friends?.full_name || 'Friend';
+    const currentOwed = selectedFriendToSettle.owed_amount || 0;
+    const newOwed = Math.max(0, currentOwed - paidVal);
+    const isFullyPaid = newOwed === 0;
 
-      if (updateFriendErr) throw updateFriendErr;
+    // 1. Update split_friends table
+    const { error: updateFriendErr } = await supabase
+      .from('split_friends')
+      .update({
+        owed_amount: parseFloat(newOwed.toFixed(2)),
+        status: isFullyPaid ? 'paid' : 'unpaid',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', selectedFriendToSettle.id);
 
-      // 2. Fetch the user's active/recent allowance and add the received payment to it
-      const { data: latestAllowance, error: allowFetchErr } = await supabase
+    if (updateFriendErr) throw updateFriendErr;
+
+    // 2. Fetch the user's active/recent allowance and add the received payment to it
+    const { data: latestAllowance, error: allowFetchErr } = await supabase
+      .from('allowances')
+      .select('id, amount')
+      .eq('spender_id', user.id)
+      .eq('is_archived', false)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!allowFetchErr && latestAllowance) {
+      const currentAllowanceAmount = parseFloat(latestAllowance.amount) || 0;
+      const updatedAllowanceAmount = currentAllowanceAmount + paidVal;
+
+      const { error: allowUpdateErr } = await supabase
         .from('allowances')
-        .select('id, amount')
-        .eq('spender_id', user.id)
-        .eq('is_archived', false)
-        .order('received_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .update({ amount: updatedAllowanceAmount })
+        .eq('id', latestAllowance.id);
 
-      if (!allowFetchErr && latestAllowance) {
-        const currentAllowanceAmount = parseFloat(latestAllowance.amount) || 0;
-        const updatedAllowanceAmount = currentAllowanceAmount + paidVal;
-
-        const { error: allowUpdateErr } = await supabase
-          .from('allowances')
-          .update({ amount: updatedAllowanceAmount })
-          .eq('id', latestAllowance.id);
-
-        if (allowUpdateErr) {
-          console.error('Failed to update allowance amount:', allowUpdateErr.message);
-        }
+      if (allowUpdateErr) {
+        console.error('Failed to update allowance amount:', allowUpdateErr.message);
       }
-
-      let successMessage = `Successfully received ₱${paidVal.toFixed(2)} from ${friendName} (added to your active allowance). ${
-        isFullyPaid ? 'Fully settled!' : `Remaining balance: ₱${newOwed.toFixed(2)}`
-      }`;
-
-      showAlert('Payment Recorded', successMessage);
-
-      if (selectedSplitForSettle) {
-        setSelectedSplitForSettle((prev) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            split_friends: prev.split_friends.map((sf) =>
-              sf.id === selectedFriendToSettle.id
-                ? {
-                    ...sf,
-                    owed_amount: parseFloat(newOwed.toFixed(2)),
-                    status: isFullyPaid ? 'paid' : 'unpaid',
-                  }
-                : sf
-            ),
-          };
-        });
-      }
-
-      fetchData(user.id);
-    } catch (err: any) {
-      showAlert('Error', err.message || 'Failed to record payment.');
-    } finally {
-      setLoading(false);
-      setSelectedFriendToSettle(null);
-      setPaymentInputAmount('');
     }
-  };
+
+    let successMessage = `Successfully received ₱${paidVal.toFixed(2)} from ${friendName} (added to your active allowance). ${
+      isFullyPaid ? 'Fully settled!' : `Remaining balance: ₱${newOwed.toFixed(2)}`
+    }`;
+
+    // Show inline success message on the main screen
+    setSettleActionMessage({ text: successMessage, type: 'success' });
+    setTimeout(() => setSettleActionMessage(null), 4000);
+
+    if (selectedSplitForSettle) {
+      setSelectedSplitForSettle((prev) => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          split_friends: prev.split_friends.map((sf) =>
+            sf.id === selectedFriendToSettle.id
+              ? {
+                  ...sf,
+                  owed_amount: parseFloat(newOwed.toFixed(2)),
+                  status: isFullyPaid ? 'paid' : 'unpaid',
+                }
+              : sf
+          ),
+        };
+      });
+    }
+
+    fetchData(user.id);
+  } catch (err: any) {
+    setSettleActionMessage({ 
+      text: err.message || 'Failed to record payment.', 
+      type: 'error' 
+    });
+  } finally {
+    setLoading(false);
+    setSelectedFriendToSettle(null);
+    setPaymentInputAmount('');
+  }
+};
 
   const resetForm = () => {
     setDescription('');
@@ -873,6 +886,28 @@ const handleCreateSplitDirectly = async () => {
                   reminderMessage.type === 'error' ? styles.errorText : styles.successText
                 ]}>
                   {reminderMessage.text}
+                </Text>
+              </View>
+            )}
+
+            {/* --- MAIN SCREEN INLINE SUCCESS/ERROR BANNER FOR SETTLEMENTS --- */}
+            {settleActionMessage && (
+              <View style={[
+                styles.inlineMessageContainer, 
+                settleActionMessage.type === 'error' ? styles.errorBanner : styles.successBanner,
+                { marginBottom: 12 }
+              ]}>
+                <Ionicons 
+                  name={settleActionMessage.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+                  size={18} 
+                  color={settleActionMessage.type === 'error' ? '#D32F2F' : '#2E7D32'} 
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[
+                  styles.inlineMessageText, 
+                  settleActionMessage.type === 'error' ? styles.errorText : styles.successText
+                ]}>
+                  {settleActionMessage.text}
                 </Text>
               </View>
             )}
@@ -1586,63 +1621,77 @@ const handleCreateSplitDirectly = async () => {
   </View>
 </Modal>
 
-      {/* PAYMENT ENTRY INPUT MODAL FOR MARK PAID */}
-      <Modal visible={settleAmountModalVisible} animationType="fade" transparent>
-        <View style={styles.modalOverlayCenter}>
-          <View style={styles.paymentModalContainer}>
-            <View style={styles.paymentModalHeader}>
-              <View style={styles.paymentModalTitleRow}>
-                <View style={styles.paymentIconContainer}>
-                  <Ionicons name="cash-outline" size={20} color={colors.primary} />
-                </View>
-                <Text style={styles.paymentModalMainTitle}>Record Payment</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.closeCircle}
-                onPress={() => setSettleAmountModalVisible(false)}
-              >
-                <Ionicons name="close" size={18} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.paymentInfoCard}>
-              <Text style={styles.paymentCardLabel}>From Friend</Text>
-              <Text style={styles.paymentFriendName}>
-                {selectedFriendToSettle?.friends?.full_name || 'Friend'}
-              </Text>
-              
-              <View style={styles.paymentCardDivider} />
-              
-              <View style={styles.paymentBalanceRow}>
-                <Text style={styles.paymentCardLabel}>Current Balance Owed:</Text>
-                <Text style={styles.paymentOwedAmount}>
-                  ₱{(selectedFriendToSettle?.owed_amount || 0).toFixed(2)}
-                </Text>
-              </View>
-            </View>
-
-            <Text style={[styles.label, { marginBottom: 6 }]}>Amount Received (₱)</Text>
-            <TextInput
-              style={styles.paymentInput}
-              placeholder="0.00"
-              placeholderTextColor={colors.textFaint}
-              keyboardType="numeric"
-              value={paymentInputAmount}
-              onChangeText={setPaymentInputAmount}
-              autoFocus={true}
-            />
-
-            <TouchableOpacity
-              style={styles.paymentSubmitBtn}
-              onPress={handleConfirmSettlePayment}
-            >
-              <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.paymentSubmitBtnText}>Confirm Settlement</Text>
-            </TouchableOpacity>
-
+{/* PAYMENT ENTRY INPUT MODAL FOR MARK PAID */}
+<Modal visible={settleAmountModalVisible} animationType="fade" transparent>
+  <View style={styles.modalOverlayCenter}>
+    <View style={styles.paymentModalContainer}>
+      <View style={styles.paymentModalHeader}>
+        <View style={styles.paymentModalTitleRow}>
+          <View style={styles.paymentIconContainer}>
+            <Ionicons name="cash-outline" size={20} color={colors.primary} />
           </View>
+          <Text style={styles.paymentModalMainTitle}>Record Payment</Text>
         </View>
-      </Modal>
+        <TouchableOpacity
+          style={styles.closeCircle}
+          onPress={() => {
+            setSettleAmountModalVisible(false);
+            setSettleModalMessage(null);
+          }}
+        >
+          <Ionicons name="close" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
+
+      {/* --- INLINE ERROR MESSAGE INSIDE MODAL --- */}
+      {settleModalMessage && (
+        <View style={[styles.inlineMessageContainer, styles.errorBanner, { marginBottom: 12 }]}>
+          <Ionicons name="alert-circle-outline" size={16} color="#D32F2F" style={{ marginRight: 6 }} />
+          <Text style={[styles.inlineMessageText, styles.errorText]}>{settleModalMessage.text}</Text>
+        </View>
+      )}
+
+      <View style={styles.paymentInfoCard}>
+        <Text style={styles.paymentCardLabel}>From Friend</Text>
+        <Text style={styles.paymentFriendName}>
+          {selectedFriendToSettle?.friends?.full_name || 'Friend'}
+        </Text>
+        
+        <View style={styles.paymentCardDivider} />
+        
+        <View style={styles.paymentBalanceRow}>
+          <Text style={styles.paymentCardLabel}>Current Balance Owed:</Text>
+          <Text style={styles.paymentOwedAmount}>
+            ₱{(selectedFriendToSettle?.owed_amount || 0).toFixed(2)}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={[styles.label, { marginBottom: 6 }]}>Amount Received (₱)</Text>
+      <TextInput
+        style={styles.paymentInput}
+        placeholder="0.00"
+        placeholderTextColor={colors.textFaint}
+        keyboardType="numeric"
+        value={paymentInputAmount}
+        onChangeText={(text) => {
+          setPaymentInputAmount(text);
+          if (settleModalMessage) setSettleModalMessage(null); // Clear error on typing
+        }}
+        autoFocus={true}
+      />
+
+      <TouchableOpacity
+        style={styles.paymentSubmitBtn}
+        onPress={handleConfirmSettlePayment}
+      >
+        <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+        <Text style={styles.paymentSubmitBtnText}>Confirm Settlement</Text>
+      </TouchableOpacity>
+
+    </View>
+  </View>
+</Modal>
     </View>
   );
 }
