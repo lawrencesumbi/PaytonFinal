@@ -4,7 +4,6 @@ import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useRef, useState } from 'react';
 import {
-    Alert,
     FlatList,
     Image,
     KeyboardAvoidingView,
@@ -124,8 +123,15 @@ export default function InsightScreen() {
                 pacingData: parsedData,
             };
             setMessages((prev) => [...prev, coachMsg]);
+        // Replace Alert.alert in your catch block with this:
         } catch (err: any) {
-            Alert.alert('Pacing Analysis Failed ❌', err.message || 'Unable to fetch insights.');
+            const errorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                sender: 'coach',
+                type: 'text', // or a custom 'error' type if your UI supports it
+                content: `⚠️ Pacing Analysis Unavailable\n\n${err.message || 'We ran into an issue fetching your insights. Please try again in a moment.'}`
+            };
+            setMessages((prev) => [...prev, errorMsg]);
         } finally {
             setLoading(false);
             setTyping(false);
