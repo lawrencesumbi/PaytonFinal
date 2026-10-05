@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
@@ -45,6 +46,9 @@ export default function SpenderProfileScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  // State for controlling the custom sign-out modal visibility
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('');
@@ -88,41 +92,29 @@ export default function SpenderProfileScreen() {
     fetchProfile();
   };
 
-  const handleLogout = async () => {
-    Alert.alert(
-      "Sign Out",
-      "Are you sure you want to exit your session?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Sign Out",
-          style: "destructive",
-          onPress: async () => {
-            setIsLoggingOut(true);
-            try {
-              const { data: { user } } = await supabase.auth.getUser();
+  const executeLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
 
-              if (user) {
-                await supabase.from('logs').insert({
-                  user_id: user.id,
-                  action: 'USER_LOGOUT',
-                  details: `${user.email} successfully signed out.`,
-                });
-              }
+      if (user) {
+        await supabase.from('logs').insert({
+          user_id: user.id,
+          action: 'USER_LOGOUT',
+          details: `${user.email} successfully signed out.`,
+        });
+      }
 
-              const { error } = await supabase.auth.signOut();
-              if (error) throw error;
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
 
-              router.replace('/');
-            } catch (error: any) {
-              Alert.alert("Error", error.message);
-            } finally {
-              setIsLoggingOut(false);
-            }
-          }
-        }
-      ]
-    );
+      setShowLogoutModal(false);
+      router.replace('/');
+    } catch (error: any) {
+      Alert.alert("Error", error.message);
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   if (isLoadingProfile) {
@@ -246,21 +238,63 @@ export default function SpenderProfileScreen() {
         </View>
 
         <TouchableOpacity 
-          style={[styles.modernLogoutBtn, isLoggingOut && styles.disabledButton]} 
-          onPress={handleLogout} 
-          disabled={isLoggingOut}
+          style={styles.modernLogoutBtn} 
+          onPress={() => setShowLogoutModal(true)} 
         >
-          {isLoggingOut ? (
-            <ActivityIndicator size="small" color="#EF4444" />
-          ) : (
-            <>
-              <Ionicons name="log-out-outline" size={18} color="#EF4444" style={{ marginRight: 8 }} />
-              <Text style={styles.modernLogoutText}>Log Out</Text>
-            </>
-          )}
+          <Ionicons name="log-out-outline" size={18} color="#EF4444" style={{ marginRight: 8 }} />
+          <Text style={styles.modernLogoutText}>Log Out</Text>
         </TouchableOpacity>
 
       </ScrollView>
+
+      {/* Modern Professional Custom Sign Out Modal */}
+      <Modal
+        visible={showLogoutModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => !isLoggingOut && setShowLogoutModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContentCard}>
+            
+            {/* Top Icon Badge */}
+            <View style={styles.modalIconContainer}>
+              <Ionicons name="log-out-outline" size={26} color="#EF4444" />
+            </View>
+
+            {/* Title & Subtitle */}
+            <Text style={styles.modalTitle}>Sign Out</Text>
+            <Text style={styles.modalSubtitle}>
+              Are you sure you want to end your session? You will need to log back in to access your data.
+            </Text>
+
+            {/* Actions */}
+            <View style={styles.modalActionsRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setShowLogoutModal(false)}
+                disabled={isLoggingOut}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalConfirmButton, isLoggingOut && styles.disabledButton]}
+                onPress={executeLogout}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.modalConfirmButtonText}>Sign Out</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -319,7 +353,7 @@ const styles = StyleSheet.create({
   },
   modernLogoutBtn: {
     backgroundColor: '#FEF2F2', 
-    borderRadius: 24,              
+    borderRadius: 24,                             
     padding: 18,                     
     flexDirection: 'row',
     justifyContent: 'center',
@@ -338,5 +372,80 @@ const styles = StyleSheet.create({
   disabledButton: { 
     backgroundColor: '#F1F5F9', 
     borderColor: '#E2E8F0' 
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  modalContentCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 28,
+    padding: 24,
+    alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  modalIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: '#FEF2F2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCancelButton: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  modalConfirmButton: {
+    backgroundColor: '#EF4444',
+  },
+  modalConfirmButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });
