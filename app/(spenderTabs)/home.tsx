@@ -453,10 +453,12 @@ const handleCreateReminder = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    const parsedAmount = parseFloat(newAmount);
+
     const { error } = await supabase.from('reminders').insert({
       user_id: user.id,
       title: newTitle.trim(),
-      amount: parseFloat(newAmount),
+      amount: parsedAmount,
       due_date: newDueDate,
       status: 'pending',
       allowance_id: summary?.allowanceId || null,
@@ -464,6 +466,12 @@ const handleCreateReminder = async () => {
     });
 
     if (error) throw error;
+
+    // Log the successful reminder creation matching your logs table schema
+    await supabase.from('logs').insert({
+      user_id: user.id,
+      details: `created reminder "${newTitle.trim()}" (${parsedAmount}).`,
+    });
 
     // Set success message
     setSuccessMessage('Reminder saved successfully!');
@@ -501,6 +509,15 @@ const confirmDeleteReminder = async () => {
 
     if (error) throw error;
     
+    // Fetch current user and log the deletion action matching your logs table schema
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `deleted reminder "${reminderToDelete.title || reminderToDelete.id}".`,
+      });
+    }
+
     fetchDashboardData();
     setDeleteModalVisible(false);
     setReminderToDelete(null);
@@ -541,6 +558,12 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
       });
 
     if (expenseError) throw expenseError;
+
+    // Log the successful settlement action matching your logs table schema
+    await supabase.from('logs').insert({
+      user_id: user.id,
+      details: `settled reminder "${reminder.title}" (${reminder.amount}).`,
+    });
 
     setSuccessMessage(`"${reminder.title}" has been settled and recorded.`);
     fetchDashboardData();

@@ -294,6 +294,12 @@ function TransactionsScreenContent() {
           .eq('id', editingTransaction.id);
 
         if (error) throw error;
+
+        // Log the successful expense update matching your logs table schema
+        await supabase.from('logs').insert({
+          user_id: user.id,
+          details: `updated expense "${descriptionInput.trim()}" (${numericAmount}).`,
+        });
       } else {
         const { error } = await supabase.from('expenses').insert({
           amount: numericAmount,
@@ -305,6 +311,12 @@ function TransactionsScreenContent() {
         });
 
         if (error) throw error;
+
+        // Log the successful expense creation matching your logs table schema
+        await supabase.from('logs').insert({
+          user_id: user.id,
+          details: `added expense "${descriptionInput.trim()}" (${numericAmount}).`,
+        });
       }
 
       setModalSuccess(editingTransaction ? 'Expense updated successfully!' : 'Expense saved successfully!');
@@ -337,6 +349,16 @@ function TransactionsScreenContent() {
         .eq('id', transactionToDelete.id);
 
       if (error) throw error;
+
+      // Fetch current user and log the deletion action matching your logs table schema
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('logs').insert({
+          user_id: user.id,
+          details: `deleted expense "${transactionToDelete.description || transactionToDelete.id}" (${transactionToDelete.amount}).`,
+        });
+      }
+
       setIsDeleteModalVisible(false);
       setTransactionToDelete(null);
       fetchTransactions();
