@@ -139,7 +139,7 @@ export default function ScanReceiptScreen() {
         setFrozenPhoto(photo.uri);
 
         const model = genAI.getGenerativeModel({ 
-          model: "gemini-2.5-flash",
+          model: "gemini-3.5-flash-lite",
           generationConfig: {
             responseMimeType: "application/json",
           }
@@ -320,6 +320,12 @@ export default function ScanReceiptScreen() {
                   ]);
                   
                   if (insertError) throw insertError;
+
+                  // Log the successful scanned receipt/expense action matching your logs table schema
+                  await supabase.from('logs').insert({
+                    user_id: user.id,
+                    details: `scanned receipt and logged expense "${merchantName}" (${Number(totalAmount)}).`,
+                  });
 
                   setAlertConfig({
                     visible: true,

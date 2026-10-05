@@ -40,8 +40,8 @@ export default function ResetPasswordScreen() {
     if (!password) {
       setPasswordError('Password cannot be blank');
       hasError = true;
-    } else if (password.length < 6) {
-      setPasswordError('Password must be at least 6 characters');
+    } else if (password.length < 8) {
+      setPasswordError('Password must be at least 8 characters');
       hasError = true;
     }
 
@@ -59,7 +59,7 @@ export default function ResetPasswordScreen() {
 
     // Because the user clicked the email link, Supabase has already 
     // initialized a session behind the scenes. We just update the current user.
-    const { error } = await supabase.auth.updateUser({
+    const { data: updateData, error } = await supabase.auth.updateUser({
       password: password,
     });
 
@@ -68,6 +68,15 @@ export default function ResetPasswordScreen() {
     if (error) {
       setGeneralError(error.message);
     } else {
+      // Log the successful password update action matching your logs table schema
+      const userId = updateData?.user?.id;
+      if (userId) {
+        await supabase.from('logs').insert({
+          user_id: userId,
+          details: 'updated account password.',
+        });
+      }
+
       setSuccessMessage('Your password has been updated successfully!');
     }
   };

@@ -293,7 +293,7 @@ export default function SplitScreen() {
     }
   };
 
-  const handleSaveFriend = async () => {
+const handleSaveFriend = async () => {
   if (!newFriendName.trim() || !user) {
     setFormMessage({ text: "Please enter your friend's name.", type: 'error' });
     return;
@@ -329,6 +329,12 @@ export default function SplitScreen() {
       if (data) {
         setFriends((prev) => (prev || []).map((f) => (f.id === editingFriend.id ? data : f)));
       }
+
+      // Log the successful friend update matching your logs table schema
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `updated friend "${newFriendName.trim()}".`,
+      });
     } else {
       const { data, error } = await supabase
         .from('friends')
@@ -340,6 +346,12 @@ export default function SplitScreen() {
       if (data) {
         setFriends((prev) => [...(prev || []), data]);
       }
+
+      // Log the successful friend creation matching your logs table schema
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `added friend "${newFriendName.trim()}".`,
+      });
     }
 
     // Success feedback
@@ -392,12 +404,29 @@ const confirmDeleteFriend = (friendId: string) => {
     setLoading(true);
     setSplitDeleteMessage(null); // Clear any previous message
 
+    // Optional: fetch the split description before deleting if you want a descriptive log
+    const { data: splitToDelete } = await supabase
+      .from('split_expenses')
+      .select('description, total_amount')
+      .eq('id', splitId)
+      .maybeSingle();
+
     const { error } = await supabase
       .from('split_expenses')
       .delete()
       .eq('id', splitId);
 
     if (error) throw error;
+
+    // Fetch current user and log the deletion action matching your logs table schema
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const splitDesc = splitToDelete?.description || splitId;
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `deleted split expense "${splitDesc}".`,
+      });
+    }
 
     setActiveSplits((prev) => prev.filter((s) => s.id !== splitId));
     
@@ -556,6 +585,12 @@ const handleCreateSplitDirectly = async () => {
       myProfile?.full_name
     );
 
+    // Log the successful split creation matching your logs table schema
+    await supabase.from('logs').insert({
+      user_id: user.id,
+      details: `created split expense "${description.trim()}" (${numericAmount}).`,
+    });
+
     // Show success inline message
     setSplitFormMessage({ text: 'Split expense saved, logged to expenses, and emails sent!', type: 'success' });
 
@@ -583,7 +618,7 @@ const handleCreateSplitDirectly = async () => {
     setSettleAmountModalVisible(true);
   };
 
-  const handleConfirmSettlePayment = async () => {
+const handleConfirmSettlePayment = async () => {
   if (!user || !selectedFriendToSettle) return;
 
   // Clear previous modal messages
@@ -641,6 +676,12 @@ const handleCreateSplitDirectly = async () => {
         console.error('Failed to update allowance amount:', allowUpdateErr.message);
       }
     }
+
+    // Log the successful settlement payment action matching your logs table schema
+    await supabase.from('logs').insert({
+      user_id: user.id,
+      details: `settled split payment of ₱${paidVal.toFixed(2)} from "${friendName}".`,
+    });
 
     let successMessage = `Successfully received ₱${paidVal.toFixed(2)} from ${friendName} (added to your active allowance). ${
       isFullyPaid ? 'Fully settled!' : `Remaining balance: ₱${newOwed.toFixed(2)}`
@@ -1584,6 +1625,7 @@ const handleCreateSplitDirectly = async () => {
   }}
   onPress={async () => {
     const idToDelete = friendToDelete.id;
+    const friendName = friendToDelete.full_name;
     setFriendToDelete(null); // Close confirmation modal
     
     try {
@@ -1593,6 +1635,15 @@ const handleCreateSplitDirectly = async () => {
         .eq('id', idToDelete);
 
       if (error) throw error;
+
+      // Fetch current user and log the deletion action matching your logs table schema
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('logs').insert({
+          user_id: user.id,
+          details: `deleted friend "${friendName || idToDelete}".`,
+        });
+      }
 
       // Update state
       setFriends((prev) => prev.filter((f) => f.id !== idToDelete));
