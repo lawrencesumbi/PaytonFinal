@@ -434,7 +434,7 @@ export default function SpenderHomeScreen() {
     setSuccessMessage(null); // <-- Add this
   };
 
-  const handleCreateReminder = async () => {
+const handleCreateReminder = async () => {
   setErrorMessage(null);
   setSuccessMessage(null);
 
@@ -465,9 +465,17 @@ export default function SpenderHomeScreen() {
 
     if (error) throw error;
 
-    resetForm();
-    setAddModalVisible(false);
+    // Set success message
+    setSuccessMessage('Reminder saved successfully!');
     fetchDashboardData();
+
+    // Optional: Wait 1 second so the user sees the success banner before closing the modal
+    setTimeout(() => {
+      resetForm();
+      setAddModalVisible(false);
+      setSuccessMessage(null);
+    }, 1000);
+
   } catch (error: unknown) {
     console.error('Error adding reminder:', extractErrorMessage(error));
     setErrorMessage('Failed to save reminder. Please try again.');
@@ -1114,6 +1122,14 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
               <View style={styles.inlineErrorContainer}>
                 <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
                 <Text style={styles.inlineErrorText}>{errorMessage}</Text>
+              </View>
+            )}
+
+            {/* Inline Success Banner */}
+            {successMessage && (
+              <View style={styles.inlineSuccessContainer}>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#16A34A" />
+                <Text style={styles.inlineSuccessText}>{successMessage}</Text>
               </View>
             )}
 
