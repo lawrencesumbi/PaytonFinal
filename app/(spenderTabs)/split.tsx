@@ -59,12 +59,10 @@ export default function SplitScreen() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-
   // Default Array States
   const [friends, setFriends] = useState<Friend[]>([]);
   const [activeSplits, setActiveSplits] = useState<ActiveSplit[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-
   // Creation Form States
   const [formVisible, setFormVisible] = useState<boolean>(false);
   const [description, setDescription] = useState<string>('');
@@ -73,42 +71,31 @@ export default function SplitScreen() {
   const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
   const [customShares, setCustomShares] = useState<{ [key: string]: string }>({});
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-
   // Friend Modal State
   const [addFriendModalVisible, setAddFriendModalVisible] = useState<boolean>(false);
   const [newFriendName, setNewFriendName] = useState<string>('');
   const [newFriendEmail, setNewFriendEmail] = useState<string>('');
-
   // Settlement Management Modal State
   const [settleModalVisible, setSettleModalVisible] = useState<boolean>(false);
   const [selectedSplitForSettle, setSelectedSplitForSettle] = useState<ActiveSplit | null>(null);
-
   // Settlement Payment Entry Modal State
   const [settleAmountModalVisible, setSettleAmountModalVisible] = useState<boolean>(false);
   const [selectedFriendToSettle, setSelectedFriendToSettle] = useState<ActiveSplitFriend | null>(null);
   const [paymentInputAmount, setPaymentInputAmount] = useState<string>('');
-
   const [editingFriend, setEditingFriend] = useState<Friend | null>(null);
   const [friendImageUri, setFriendImageUri] = useState<string | null>(null);
-
   const [myProfile, setMyProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
-
   const [saving, setSaving] = useState(false);
-
   const [formMessage, setFormMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
-
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [manageModalVisible, setManageModalVisible] = useState(false);
-
   // Add this near your other state declarations
   const [friendToDelete, setFriendToDelete] = useState<any | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
   const [splitFormMessage, setSplitFormMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
-
   const [splitToDelete, setSplitToDelete] = useState<any | null>(null);
-
   const [splitDeleteMessage, setSplitDeleteMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [reminderMessage, setReminderMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   const showAlert = (title: string, message: string) => {
     Alert.alert(title, message, [{ text: 'OK' }]);
@@ -706,39 +693,54 @@ const handleCreateSplitDirectly = async () => {
   };
 
   const handleSendReminderEmail = async (
-    friendEmail: any, 
-    friendName: any, 
-    owedAmount: any, 
-    totalAmount: any,
-    description: any,
-    senderName: any
-  ) => {
-    try {
-      const templateParams = {
-        email: friendEmail,                         
-        email_subject: `Reminder: Balance for ${description}`, 
-        friend_name: friendName,                     
-        intro_message: "This is a friendly reminder that you still have a remaining balance for this expense.",
-        description: description,                     
-        total_amount: (totalAmount || 0).toFixed(2),      
-        amount: (owedAmount || 0).toFixed(2),            
-        call_to_action: "Please settle this at your earliest convenience. Thank you!",
-        sender_name: senderName,                     
-      };
+  friendEmail: any, 
+  friendName: any, 
+  owedAmount: any, 
+  totalAmount: any,
+  description: any,
+  senderName: any
+) => {
+  try {
+    setReminderMessage(null); // Clear any existing messages
 
-      const serviceID = 'service_67drjkh';    
-      const templateID = 'template_amd0qms';   
-      const userID = 'W4iiQMEllSfk5dSfk';        
+    const templateParams = {
+      email: friendEmail,                        
+      email_subject: `Reminder: Balance for ${description}`, 
+      friend_name: friendName,                    
+      intro_message: "This is a friendly reminder that you still have a remaining balance for this expense.",
+      description: description,                    
+      total_amount: (totalAmount || 0).toFixed(2),      
+      amount: (owedAmount || 0).toFixed(2),            
+      call_to_action: "Please settle this at your earliest convenience. Thank you!",
+      sender_name: senderName,                    
+    };
 
-      const response = await emailjs.send(serviceID, templateID, templateParams, userID);
-      
-      console.log('SUCCESS!', response.status, response.text);
-      alert('Email reminder sent successfully!');
-    } catch (err) {
-      console.error('FAILED...', err);
-      alert('Failed to send email reminder.');
-    }
-  };
+    const serviceID = 'service_67drjkh';    
+    const templateID = 'template_amd0qms';   
+    const userID = 'W4iiQMEllSfk5dSfk';        
+
+    const response = await emailjs.send(serviceID, templateID, templateParams, userID);
+    
+    console.log('SUCCESS!', response.status, response.text);
+    
+    // Show inline success message
+    setReminderMessage({ text: 'Email reminder sent successfully!', type: 'success' });
+
+    // Auto-clear message after 3 seconds
+    setTimeout(() => {
+      setReminderMessage(null);
+    }, 3000);
+
+  } catch (err: any) {
+    console.error('FAILED...', err);
+    
+    // Show inline error message
+    setReminderMessage({ 
+      text: err.text || err.message || 'Failed to send email reminder.', 
+      type: 'error' 
+    });
+  }
+};
 
   const sendNewSplitEmails = async (createdSplitData: any, friendsPayload: any, totalAmount: any, description: any, senderName: any) => {
     try {
@@ -852,7 +854,29 @@ const handleCreateSplitDirectly = async () => {
                 </Text>
               </View>
             )}
-            
+
+            {/* --- INLINE REMINDER EMAIL MESSAGE BANNER --- */}
+            {reminderMessage && (
+              <View style={[
+                styles.inlineMessageContainer, 
+                reminderMessage.type === 'error' ? styles.errorBanner : styles.successBanner,
+                { marginBottom: 12 }
+              ]}>
+                <Ionicons 
+                  name={reminderMessage.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+                  size={18} 
+                  color={reminderMessage.type === 'error' ? '#D32F2F' : '#2E7D32'} 
+                  style={{ marginRight: 6 }}
+                />
+                <Text style={[
+                  styles.inlineMessageText, 
+                  reminderMessage.type === 'error' ? styles.errorText : styles.successText
+                ]}>
+                  {reminderMessage.text}
+                </Text>
+              </View>
+            )}
+
             <View style={styles.sectionTitleRow}>
               <Text style={styles.sectionTitle}>Friends List</Text>
               <Text style={styles.sectionCount}>{friends?.length || 0} friends</Text>
