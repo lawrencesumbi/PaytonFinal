@@ -4,7 +4,6 @@ import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   Modal,
@@ -205,6 +204,13 @@ export default function SpenderHomeScreen() {
   const [newDueDate, setNewDueDate] = useState(todayStr);
   const [newCategoryId, setNewCategoryId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [reminderToDelete, setReminderToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const centerToday = (animated = false) => {
     const todayIndex = dateList.findIndex(item => item.isToday);
@@ -424,110 +430,117 @@ export default function SpenderHomeScreen() {
     setNewDueDate(todayStr);
     setNewCategoryId(null);
     setSubmitting(false);
+    setErrorMessage(null);    // <-- Add this
+    setSuccessMessage(null); // <-- Add this
   };
 
   const handleCreateReminder = async () => {
-    if (!newTitle.trim() || !newAmount.trim()) {
-      alert('Please fill in both title and amount.');
-      return;
-    }
+  setErrorMessage(null);
+  setSuccessMessage(null);
 
-    if (!newCategoryId) {
-      alert('Please choose a category for this reminder.');
-      return;
-    }
+  if (!newTitle.trim() || !newAmount.trim()) {
+    setErrorMessage('Please fill in both title and amount.');
+    return;
+  }
 
-    try {
-      setSubmitting(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+  if (!newCategoryId) {
+    setErrorMessage('Please choose a category for this reminder.');
+    return;
+  }
 
-      const { error } = await supabase.from('reminders').insert({
+  try {
+    setSubmitting(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase.from('reminders').insert({
+      user_id: user.id,
+      title: newTitle.trim(),
+      amount: parseFloat(newAmount),
+      due_date: newDueDate,
+      status: 'pending',
+      allowance_id: summary?.allowanceId || null,
+      category_id: newCategoryId,
+    });
+
+    if (error) throw error;
+
+    resetForm();
+    setAddModalVisible(false);
+    fetchDashboardData();
+  } catch (error: unknown) {
+    console.error('Error adding reminder:', extractErrorMessage(error));
+    setErrorMessage('Failed to save reminder. Please try again.');
+  } finally {
+    setSubmitting(false);
+  }
+};
+
+const handleDeleteReminder = (reminderId: string, reminderTitle: string) => {
+  setReminderToDelete({ id: reminderId, title: reminderTitle });
+  setDeleteModalVisible(true);
+};
+
+const confirmDeleteReminder = async () => {
+  if (!reminderToDelete) return;
+
+  try {
+    setIsDeleting(true);
+    const { error } = await supabase
+      .from('reminders')
+      .delete()
+      .eq('id', reminderToDelete.id);
+
+    if (error) throw error;
+    
+    fetchDashboardData();
+    setDeleteModalVisible(false);
+    setReminderToDelete(null);
+  } catch (error: unknown) {
+    console.error('Error deleting reminder:', extractErrorMessage(error));
+    setErrorMessage('Failed to delete reminder.');
+  } finally {
+    setIsDeleting(false);
+  }
+};
+
+const handleSettleReminder = async (reminder: ReminderItem) => {
+  setErrorMessage(null);
+  setSuccessMessage(null);
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 1. Update reminder status to 'paid'
+    const { error: updateError } = await supabase
+      .from('reminders')
+      .update({ status: 'paid' })
+      .eq('id', reminder.id);
+
+    if (updateError) throw updateError;
+
+    // 2. Insert record into the expenses table
+    const { error: expenseError } = await supabase
+      .from('expenses')
+      .insert({
         user_id: user.id,
-        title: newTitle.trim(),
-        amount: parseFloat(newAmount),
-        due_date: newDueDate,
-        status: 'pending',
+        description: reminder.title,
+        amount: reminder.amount,
+        category_id: reminder.category_id || null,
         allowance_id: summary?.allowanceId || null,
-        category_id: newCategoryId,
+        spent_at: new Date().toISOString(),
       });
 
-      if (error) throw error;
+    if (expenseError) throw expenseError;
 
-      resetForm();
-      setAddModalVisible(false);
-      fetchDashboardData();
-    } catch (error: unknown) {
-      console.error('Error adding reminder:', extractErrorMessage(error));
-      alert('Failed to save reminder.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDeleteReminder = (reminderId: string, reminderTitle: string) => {
-    Alert.alert(
-      'Delete Reminder',
-      `Are you sure you want to delete "${reminderTitle}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase
-                .from('reminders')
-                .delete()
-                .eq('id', reminderId);
-
-              if (error) throw error;
-              fetchDashboardData();
-            } catch (error: unknown) {
-              console.error('Error deleting reminder:', extractErrorMessage(error));
-              alert('Failed to delete reminder.');
-            }
-          },
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const handleSettleReminder = async (reminder: ReminderItem) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // 1. Update reminder status to 'paid'
-      const { error: updateError } = await supabase
-        .from('reminders')
-        .update({ status: 'paid' })
-        .eq('id', reminder.id);
-
-      if (updateError) throw updateError;
-
-      // 2. Insert record into the expenses table
-      const { error: expenseError } = await supabase
-        .from('expenses')
-        .insert({
-          user_id: user.id,
-          description: reminder.title,
-          amount: reminder.amount,
-          category_id: reminder.category_id || null,
-          allowance_id: summary?.allowanceId || null,
-          spent_at: new Date().toISOString(),
-        });
-
-      if (expenseError) throw expenseError;
-
-      Alert.alert('Success', `"${reminder.title}" has been settled and recorded as an expense.`);
-      fetchDashboardData();
-    } catch (error: unknown) {
-      console.error('Error settling reminder:', extractErrorMessage(error));
-      alert('Failed to settle reminder.');
-    }
-  };
+    setSuccessMessage(`"${reminder.title}" has been settled and recorded.`);
+    fetchDashboardData();
+  } catch (error: unknown) {
+    console.error('Error settling reminder:', extractErrorMessage(error));
+    setErrorMessage('Failed to settle reminder.');
+  }
+};
 
   if (loading) {
     return (
@@ -903,12 +916,28 @@ export default function SpenderHomeScreen() {
                 onPress={() => {
                   setModalVisible(false);
                   setSelectedDate(todayStr);
+                  setErrorMessage(null);   // <-- Add this
+                  setSuccessMessage(null); // <-- Add this
                 }} 
                 style={styles.modalCloseButton}
               >
                 <Ionicons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
+
+            {errorMessage && (
+              <View style={styles.inlineErrorContainer}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <Text style={styles.inlineErrorText}>{errorMessage}</Text>
+              </View>
+            )}
+
+            {successMessage && (
+              <View style={styles.inlineSuccessContainer}>
+                <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.olive} />
+                <Text style={styles.inlineSuccessText}>{successMessage}</Text>
+              </View>
+            )}
 
             <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
               {filteredDues.length > 0 ? (
@@ -976,6 +1005,79 @@ export default function SpenderHomeScreen() {
         </View>
       </Modal>
 
+{/* CUSTOM DELETE CONFIRMATION MODAL */}
+<Modal
+  animationType="fade"
+  transparent={true}
+  visible={deleteModalVisible}
+  onRequestClose={() => !isDeleting && setDeleteModalVisible(false)}
+>
+  {/* Ensure modalOverlay has justifyContent and alignItems set to 'center' */}
+  <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+    <View style={[styles.modalContainer2, { width: '85%', maxWidth: 340, padding: 24, alignItems: 'center', alignSelf: 'center' }]}>
+      
+      {/* Warning Icon with subtle red aura */}
+      <View style={{
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#FEF2F2',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+        borderWidth: 8,
+        borderColor: '#FEE2E2'
+      }}>
+        <Ionicons name="alert-circle-outline" size={24} color="#DC2626" />
+      </View>
+
+      {/* Title */}
+      <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 8, textAlign: 'center' }}>
+        Delete Reminder
+      </Text>
+
+      {/* Subtitle / Description */}
+      <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
+        Are you sure you want to delete "{reminderToDelete?.title}"?{'\n'}This action cannot be undone.
+      </Text>
+
+      {/* Action Buttons */}
+      <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: '#F3F4F6',
+            paddingVertical: 12,
+            borderRadius: 12,
+            alignItems: 'center',
+          }}
+          onPress={() => setDeleteModalVisible(false)}
+          disabled={isDeleting}
+        >
+          <Text style={{ color: '#374151', fontWeight: '600', fontSize: 15 }}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: '#DC2626',
+            paddingVertical: 12,
+            borderRadius: 12,
+            alignItems: 'center',
+          }}
+          onPress={confirmDeleteReminder}
+          disabled={isDeleting}
+        >
+          <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 15 }}>
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+    </View>
+  </View>
+</Modal>
+
       {/* MODAL FOR ADDING A NEW REMINDER */}
       <Modal
         animationType="slide"
@@ -984,6 +1086,8 @@ export default function SpenderHomeScreen() {
         onRequestClose={() => {
           resetForm();
           setAddModalVisible(false);
+          setErrorMessage(null);   // <-- Add this
+          setSuccessMessage(null); // <-- Add this
         }}
         onShow={() => fetchCategories()}
       >
@@ -1004,6 +1108,14 @@ export default function SpenderHomeScreen() {
                 <Ionicons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
+
+            {/* Inline Error Banner */}
+            {errorMessage && (
+              <View style={styles.inlineErrorContainer}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <Text style={styles.inlineErrorText}>{errorMessage}</Text>
+              </View>
+            )}
 
             <ScrollView contentContainerStyle={styles.formContainer} showsVerticalScrollIndicator={false}>
               <Text style={styles.inputLabel}>Title</Text>
@@ -1321,6 +1433,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.overlay,
     justifyContent: 'flex-end',
   },
+  
   modalContainer: {
     backgroundColor: COLORS.bg,
     borderTopLeftRadius: 28,
@@ -1335,6 +1448,24 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
+
+modalContainer2: {
+    backgroundColor: COLORS.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 40,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+    shadowColor: COLORS.modalShadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1491,4 +1622,40 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
   },
+  inlineErrorContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#FEF2F2',
+  borderColor: '#FCA5A5',
+  borderWidth: 1,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRadius: 8,
+  marginBottom: 16,
+  gap: 8,
+},
+inlineErrorText: {
+  color: '#DC2626',
+  fontSize: 13,
+  fontWeight: '500',
+  flex: 1,
+},
+inlineSuccessContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: 'rgba(126, 160, 14, 0.1)',
+  borderColor: 'rgba(126, 160, 14, 0.3)',
+  borderWidth: 1,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRadius: 8,
+  marginBottom: 16,
+  gap: 8,
+},
+inlineSuccessText: {
+  color: COLORS.olive,
+  fontSize: 13,
+  fontWeight: '500',
+  flex: 1,
+},
 });
