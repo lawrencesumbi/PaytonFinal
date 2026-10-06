@@ -149,7 +149,7 @@ export default function PersonalLayout() {
         <Tabs.Screen
           name="home"
           options={{
-            title: "",
+            title: "Home",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -162,9 +162,9 @@ export default function PersonalLayout() {
         />
 
         <Tabs.Screen
-          name="budget"
+          name="transaction"
           options={{
-            title: "",
+            title: "Transactions",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -179,7 +179,7 @@ export default function PersonalLayout() {
         <Tabs.Screen
           name="scan"
           options={{
-            title: "",
+            title: "Scan",
             tabBarLabelStyle: styles.scanLabel,
             tabBarIcon: ({ focused }: any) => (
               <View
@@ -201,7 +201,7 @@ export default function PersonalLayout() {
         <Tabs.Screen
           name="split"
           options={{
-            title: "",
+            title: "Split",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
@@ -214,55 +214,24 @@ export default function PersonalLayout() {
         />
 
         <Tabs.Screen
-          name="profile"
+          name="insight"
           options={{
-            title: "",
+            title: "Coach",
             tabBarIcon: ({ color, focused }: any) => (
               <TabIcon
                 color={color}
                 focused={focused}
-                activeIcon="person"
-                inactiveIcon="person-outline"
+                activeIcon="chatbox-ellipses"
+                inactiveIcon="chatbox-ellipses-outline"
               />
             ),
           }}
         />
 
         {/* Hidden routes */}
-        <Tabs.Screen name="insight" options={{ href: null }} />
-        <Tabs.Screen name="transaction" options={{ href: null }} />
-        <Tabs.Screen name="reminders" options={{ href: null }} />
-        <Tabs.Screen name="statistics" options={{ href: null }} />
-        <Tabs.Screen name="income" options={{ href: null }} />
-        <Tabs.Screen name="Budgetcategorydetails" options={{ href: null }} />
+        <Tabs.Screen name="profile" options={{ href: null }} />
+        
       </Tabs>
-
-{/*  
-
-      {!shouldHideAiButton && (
-        <View style={styles.aiContainer}>
-          <Animated.View style={[styles.speechBubble, animatedBubbleStyle]}>
-            <Text style={styles.speechBubbleText}>{currentMessage}</Text>
-            <View style={styles.speechBubbleArrow} />
-          </Animated.View>
-
-          <Animated.View style={animatedButtonStyle}>
-            <TouchableOpacity
-              style={styles.floatingAiButton}
-              onPress={() => router.push("/insight")}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={require("../../assets/images/coachpayton.png")}
-                style={styles.paytonLogo}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-      )}
-
-*/}
 
 
     </>

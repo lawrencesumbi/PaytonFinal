@@ -1,17 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Animated,
   Dimensions,
-  FlatList,
   Image,
   Modal,
   Platform,
   RefreshControl,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -19,6 +17,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import Svg, { Circle, G, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { supabase } from '../../lib/supabase';
 
@@ -40,24 +39,29 @@ const COLORS = {
   modalShadow: '#04201C',
 };
 
+const CATEGORY_COLORS = [
+  // Original Colors
+  '#54C9CC', // Cyan
+  '#1F4F59', // Dark Teal
+  '#7EA00E', // Olive Green
+  '#DCD964', // Light Yellow-Green
+  '#213502', // Deep Forest Green
+
+  // New Neighboring Colors
+  '#3AA8AC', // Muted Cyan (closer to Dark Teal / Cyan mix)
+  '#357380', // Medium Teal (between Cyan and Dark Teal)
+  '#9BC915', // Vibrant Olive Green (bright relative to your Olive)
+  '#F4F19C', // Soft Pastel Yellow-Green (lighter shade of Light Yellow-Green)
+  '#3D6105', // Mid Forest Green (softer transition into Deep Forest Green)
+];
+
 const PALETTE_LIGHT_CARDS = [
   '#E6F0F2',
   '#F4F8E8',
   '#FAFAD8',
 ];
 
-const CARD_THEMES = [
-  { bg: '#E6F0F2', text: '#1F4F59', iconBg: '#54C9CC', iconColor: '#FFFFFF' },
-  { bg: '#F4F8E8', text: '#213502', iconBg: '#7EA00E', iconColor: '#FFFFFF' },
-  { bg: '#FAFAD8', text: '#213502', iconBg: '#DCD964', iconColor: '#213502' },
-];
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SECTION_H_PADDING = 24;
-const CARD_GAP = 14;
-const SLIDE_WIDTH = SCREEN_WIDTH - SECTION_H_PADDING * 2;
-const QUICK_BUDGET_CARD_WIDTH = (SLIDE_WIDTH - CARD_GAP) / 2;
-const COLLAPSE_THRESHOLD = 72;
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 function extractErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -95,45 +99,45 @@ function getDaysInfo(dueDateStr: string): { text: string; urgent: boolean } {
   return { text: `${diffDays} days left`, urgent: false };
 }
 
-function formatDueDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+function formatReadableDate(dateStr: string): string {
+  try {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
 }
 
-// ---------------------------------------------------------------------------
-// TYPES
-// ---------------------------------------------------------------------------
+function generateDateRange() {
+  const dates = [];
+  const today = new Date();
+  
+  for (let i = -7; i <= 7; i++) {
+    const d = new Date();
+    d.setDate(today.getDate() + i);
+    dates.push({
+      dateString: d.toISOString().split('T')[0],
+      dayName: d.toLocaleString('en-US', { weekday: 'short' }).toUpperCase(),
+      dayNumber: d.getDate(),
+      monthStr: d.toLocaleString('en-US', { month: 'short' }).toUpperCase(),
+      isToday: i === 0,
+    });
+  }
+  return dates;
+}
+
 interface DashboardSummary {
   incomeId: string;
-  incomeName: string;
+  sourceName: string;
   totalIncome: number;
   totalSpent: number;
   remaining: number;
   unallocated: number;
-}
-
-interface DynamicCategory {
-  id: string;
-  name: string;
-  icon: string;
-  color?: string;
-  totalSpent: number;
-  allocatedAmount: number;
-  remainingAmount: number;
-  budgetId?: string;
-}
-
-interface BudgetExpense {
-  id: string;
-  amount: number;
-}
-
-interface BudgetQuery {
-  id: string;
-  category_id: string;
-  allocated_amount: number;
-  income_id: string;
-  expenses: BudgetExpense[];
 }
 
 interface ReminderItem {
@@ -142,30 +146,33 @@ interface ReminderItem {
   amount: number;
   due_date: string;
   status: string;
+  category_id?: string | null; // <--- Add this line
   categories?: {
     name?: string;
     icon?: string;
   } | null;
 }
 
-interface FriendItem {
+interface CategoryItem {
   id: string;
-  full_name: string;
-  email?: string;
-  avatar_url?: string | null;
-  amount_owed: number;
+  name: string;
+  icon?: string;
+  color?: string;
 }
 
-interface TransactionItem {
-  id: string;
+interface CategoryStat {
+  categoryId: string;
+  categoryName: string;
+  icon?: string;
+  total: number;
+  percentage: number;
+  color: string;
+}
+
+interface DailyTrendItem {
+  dateStr: string;
+  displayDay: string;
   amount: number;
-  created_at: string;
-  description?: string;
-  categories?: {
-    name?: string;
-    icon?: string;
-    color?: string;
-  } | null;
 }
 
 export default function PersonalHomeScreen() {
@@ -173,216 +180,202 @@ export default function PersonalHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [personalName, setPersonalName] = useState('Guian Sumbi');
+  const [personalRole, setPersonalRole] = useState('Member');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [categories, setCategories] = useState<DynamicCategory[]>([]);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
-  const [friendsList, setFriendsList] = useState<FriendItem[]>([]);
-  const [recentTransactions, setRecentTransactions] = useState<TransactionItem[]>([]);
-
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  
+  // Statistics State
+  const [categoryStats, setCategoryStats] = useState<CategoryStat[]>([]);
+  const [overallTotalExpenses, setOverallTotalExpenses] = useState<number>(0);
+  const [dailyTrends, setDailyTrends] = useState<DailyTrendItem[]>([]);
+  
+  const dateList = generateDateRange();
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<DynamicCategory | null>(null);
-  const [allocateAmount, setAllocateAmount] = useState('');
+  const horizontalScrollRef = useRef<ScrollView>(null);
+
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newAmount, setNewAmount] = useState('');
+  const [newDueDate, setNewDueDate] = useState(todayStr);
+  const [newCategoryId, setNewCategoryId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // ---- Scroll-driven header collapse ----
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const headerPaddingBottom = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [30, 10],
-    extrapolate: 'clamp',
-  });
-  const headerShadowOpacity = scrollY.interpolate({
-    inputRange: [8, 30],
-    outputRange: [0, 0.15],
-    extrapolate: 'clamp',
-  });
-  const headerElevation = scrollY.interpolate({
-    inputRange: [8, 30],
-    outputRange: [0, 10],
-    extrapolate: 'clamp',
-  });
-  const topRowMarginBottom = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [24, 8],
-    extrapolate: 'clamp',
-  });
-  const helloOpacity = scrollY.interpolate({ inputRange: [0, 22], outputRange: [1, 0], extrapolate: 'clamp' });
-  const helloHeight = scrollY.interpolate({ inputRange: [0, 22], outputRange: [26, 0], extrapolate: 'clamp' });
-  const userNameFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [18, 15],
-    extrapolate: 'clamp',
-  });
-  const labelOpacity = scrollY.interpolate({ inputRange: [0, 18], outputRange: [1, 0], extrapolate: 'clamp' });
-  const labelHeight = scrollY.interpolate({ inputRange: [0, 18], outputRange: [26, 0], extrapolate: 'clamp' });
-  const pillOuterHeight = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [54, 16],
-    extrapolate: 'clamp',
-  });
-  const pillOuterRadius = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [30, 8],
-    extrapolate: 'clamp',
-  });
-  const pillInnerHeight = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [46, 8],
-    extrapolate: 'clamp',
-  });
-  const pillInnerRadius = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [26, 4],
-    extrapolate: 'clamp',
-  });
-  const amountMarginTop = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [16, 4],
-    extrapolate: 'clamp',
-  });
-  const amountFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [32, 17],
-    extrapolate: 'clamp',
-  });
-  const dividerFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [22, 11],
-    extrapolate: 'clamp',
-  });
-  const totalFontSize = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [15, 11],
-    extrapolate: 'clamp',
-  });
-  const unallocOpacity = scrollY.interpolate({ inputRange: [0, 18], outputRange: [1, 0], extrapolate: 'clamp' });
-  const unallocHeight = scrollY.interpolate({ inputRange: [0, 18], outputRange: [46, 0], extrapolate: 'clamp' });
-  const iconCircleScale = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [1, 0.82],
-    extrapolate: 'clamp',
-  });
-  const avatarScale = scrollY.interpolate({
-    inputRange: [0, COLLAPSE_THRESHOLD],
-    outputRange: [1, 0.75],
-    extrapolate: 'clamp',
-  });
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [reminderToDelete, setReminderToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // DATA FETCHING
-  // ---------------------------------------------------------------------------
+  const centerToday = (animated = false) => {
+    const todayIndex = dateList.findIndex(item => item.isToday);
+    const dateBoxWidth = 54; 
+    const dateBoxGap = 8;         
+    const containerPadding = 24; 
+
+    const totalItemWidth = dateBoxWidth + dateBoxGap;
+    const computedX = (todayIndex * totalItemWidth) - (SCREEN_WIDTH / 2 - containerPadding - (dateBoxWidth / 2));
+
+    horizontalScrollRef.current?.scrollTo({
+      x: Math.max(0, computedX),
+      animated: animated,
+    });
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      centerToday(false);
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  const fetchCategories = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      let query = supabase.from('categories').select('id, name, icon, color');
+      
+      if (user) {
+        query = query.or(`user_id.eq.${user.id},user_id.is.null`);
+      } else {
+        query = query.is('user_id', null);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      setCategories(data || []);
+    } catch (error: unknown) {
+      console.error('Error fetching categories:', extractErrorMessage(error));
+    }
+  };
+
   const fetchDashboardData = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Fetch Profile
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('full_name, avatar_url')
+        .select('full_name, avatar_url, role')
         .eq('id', user.id)
         .single();
 
       if (profileData?.full_name) setPersonalName(profileData.full_name);
       if (profileData?.avatar_url) setAvatarUrl(profileData.avatar_url);
+      if (profileData?.role) setPersonalRole(profileData.role);
 
-      // 2. Fetch Categories
-      const { data: allCategoriesData, error: catError } = await supabase
-        .from('categories')
-        .select('id, name, icon, color')
-        .or(`user_id.is.null,user_id.eq.${user.id}`);
-
-      if (catError) throw catError;
-
-      const categoryMap: { [key: string]: DynamicCategory } = {};
-      (allCategoriesData || []).forEach((cat) => {
-        categoryMap[cat.id] = {
-          id: cat.id,
-          name: cat.name,
-          icon: cat.icon || 'folder',
-          color: cat.color || '#E2E8F0',
-          totalSpent: 0,
-          allocatedAmount: 0,
-          remainingAmount: 0,
-        };
-      });
-
-      const today = new Date().toISOString().split('T')[0];
-
-      // 3. Fetch Income
       const { data: incomeData, error: incomeError } = await supabase
         .from('income')
-        .select('id, source_name, amount, start_date, end_date')
+        .select('id, source_name, amount, received_at')
         .eq('user_id', user.id)
-        .lte('start_date', today)
-        .gte('end_date', today)
-        .order('received_at', { ascending: false })
-        .limit(1);
+        .eq('is_archived', false) // Only fetch non-archived income records
+        .order('received_at', { ascending: false });
 
       if (incomeError) throw incomeError;
 
       let totalSpentCounter = 0;
-      let totalAllocatedCounter = 0;
+      let combinedTotalIncome = 0;
 
       if (incomeData && incomeData.length > 0) {
-        const activeIncome = incomeData[0];
+        const incomeIds = incomeData.map((item) => item.id);
+        
+        combinedTotalIncome = incomeData.reduce(
+          (sum, item) => sum + Number(item.amount || 0),
+          0
+        );
 
-        const { data: budgetsData, error: budgetsError } = await supabase
-          .from('budgets')
+        const { data: expensesData, error: expensesError } = await supabase
+          .from('expenses')
           .select(`
-            id,
-            category_id,
-            allocated_amount,
+            id, 
+            amount, 
             income_id,
-            expenses (
-              id,
-              amount
-            )
+            category_id,
+            spent_at,
+            categories ( id, name, icon )
           `)
-          .eq('user_id', user.id)
-          .eq('income_id', activeIncome.id);
+          .in('income_id', incomeIds);
 
-        if (budgetsError) throw budgetsError;
+        if (expensesError) throw expensesError;
 
-        ((budgetsData as unknown as BudgetQuery[]) || []).forEach((budget) => {
-          const catId = budget.category_id;
-          const currentAllocation = Number(budget.allocated_amount || 0);
+        totalSpentCounter = (expensesData || []).reduce(
+          (sum: number, exp: any) => sum + Number(exp.amount || 0),
+          0
+        );
 
-          totalAllocatedCounter += currentAllocation;
+        setOverallTotalExpenses(totalSpentCounter);
 
-          const expensesList = budget.expenses || [];
-          const categoryTotalSpent = expensesList.reduce((sum: number, exp) => sum + Number(exp.amount || 0), 0);
+        const categoryMap: { [key: string]: { name: string; icon?: string; total: number } } = {};
+        (expensesData || []).forEach((exp: any) => {
+          const catId = exp.category_id || 'uncategorized';
+          const catName = exp.categories?.name || 'Uncategorized';
+          const catIcon = exp.categories?.icon;
+          const amt = Number(exp.amount || 0);
 
-          totalSpentCounter += categoryTotalSpent;
-
-          if (categoryMap[catId]) {
-            categoryMap[catId].budgetId = budget.id;
-            categoryMap[catId].totalSpent = categoryTotalSpent;
-            categoryMap[catId].allocatedAmount = currentAllocation;
-            categoryMap[catId].remainingAmount = Math.max(0, currentAllocation - categoryTotalSpent);
+          if (!categoryMap[catId]) {
+            categoryMap[catId] = { name: catName, icon: catIcon, total: 0 };
           }
+          categoryMap[catId].total += amt;
         });
 
-        const totalIncomeVal = Number(activeIncome.amount);
+        const statsArray: CategoryStat[] = Object.keys(categoryMap).map((catId, index) => {
+          const item = categoryMap[catId];
+          const percentage = totalSpentCounter > 0 ? (item.total / totalSpentCounter) * 100 : 0;
+          return {
+            categoryId: catId,
+            categoryName: item.name,
+            icon: item.icon,
+            total: item.total,
+            percentage,
+            color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+          };
+        });
+
+        setCategoryStats(statsArray);
+
+        // Compute past 7 days trend data for the Line Graph
+        const todayObj = new Date();
+        const trendData: DailyTrendItem[] = [];
+        
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(todayObj.getDate() - i);
+          const yyyyMmDd = d.toISOString().split('T')[0];
+          const displayLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+          const dayExpenses = (expensesData || []).filter((exp: any) => exp.spent_at?.startsWith(yyyyMmDd));
+          const dayTotal = dayExpenses.reduce((sum: number, exp: any) => sum + Number(exp.amount || 0), 0);
+
+          trendData.push({
+            dateStr: yyyyMmDd,
+            displayDay: displayLabel,
+            amount: dayTotal,
+          });
+        }
+        setDailyTrends(trendData);
 
         setSummary({
-          incomeId: activeIncome.id,
-          incomeName: activeIncome.source_name,
-          totalIncome: totalIncomeVal,
+          incomeId: incomeIds[0], 
+          sourceName: incomeData.map(a => a.source_name).join(', '),
+          totalIncome: combinedTotalIncome,
           totalSpent: totalSpentCounter,
-          remaining: totalIncomeVal - totalSpentCounter,
-          unallocated: totalIncomeVal - totalAllocatedCounter,
+          remaining: combinedTotalIncome - totalSpentCounter,
+          unallocated: 0,
         });
       } else {
         setSummary(null);
+        setOverallTotalExpenses(0);
+        setCategoryStats([]);
+        setDailyTrends([]);
       }
 
-      setCategories(Object.values(categoryMap));
-
-      // 4. Fetch Upcoming Dues
       const { data: duesData, error: duesError } = await supabase
         .from('reminders')
         .select(`
@@ -391,101 +384,17 @@ export default function PersonalHomeScreen() {
           amount,
           due_date,
           status,
+          category_id,
           categories ( name, icon )
         `)
         .eq('user_id', user.id)
-        .eq('status', 'pending')
-        .order('due_date', { ascending: true })
-        .limit(5);
+        .in('status', ['pending', 'paid'])
+        .order('due_date', { ascending: true });
 
       if (duesError) throw duesError;
       setUpcomingDues((duesData as unknown as ReminderItem[]) || []);
 
-      // 5. FETCH FRIENDS AND THEIR OWED AMOUNTS
-      try {
-        const { data: friendsData, error: friendsErr } = await supabase
-          .from('friends')
-          .select(`
-            id,
-            full_name,
-            email,
-            avatar_url,
-            split_friends (
-              owed_amount
-            )
-          `)
-          .eq('user_id', user.id)
-          .order('full_name', { ascending: true });
-
-        if (friendsErr) {
-          console.error('Error fetching friends:', friendsErr.message);
-        }
-
-        if (friendsData && friendsData.length > 0) {
-          const mappedFriends: FriendItem[] = friendsData.map((f: any) => {
-            const totalOwed = (f.split_friends || []).reduce(
-              (sum: number, entry: any) => sum + Number(entry.owed_amount || 0),
-              0
-            );
-
-            return {
-              id: f.id,
-              full_name: f.full_name || 'Friend',
-              email: f.email,
-              avatar_url: f.avatar_url || null,
-              amount_owed: totalOwed,
-            };
-          });
-
-          setFriendsList(mappedFriends);
-        } else {
-          setFriendsList([]);
-        }
-      } catch (friendErr) {
-        console.error('Error fetching friends:', friendErr);
-      }
-
-      // 6. FETCH RECENT TRANSACTIONS
-      try {
-        const { data: transactionData, error: transactionErr } = await supabase
-          .from('expenses')
-          .select(`
-            id,
-            amount,
-            spent_at,
-            description,
-            budgets (
-              categories (
-                name,
-                icon,
-                color
-              )
-            )
-          `)
-          .eq('budgets.user_id', user.id)
-          .order('spent_at', { ascending: false })
-          .limit(5);
-
-        if (transactionErr) {
-          console.error('Error fetching transactions:', transactionErr.message);
-        }
-
-        if (transactionData && transactionData.length > 0) {
-          const mappedTransactions: TransactionItem[] = (transactionData as any[]).map((t: any) => ({
-            id: t.id,
-            amount: t.amount,
-            created_at: t.spent_at,
-            description: t.description,
-            categories: t.budgets?.categories || null,
-          }));
-
-          setRecentTransactions(mappedTransactions);
-        } else {
-          setRecentTransactions([]);
-        }
-      } catch (transactionErr) {
-        console.error('Error fetching transactions:', transactionErr);
-      }
+      await fetchCategories();
 
     } catch (error: unknown) {
       console.error('Personal Dashboard Error:', extractErrorMessage(error));
@@ -495,81 +404,206 @@ export default function PersonalHomeScreen() {
     }
   };
 
-  const handleSaveBudget = async () => {
-    if (!selectedCategory || !summary) return;
-    const newAllocation = parseFloat(allocateAmount);
-
-    if (isNaN(newAllocation) || newAllocation < 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid amount.');
-      return;
-    }
-
-    const currentAllocation = selectedCategory.allocatedAmount || 0;
-    const additionalAmountNeeded = newAllocation - currentAllocation;
-
-    if (additionalAmountNeeded > (summary?.unallocated ?? 0)) {
-      Alert.alert(
-        'Allocation Exceeded',
-        `Insufficient unallocated balance (₱${(summary?.unallocated ?? 0).toFixed(2)} available).`
-      );
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      if (selectedCategory.budgetId) {
-        await supabase
-          .from('budgets')
-          .update({ allocated_amount: newAllocation })
-          .eq('id', selectedCategory.budgetId);
-      } else {
-        await supabase
-          .from('budgets')
-          .insert({
-            user_id: user.id,
-            category_id: selectedCategory.id,
-            income_id: summary.incomeId,
-            allocated_amount: newAllocation,
-          });
-      }
-
-      setModalVisible(false);
-      setAllocateAmount('');
-      fetchDashboardData();
-    } catch (error: unknown) {
-      Alert.alert('Error', extractErrorMessage(error));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const openAllocateModal = (category: DynamicCategory) => {
-    if (!summary) {
-      Alert.alert('No Active Income', 'Please set an active income source first.');
-      return;
-    }
-    setSelectedCategory(category);
-    setAllocateAmount(category.allocatedAmount > 0 ? String(category.allocatedAmount) : '');
-    setModalVisible(true);
-  };
-
-  const closeAllocateModal = () => {
-    setModalVisible(false);
-    setSelectedCategory(null);
-    setAllocateAmount('');
-  };
-
   useEffect(() => {
     fetchDashboardData();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+      setSelectedDate(todayStr);
+      centerToday(true);
+    }, [])
+  );
+
   const onRefresh = () => {
     setRefreshing(true);
-    fetchDashboardData();
+    setSelectedDate(todayStr);
+    fetchDashboardData().then(() => {
+      setTimeout(() => centerToday(true), 100);
+    });
   };
+
+  const resetForm = () => {
+    setNewTitle('');
+    setNewAmount('');
+    setNewDueDate(todayStr);
+    setNewCategoryId(null);
+    setSubmitting(false);
+    setErrorMessage(null);    // <-- Add this
+    setSuccessMessage(null); // <-- Add this
+  };
+
+const handleCreateReminder = async () => {
+  setErrorMessage(null);
+  setSuccessMessage(null);
+
+  if (!newTitle.trim() || !newAmount.trim()) {
+    setErrorMessage('Please fill in both title and amount.');
+    return;
+  }
+
+  if (!newCategoryId) {
+    setErrorMessage('Please choose a category for this reminder.');
+    return;
+  }
+
+  
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(newDueDate)) {
+    setErrorMessage('Invalid due date. Please use YYYY-MM-DD.');
+    return;
+  }
+
+  // 3. Optional: Validate if it's a real calendar date (e.g., catching "2026-02-31")
+  const parsedDate = new Date(newDueDate);
+  const timestamp = parsedDate.getTime();
+  
+  if (
+    isNaN(timestamp) || 
+    parsedDate.toISOString().slice(0, 10) !== newDueDate
+  ) {
+    setErrorMessage('Please enter a valid calendar date (YYYY-MM-DD).');
+    return;
+  }
+
+  try {
+    setSubmitting(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const parsedAmount = parseFloat(newAmount);
+
+    const { error } = await supabase.from('reminders').insert({
+      user_id: user.id,
+      title: newTitle.trim(),
+      amount: parsedAmount,
+      due_date: newDueDate,
+      status: 'pending',
+      income_id: summary?.incomeId || null,
+      category_id: newCategoryId,
+    });
+
+    if (error) throw error;
+
+    // Log the successful reminder creation matching your logs table schema
+    await supabase.from('logs').insert({
+      user_id: user.id,
+      details: `created reminder "${newTitle.trim()}" (${parsedAmount}).`,
+    });
+
+    // Set success message
+    setSuccessMessage('Reminder saved successfully!');
+    fetchDashboardData();
+
+    // Optional: Wait 1 second so the user sees the success banner before closing the modal
+    setTimeout(() => {
+      resetForm();
+      setAddModalVisible(false);
+      setSuccessMessage(null);
+    }, 1000);
+
+  } catch (error: unknown) {
+    console.error('Error adding reminder:', extractErrorMessage(error));
+    setErrorMessage('Failed to save reminder. Please try again.');
+  } finally {
+    setSubmitting(false);
+  }
+};
+
+const handleDeleteReminder = (reminderId: string, reminderTitle: string) => {
+  setReminderToDelete({ id: reminderId, title: reminderTitle });
+  setDeleteModalVisible(true);
+};
+
+const confirmDeleteReminder = async () => {
+  if (!reminderToDelete) return;
+
+  try {
+    setIsDeleting(true);
+    const { error } = await supabase
+      .from('reminders')
+      .delete()
+      .eq('id', reminderToDelete.id);
+
+    if (error) throw error;
+    
+    // Fetch current user and log the deletion action matching your logs table schema
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `deleted reminder "${reminderToDelete.title || reminderToDelete.id}".`,
+      });
+    }
+
+    fetchDashboardData();
+    
+    // 1. Clear any old errors and set your success message
+    setErrorMessage(null);
+    setSuccessMessage(`Successfully deleted "${reminderToDelete.title || 'reminder'}"`);
+
+    // 2. Close the delete confirmation modal and clear temporary deletion state
+    setDeleteModalVisible(false);
+    setReminderToDelete(null);
+
+    // 3. Optional: Automatically clear the success banner after 4 seconds
+    setTimeout(() => {
+      setSuccessMessage(null);
+    }, 4000);
+
+  } catch (error: unknown) {
+    console.error('Error deleting reminder:', extractErrorMessage(error));
+    setSuccessMessage(null); // Clear any old success message on failure
+    setErrorMessage('Failed to delete reminder.');
+  } finally {
+    setIsDeleting(false);
+  }
+};
+
+const handleSettleReminder = async (reminder: ReminderItem) => {
+  setErrorMessage(null);
+  setSuccessMessage(null);
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 1. Update reminder status to 'paid'
+    const { error: updateError } = await supabase
+      .from('reminders')
+      .update({ status: 'paid' })
+      .eq('id', reminder.id);
+
+    if (updateError) throw updateError;
+
+    // 2. Insert record into the expenses table
+    const { error: expenseError } = await supabase
+      .from('expenses')
+      .insert({
+        user_id: user.id,
+        description: reminder.title,
+        amount: reminder.amount,
+        category_id: reminder.category_id || null,
+        income_id: summary?.incomeId || null,
+        spent_at: new Date().toISOString(),
+      });
+
+    if (expenseError) throw expenseError;
+
+    // Log the successful settlement action matching your logs table schema
+    await supabase.from('logs').insert({
+      user_id: user.id,
+      details: `settled reminder "${reminder.title}" (${reminder.amount}).`,
+    });
+
+    setSuccessMessage(`"${reminder.title}" has been settled and recorded.`);
+    fetchDashboardData();
+  } catch (error: unknown) {
+    console.error('Error settling reminder:', extractErrorMessage(error));
+    setErrorMessage('Failed to settle reminder.');
+  }
+};
 
   if (loading) {
     return (
@@ -584,26 +618,38 @@ export default function PersonalHomeScreen() {
     ? Math.max(0, Math.min(((summary.totalIncome - summary.totalSpent) / summary.totalIncome) * 100, 100))
     : 0;
 
+  const hasPendingOnDate = (dateStr: string) => {
+    return upcomingDues.some(due => due.due_date === dateStr && due.status === 'pending');
+  };
+
+  const handleDatePress = (dateStr: string) => {
+    setSelectedDate(dateStr);
+    setModalVisible(true);
+  };
+
+  const filteredDues = upcomingDues.filter(due => due.due_date === selectedDate);
+  const selectedDaysInfo = getDaysInfo(selectedDate);
+
+  // SVG Donut Chart Calculation variables
+  const size = 200;
+  const strokeWidth = 23;
+  const center = size / 2;
+  const radius = center - strokeWidth;
+  const circumference = 2 * Math.PI * radius;
+
+  let accumulatedPercent = 0;
+
   return (
     <View style={styles.mainContainer}>
       <ExpoStatusBar style="light" />
 
-      {/* ========== COLLAPSIBLE HEADER ========== */}
-      <Animated.View
-        style={[
-          styles.headerBackground,
-          {
-            paddingBottom: headerPaddingBottom,
-            shadowOpacity: headerShadowOpacity,
-            elevation: headerElevation,
-          },
-        ]}
-      >
-        <Animated.View style={{ marginBottom: topRowMarginBottom }}>
+      {/* HEADER */}
+      <View style={styles.headerBackground}>
+        <View style={styles.topRowContainer}>
           <View style={styles.topRow}>
             <View style={styles.userProfileGroup}>
               <TouchableOpacity onPress={() => router.push('/profile')}>
-                <Animated.View style={{ transform: [{ scale: avatarScale }] }}>
+                <View>
                   {avatarUrl ? (
                     <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
                   ) : (
@@ -611,83 +657,53 @@ export default function PersonalHomeScreen() {
                       <Text style={styles.avatarInitial}>{personalName.charAt(0).toUpperCase()}</Text>
                     </View>
                   )}
-                </Animated.View>
+                </View>
               </TouchableOpacity>
 
               <View>
-                <Animated.View style={{ height: helloHeight, opacity: helloOpacity, overflow: 'hidden', justifyContent: 'flex-end' }}>
-                  <Text style={styles.helloText}>Hello,</Text>
-                </Animated.View>
-                <Animated.Text style={[styles.userNameText, { fontSize: userNameFontSize }]} numberOfLines={1}>
+                <Text style={styles.helloText}>Hello,</Text>
+                <Text style={styles.userNameText} numberOfLines={1}>
                   {personalName}
-                </Animated.Text>
+                </Text>
               </View>
             </View>
 
-            <View style={styles.topIconsRow}>
-              <Animated.View style={{ transform: [{ scale: iconCircleScale }] }}>
-                <TouchableOpacity 
-                  style={styles.iconCircleModern} 
-                  onPress={() => router.push('/income')}
-                >
-                  <Ionicons name="wallet-outline" size={20} color="#FFFFFF" />
-                </TouchableOpacity>
-              </Animated.View>
-
-              <Animated.View style={{ transform: [{ scale: iconCircleScale }] }}>
-                <TouchableOpacity 
-                  style={styles.iconCircleModern} 
-                  onPress={() => router.push('/reminders')}
-                >
-                  <Text style={styles.dateMonthText}>
-                    {new Date().toLocaleString('en-US', { month: 'short' }).toUpperCase()}
-                  </Text>
-                  <Text style={styles.dateDayText}>{new Date().getDate()}</Text>
-                </TouchableOpacity>
-              </Animated.View>
-            </View>
-          </View>
-        </Animated.View>
-
-        <View style={styles.balanceBlock}>
-          <Animated.View style={{ height: labelHeight, opacity: labelOpacity, overflow: 'hidden' }}>
-            <View style={styles.balanceLabelRow}>
-              <View style={styles.balanceLabelIconWrap}>
-                <Ionicons name="wallet-outline" size={13} color={COLORS.deepTeal} />
-              </View>
-              <Text style={styles.balanceLabel}>Total Remaining Balance</Text>
-            </View>
-          </Animated.View>
-
-          <Animated.View style={[styles.pillTrackOuter, { height: pillOuterHeight, borderRadius: pillOuterRadius }]}>
-            <Animated.View style={[styles.pillTrack, { height: pillInnerHeight, borderRadius: pillInnerRadius }]}>
-              <Animated.View style={[styles.pillFill, { width: `${remainingPercentage}%`, borderRadius: pillInnerRadius }]} />
-            </Animated.View>
-          </Animated.View>
-
-          <Animated.View style={[styles.balanceAmountRow, { marginTop: amountMarginTop }]}>
-            <Animated.Text style={[styles.pillAmountText, { fontSize: amountFontSize }]}>
-              ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
-            </Animated.Text>
-            <Animated.Text style={[styles.pillAmountDivider, { fontSize: dividerFontSize }]}>/</Animated.Text>
-            <Animated.Text style={[styles.pillAmountTotal, { fontSize: totalFontSize }]}>
-              ₱{summary ? summary.totalIncome.toLocaleString('en-US') : '0'}
-            </Animated.Text>
-          </Animated.View>
-
-          <Animated.View style={{ height: unallocHeight, opacity: unallocOpacity, overflow: 'hidden', justifyContent: 'flex-end' }}>
-            <View style={styles.unallocatedChip}>
-              <View style={styles.unallocatedDot} />
-              <Text style={styles.unallocatedHint} numberOfLines={1}>
-                ₱{summary ? summary.unallocated.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'} unallocated budget
+            <View style={styles.roleBadgeContainer}>
+              <Text style={styles.roleBadgeText} numberOfLines={1}>
+                {personalRole ? personalRole.toUpperCase() : ''}
               </Text>
             </View>
-          </Animated.View>
+          </View>
         </View>
-      </Animated.View>
 
-      {/* ========== SCROLLABLE CONTENT ========== */}
-      <Animated.ScrollView
+        <View style={styles.balanceBlock}>
+          <View style={styles.balanceLabelRow}>
+            <View style={styles.balanceLabelIconWrap}>
+              <Ionicons name="wallet-outline" size={13} color={COLORS.deepTeal} />
+            </View>
+            <Text style={styles.balanceLabel}>Total Remaining</Text>
+          </View>
+
+          <View style={styles.pillTrackOuter}>
+            <View style={styles.pillTrack}>
+              <View style={[styles.pillFill, { width: `${remainingPercentage}%` }]} />
+            </View>
+          </View>
+
+          <View style={styles.balanceAmountRow}>
+            <Text style={styles.pillAmountText}>
+              ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
+            </Text>
+            <Text style={styles.pillAmountDivider}>/</Text>
+            <Text style={styles.pillAmountTotal}>
+              ₱{summary ? summary.totalIncome.toLocaleString('en-US') : '0'}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* SCROLLABLE CONTENT */}
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -695,304 +711,545 @@ export default function PersonalHomeScreen() {
         }
         showsVerticalScrollIndicator={false}
         bounces
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
       >
-        {/* ========== QUICK BUDGET ========== */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Quick Budget</Text>
-            <TouchableOpacity onPress={() => router.push('/budget')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
-          </View>
-
-          {categories.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>No budget folders yet.</Text>
-            </View>
-          ) : (
-            <FlatList
-              data={[...categories].sort((a, b) => a.remainingAmount - b.remainingAmount)}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(cat) => `quick-budget-item-${cat.id}`}
-              contentContainerStyle={{ gap: 12, paddingHorizontal: 4 }}
-              renderItem={({ item: cat, index }) => {
-                const theme = CARD_THEMES[index % CARD_THEMES.length];
-                const hasBudget = Boolean(cat.budgetId);
-
-                return (
-                  <TouchableOpacity
-                    key={cat.id}
-                    activeOpacity={0.8}
-                    onPress={() => openAllocateModal(cat)}
-                    style={[styles.quickBudgetCard, { backgroundColor: theme.bg }]}
-                  >
-                    <View style={[styles.quickBudgetIconCircle, { backgroundColor: theme.iconBg }]}>
-                      <Ionicons name={(cat.icon as any) || 'folder-outline'} size={18} color={theme.iconColor} />
-                    </View>
-
-                    <Text style={[styles.quickBudgetName, { color: theme.text }]} numberOfLines={1}>
-                      {cat.name}
-                    </Text>
-
-                    <Text style={[styles.quickBudgetAmount, { color: theme.text }]} numberOfLines={1}>
-                      {hasBudget ? `₱${cat.remainingAmount.toLocaleString()} left` : 'Tap to allocate'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              }}
-            />
-          )}
-        </View>
-
-        {/* ========== UPCOMING DUES ========== */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Upcoming Dues</Text>
-            <TouchableOpacity onPress={() => router.push('/reminders')}>
-              <Text style={styles.seeAllText}>See all</Text>
+            <TouchableOpacity onPress={() => setAddModalVisible(true)}>
+              <Text style={styles.seeAllText}>+ Set Reminders</Text>
             </TouchableOpacity>
           </View>
 
-          {upcomingDues.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <View style={styles.emptyIconWrapper}>
-                <Ionicons name="checkmark-done-circle-outline" size={40} color={COLORS.cyan} />
-              </View>
-              <Text style={styles.emptyText}>All clear! No upcoming dues.</Text>
-              <TouchableOpacity style={styles.addDueButton} onPress={() => router.push('/reminders')}>
-                <Ionicons name="add-circle-outline" size={16} color={COLORS.olive} />
-                <Text style={styles.addDueButtonText}>Add a reminder</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.dueCardsContainer}>
-              {upcomingDues.map((due, index) => {
-                const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
-                const daysInfo = getDaysInfo(due.due_date);
-                const dateObj = new Date(due.due_date);
-                const monthStr = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
-                const dayStr = dateObj.getDate();
+          {/* Horizontal Date Strip */}
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.dateStripContainer}
+            ref={horizontalScrollRef}
+            onLayout={() => centerToday(false)}
+          >
+            {dateList.map((item) => {
+              const isSelected = selectedDate === item.dateString;
+              const hasPending = hasPendingOnDate(item.dateString);
 
-                return (
-                  <TouchableOpacity
-                    key={due.id}
-                    activeOpacity={0.85}
-                    onPress={() => router.push('/reminders')}
-                    style={[styles.reminderCardHome, { backgroundColor: cardBgColor }]}
-                  >
-                    <View style={styles.calendarBadgeHome}>
-                      <Text style={styles.calendarMonthHome}>{monthStr}</Text>
-                      <Text style={styles.calendarDayHome}>{dayStr}</Text>
-                    </View>
-
-                    <View style={styles.cardContentHome}>
-                      <Text style={styles.reminderTitleHome}>{due.title}</Text>
-                      <Text style={styles.reminderSubHome}>
-                        ₱{Number(due.amount).toFixed(2)}
-                      </Text>
-                    </View>
-
-                    <View style={[
-                      styles.dueBadgeHome, 
-                      { backgroundColor: daysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
-                    ]}>
-                      <Text style={[
-                        styles.dueBadgeTextHome, 
-                        { color: daysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
-                      ]}>
-                        {daysInfo.text}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
+              return (
+                <TouchableOpacity
+                  key={item.dateString}
+                  activeOpacity={hasPending ? 0.8 : 1}
+                  onPress={() => handleDatePress(item.dateString)}
+                  style={[
+                    styles.dateBox,
+                    item.isToday ? styles.dateBoxToday : (isSelected && styles.dateBoxBorderSelected)
+                  ]}
+                >
+                  <Text style={[
+                    styles.dateDayName, 
+                    item.isToday && styles.dateTextToday,
+                    !item.isToday && isSelected && styles.dateTextBorderSelected
+                  ]}>
+                    {item.dayName}
+                  </Text>
+                  <Text style={[
+                    styles.dateDayNumber, 
+                    item.isToday && styles.dateTextToday,
+                    !item.isToday && isSelected && styles.dateTextBorderSelected
+                  ]}>
+                    {item.dayNumber}
+                  </Text>
+                  
+                  <View style={styles.dotContainer}>
+                    {hasPending && (
+                      <View style={[
+                        styles.pendingDot, 
+                        item.isToday && styles.pendingDotToday,
+                        !item.isToday && isSelected && styles.pendingDotBorderSelected
+                      ]} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
-        {/* ========== WHO OWES YOU ========== */}
+        {/* STATISTICS SECTION */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Who Owes You</Text>
-            <TouchableOpacity onPress={() => router.push('/split')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>Expenses per Category</Text>
           </View>
 
-          {friendsList.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Ionicons name="people-outline" size={32} color={COLORS.textMuted} style={{ marginBottom: 6 }} />
-              <Text style={styles.emptyText}>No debts recorded yet.</Text>
-            </View>
-          ) : (
-            <View style={styles.debtListContainer}>
-              {[...friendsList]
-                .filter(item => (Number(item.amount_owed) || 0) > 0)
-                .sort((a, b) => (Number(b.amount_owed) || 0) - (Number(a.amount_owed) || 0))
-                .map((item, index) => {
-                  return (
-                    <TouchableOpacity
-                      key={`debt-friend-${item.id}`}
-                      style={styles.debtCardItem}
-                      onPress={() => router.push('/split')}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.debtItemLeft}>
-                        {item.avatar_url ? (
-                          <Image source={{ uri: item.avatar_url }} style={styles.friendAvatarImageRow} />
-                        ) : (
-                          <Image 
-                            source={require('../../assets/images/default.png')} 
-                            style={styles.friendAvatarImageRow} 
-                          />
-                        )}
-                        <Text style={styles.friendNameRowText} numberOfLines={1}>
-                          {item.full_name}
-                        </Text>
-                      </View>
+          <View style={styles.statsCard}>
+            {/* Multi-Segment Donut Chart Display */}
+            <View style={styles.circleContainer}>
+              <Svg width={size} height={size}>
+                {/* Background Track Circle */}
+                <Circle
+                  cx={center}
+                  cy={center}
+                  r={radius}
+                  stroke="#E2E8F0"
+                  strokeWidth={strokeWidth}
+                  fill="none"
+                />
+                
+                {/* Dynamic Category Segments */}
+                {categoryStats.map((stat) => {
+                  const strokeDashoffset = circumference - (circumference * stat.percentage) / 100;
+                  const currentRotation = (accumulatedPercent / 100) * 360 - 90;
+                  accumulatedPercent += stat.percentage;
 
-                      <View style={styles.debtItemRight}>
-                        <Text style={styles.owesYouLabel}>owes you</Text>
-                        <Text style={styles.owesYouAmountText}>
-                          ₱{(Number(item.amount_owed) || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
+                  return (
+                    <Circle
+                      key={stat.categoryId}
+                      cx={center}
+                      cy={center}
+                      r={radius}
+                      stroke={stat.color}
+                      strokeWidth={strokeWidth}
+                      strokeDasharray={circumference}
+                      strokeDashoffset={strokeDashoffset}
+                      strokeLinecap="round"
+                      fill="none"
+                      rotation={currentRotation}
+                      origin={`${center}, ${center}`}
+                    />
                   );
                 })}
-            </View>
-          )}
-        </View>
+              </Svg>
 
-        {/* ========== RECENT TRANSACTIONS ========== */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Recent Transactions</Text>
-            <TouchableOpacity onPress={() => router.push('/transaction')}>
-              <Text style={styles.seeAllText}>See all</Text>
-            </TouchableOpacity>
-          </View>
-
-          {recentTransactions.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Ionicons name="receipt-outline" size={32} color={COLORS.textMuted} style={{ marginBottom: 6 }} />
-              <Text style={styles.emptyText}>No transactions yet.</Text>
-            </View>
-          ) : (
-            <View style={styles.transactionCardsContainer}>
-              {recentTransactions.map((transaction) => {
-                const transactionDate = new Date(transaction.created_at);
-                const today = new Date();
-                const yesterday = new Date(today);
-                yesterday.setDate(yesterday.getDate() - 1);
-
-                let dateLabel: string;
-                const timeString = transactionDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-
-                if (transactionDate.toDateString() === today.toDateString()) {
-                  dateLabel = `Today at ${timeString}`;
-                } else if (transactionDate.toDateString() === yesterday.toDateString()) {
-                  dateLabel = `Yesterday at ${timeString}`;
-                } else {
-                  dateLabel = transactionDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-                }
-
-                const iconName = (transaction.categories?.icon as any) || 'receipt-outline';
-                const iconColor = transaction.categories?.color || '#1F4F59';
-
-                return (
-                  <View
-                    key={transaction.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingVertical: 14,
-                      paddingHorizontal: 16,
-                      backgroundColor: '#ffffff',
-                      borderRadius: 15,
-                      gap: 10,
-                    }}
-                  >
-                    <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: '#EFF4F6', justifyContent: 'center', alignItems: 'center', flexShrink: 0 }}>
-                      <Ionicons name={iconName} size={18} color={iconColor} />
-                    </View>
-
-                    <View style={{ flex: 1, justifyContent: 'center', marginRight: 8 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }} numberOfLines={1} ellipsizeMode="tail">
-                        {transaction.description || transaction.categories?.name || 'Transaction'}
-                      </Text>
-                      <Text style={{ fontSize: 11, fontWeight: '500', color: '#64748B', marginTop: 2 }}>
-                        {dateLabel}
-                      </Text>
-                    </View>
-
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#1F4F59', flexShrink: 0 }}>
-                      -₱{Number(transaction.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      </Animated.ScrollView>
-
-      {/* ========== ALLOCATE / UPDATE BUDGET MODAL ========== */}
-      <Modal animationType="fade" transparent visible={modalVisible} onRequestClose={closeAllocateModal}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalIconWrapper}>
-                <Ionicons name="wallet-outline" size={22} color={COLORS.olive} />
-              </View>
-              <View>
-                <Text style={styles.modalTitle}>
-                  {selectedCategory?.budgetId ? 'Edit Budget' : 'Allocate Budget'}
+              <View style={styles.innerCircle}>
+                <Text style={styles.statsLabel}>Total Expenses</Text>
+                <Text style={styles.statsAmount}>
+                  ₱{overallTotalExpenses.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                 </Text>
               </View>
             </View>
 
-            <Text style={styles.modalSubText}>
-              {selectedCategory?.budgetId
-                ? `Update allocation for ${selectedCategory?.name}.`
-                : `Set budget allocation for ${selectedCategory?.name}.`}
-            </Text>
+            {/* Category Breakdown Legend List */}
+            <View style={styles.legendContainer}>
+              {categoryStats.map((stat) => (
+                <View key={stat.categoryId} style={styles.legendRow}>
+                  <View style={styles.legendLeft}>
+                    <View style={[styles.legendColorDot, { backgroundColor: stat.color }]} />
+                    <Text style={styles.legendCategoryName} numberOfLines={1}>{stat.categoryName}</Text>
+                  </View>
+                  <View style={styles.legendRight}>
+                    <Text style={styles.legendAmount}>₱{stat.total.toLocaleString('en-US')}</Text>
+                    <Text style={styles.legendPercentage}>({stat.percentage.toFixed(1)}%)</Text>
+                  </View>
+                </View>
+              ))}
+              {categoryStats.length === 0 && (
+                <Text style={styles.emptyLegendText}>No expense records found.</Text>
+              )}
+            </View>
+          </View>
+        </View>
 
-            {summary && (
-              <Text style={styles.modalHintText}>
-                Unallocated available: ₱{summary.unallocated.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-              </Text>
+        {/* DAILY SPENDING TREND LINE GRAPH */}
+        <View style={styles.sectionBlock}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Daily Spending Trend</Text>
+          </View>
+
+          <View style={styles.statsCard}>
+            <Text style={styles.lineGraphSubtitle}>Expenses incurred per day (Past 7 Days)</Text>
+            
+            <View style={styles.graphWrapper}>
+              {(() => {
+                const chartWidth = SCREEN_WIDTH - 88;
+                const chartHeight = 160;
+                const paddingLeft = 35;
+                const paddingRight = 15;
+                const paddingTop = 20;
+                const paddingBottom = 35;
+
+                const usableWidth = chartWidth - paddingLeft - paddingRight;
+                const usableHeight = chartHeight - paddingTop - paddingBottom;
+
+                const maxAmount = Math.max(...dailyTrends.map(d => d.amount), 100);
+
+                const points = dailyTrends.map((item, index) => {
+                  const x = paddingLeft + (index / (dailyTrends.length - 1 || 1)) * usableWidth;
+                  const y = paddingTop + usableHeight - (item.amount / maxAmount) * usableHeight;
+                  return { x, y, ...item };
+                });
+
+                const polylinePoints = points.map(p => `${p.x},${p.y}`).join(' ');
+
+                return (
+                  <Svg width={chartWidth} height={chartHeight}>
+                    {[0, 0.5, 1].map((ratio, idx) => {
+                      const yPos = paddingTop + usableHeight * ratio;
+                      const valLabel = Math.round(maxAmount * (1 - ratio));
+                      return (
+                        <G key={idx}>
+                          <Line
+                            x1={paddingLeft}
+                            y1={yPos}
+                            x2={chartWidth - paddingRight}
+                            y2={yPos}
+                            stroke="#E2E8F0"
+                            strokeDasharray="4,4"
+                            strokeWidth="1"
+                          />
+                          <SvgText
+                            x={paddingLeft - 15}
+                            y={yPos + 4}
+                            fontSize="9"
+                            fill={COLORS.textMuted}
+                            textAnchor="end"
+                          >
+                            {valLabel}
+                          </SvgText>
+                        </G>
+                      );
+                    })}
+
+                    <Polyline
+                      points={polylinePoints}
+                      fill="none"
+                      stroke={COLORS.deepTeal}
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+
+                    {points.map((p, idx) => (
+                      <G key={idx}>
+                        <Circle
+                          cx={p.x}
+                          cy={p.y}
+                          r={4.5}
+                          fill={COLORS.yellowGreen}
+                          stroke={COLORS.deepTeal}
+                          strokeWidth="2"
+                        />
+                        <SvgText
+                          x={p.x}
+                          y={chartHeight - 6}
+                          fontSize="9"
+                          fill={COLORS.textMuted}
+                          textAnchor="middle"
+                        >
+                          {p.displayDay}
+                        </SvgText>
+                      </G>
+                    ))}
+                  </Svg>
+                );
+              })()}
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+
+      {/* MODAL FOR PENDING DUES */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderLeft}>
+                <View>
+                  <Text style={styles.modalTitle}>Scheduled Dues</Text>
+                  <Text style={styles.modalSubtitle}>{formatReadableDate(selectedDate)}</Text>
+                </View>
+                {/* Only show the days remaining/overdue badge if there are pending dues or if not all items are paid */}
+                {filteredDues.length > 0 && filteredDues.some(d => d.status === 'pending') && (
+                  <View style={[
+                    styles.dueBadgeHome, 
+                    { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
+                  ]}>
+                    <Text style={[
+                      styles.dueBadgeTextHome, 
+                      { color: selectedDaysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
+                    ]}>
+                      {selectedDaysInfo.text}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity 
+                onPress={() => {
+                  setModalVisible(false);
+                  setSelectedDate(todayStr);
+                  setErrorMessage(null);   // <-- Add this
+                  setSuccessMessage(null); // <-- Add this
+                }} 
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            {errorMessage && (
+              <View style={styles.inlineErrorContainer}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <Text style={styles.inlineErrorText}>{errorMessage}</Text>
+              </View>
             )}
 
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>Amount</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="₱0.00"
-                placeholderTextColor="#94A3B8"
-                keyboardType="numeric"
-                value={allocateAmount}
-                onChangeText={setAllocateAmount}
-                editable={!submitting}
-                selectTextOnFocus
-              />
+            {successMessage && (
+              <View style={styles.inlineSuccessContainer}>
+                <Ionicons name="checkmark-circle-outline" size={18} color={COLORS.olive} />
+                <Text style={styles.inlineSuccessText}>{successMessage}</Text>
+              </View>
+            )}
+
+            <ScrollView contentContainerStyle={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {filteredDues.length > 0 ? (
+                filteredDues.map((due, index) => {
+                  const cardBgColor = PALETTE_LIGHT_CARDS[index % PALETTE_LIGHT_CARDS.length];
+                  const categoryIcon = due.categories?.icon || 'pricetag-outline';
+                  const isPaid = due.status === 'paid';
+
+                  return (
+                    <View
+                      key={due.id}
+                      style={[styles.reminderCardHome, { backgroundColor: cardBgColor, opacity: isPaid ? 0.75 : 1 }]}
+                    >
+                      <View style={styles.calendarBadgeHome}>
+                        <Ionicons name={categoryIcon as any} size={22} color={COLORS.deepTeal} />
+                      </View>
+
+                      <View style={styles.cardContentHome}>
+                        <Text style={[styles.reminderTitleHome, isPaid && { textDecorationLine: 'line-through', color: COLORS.textMuted }]}>
+                          {due.title}
+                        </Text>
+                        <Text style={styles.reminderSubHome}>
+                          ₱{Number(due.amount).toFixed(2)}
+                        </Text>
+                      </View>
+
+                      {/* Conditional Actions or Paid Badge */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {isPaid ? (
+                          <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(126, 160, 14, 0.15)', borderRadius: 8, marginRight: 4 }}>
+                            <Text style={{ color: COLORS.olive, fontWeight: '600', fontSize: 13 }}>Paid</Text>
+                          </View>
+                        ) : (
+                          /* Settle Button (Only shown when not paid) */
+                          <TouchableOpacity 
+                            style={[styles.deleteButtonHome, { backgroundColor: 'rgba(31, 79, 89, 0.1)' }]} 
+                            onPress={() => handleSettleReminder(due)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons name="checkmark-outline" size={18} color={COLORS.deepTeal} />
+                          </TouchableOpacity>
+                        )}
+
+                        {/* Delete Button (Always shown) */}
+                        <TouchableOpacity 
+                          style={styles.deleteButtonHome} 
+                          onPress={() => handleDeleteReminder(due.id, due.title)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })
+              ) : (
+                <View style={styles.emptyStateContainer}>
+                  <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.deepTeal} />
+                  <Text style={styles.emptyStateTitle}>All Clear!</Text>
+                  <Text style={styles.emptyStateText}>No reminders set for this date.</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+{/* CUSTOM DELETE CONFIRMATION MODAL */}
+<Modal
+  animationType="fade"
+  transparent={true}
+  visible={deleteModalVisible}
+  onRequestClose={() => !isDeleting && setDeleteModalVisible(false)}
+>
+  {/* Ensure modalOverlay has justifyContent and alignItems set to 'center' */}
+  <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
+    <View style={[styles.modalContainer2, { width: '85%', maxWidth: 340, padding: 24, alignItems: 'center', alignSelf: 'center' }]}>
+      
+      {/* Warning Icon with subtle red aura */}
+      <View style={{
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#FEF2F2',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+        borderWidth: 8,
+        borderColor: '#FEE2E2'
+      }}>
+        <Ionicons name="alert-circle-outline" size={24} color="#DC2626" />
+      </View>
+
+      {/* Title */}
+      <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 8, textAlign: 'center' }}>
+        Delete Reminder
+      </Text>
+
+      {/* Subtitle / Description */}
+      <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
+        Are you sure you want to delete "{reminderToDelete?.title}"?{'\n'}This action cannot be undone.
+      </Text>
+
+      {/* Action Buttons */}
+      <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: '#F3F4F6',
+            paddingVertical: 12,
+            borderRadius: 12,
+            alignItems: 'center',
+          }}
+          onPress={() => setDeleteModalVisible(false)}
+          disabled={isDeleting}
+        >
+          <Text style={{ color: '#374151', fontWeight: '600', fontSize: 15 }}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            flex: 1,
+            backgroundColor: '#DC2626',
+            paddingVertical: 12,
+            borderRadius: 12,
+            alignItems: 'center',
+          }}
+          onPress={confirmDeleteReminder}
+          disabled={isDeleting}
+        >
+          <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 15 }}>
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+    </View>
+  </View>
+</Modal>
+
+      {/* MODAL FOR ADDING A NEW REMINDER */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={addModalVisible}
+        onRequestClose={() => {
+          resetForm();
+          setAddModalVisible(false);
+          setErrorMessage(null);   // <-- Add this
+          setSuccessMessage(null); // <-- Add this
+        }}
+        onShow={() => fetchCategories()}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Add New Reminder</Text>
+                <Text style={styles.modalSubtitle}>Fill in reminder details</Text>
+              </View>
+              <TouchableOpacity 
+                onPress={() => {
+                  resetForm();
+                  setAddModalVisible(false);
+                }} 
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
             </View>
 
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelBtn]} onPress={closeAllocateModal} disabled={submitting}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.confirmBtn]} onPress={handleSaveBudget} disabled={submitting}>
+            {/* Inline Error Banner */}
+            {errorMessage && (
+              <View style={styles.inlineErrorContainer}>
+                <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
+                <Text style={styles.inlineErrorText}>{errorMessage}</Text>
+              </View>
+            )}
+
+            {/* Inline Success Banner */}
+            {successMessage && (
+              <View style={styles.inlineSuccessContainer}>
+                <Ionicons name="checkmark-circle-outline" size={18} color="#16A34A" />
+                <Text style={styles.inlineSuccessText}>{successMessage}</Text>
+              </View>
+            )}
+
+            <ScrollView contentContainerStyle={styles.formContainer} showsVerticalScrollIndicator={false}>
+              <Text style={styles.inputLabel}>Title</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g., Electricity Bill"
+                placeholderTextColor={COLORS.textMuted}
+                value={newTitle}
+                onChangeText={setNewTitle}
+              />
+
+              <Text style={styles.inputLabel}>Amount (₱)</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="0.00"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="numeric"
+                value={newAmount}
+                onChangeText={setNewAmount}
+              />
+
+              <Text style={styles.inputLabel}>Category</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                {categories.map((cat) => {
+                  const isSelected = newCategoryId === cat.id;
+                  return (
+                    <TouchableOpacity
+                      key={cat.id}
+                      onPress={() => setNewCategoryId(cat.id)}
+                      style={[
+                        styles.categoryChip,
+                        isSelected && { backgroundColor: COLORS.headerDark, borderColor: COLORS.headerDark }
+                      ]}
+                    >
+                      <Text style={[styles.categoryChipText, isSelected && { color: '#FFFFFF' }]}>
+                        {cat.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <Text style={styles.inputLabel}>Due Date (YYYY-MM-DD)</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="YYYY-MM-DD"
+                placeholderTextColor={COLORS.textMuted}
+                value={newDueDate}
+                onChangeText={setNewDueDate}
+              />
+
+              <TouchableOpacity 
+                style={styles.submitButton} 
+                onPress={handleCreateReminder}
+                disabled={submitting}
+              >
                 {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
+                  <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.confirmBtnText}>{selectedCategory?.budgetId ? 'Update' : 'Allocate'}</Text>
+                  <Text style={styles.submitButtonText}>Save Reminder</Text>
                 )}
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1000,20 +1257,17 @@ export default function PersonalHomeScreen() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// STYLES
-// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   mainContainer: { flex: 1, backgroundColor: COLORS.bg },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   scrollView: { flex: 1 },
-  scrollContent: { backgroundColor: COLORS.bg, paddingBottom: 100 },
+  scrollContent: { backgroundColor: COLORS.bg, paddingBottom: 50 },
 
-  // Header
   headerBackground: {
     backgroundColor: COLORS.headerDark,
     paddingHorizontal: 24,
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 22,
+    paddingBottom: 30,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     shadowColor: '#000000',
@@ -1022,6 +1276,7 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 10,
   },
+  topRowContainer: { marginBottom: 24 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   userProfileGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatarImage: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: '#FFFFFF' },
@@ -1037,15 +1292,23 @@ const styles = StyleSheet.create({
   },
   avatarInitial: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
   helloText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.3, lineHeight: 26 },
-  userNameText: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 1 },
-  topIconsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  iconCircleModern: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: COLORS.headerDarker,
+  userNameText: { fontSize: 18, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 1 },
+  
+  roleBadgeContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
+    maxWidth: 120,
+  },
+  roleBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+    letterSpacing: 0.5,
   },
 
   balanceBlock: { alignItems: 'center' },
@@ -1056,117 +1319,266 @@ const styles = StyleSheet.create({
   },
   balanceLabel: { fontSize: 12, color: COLORS.white, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
   pillTrackOuter: { width: '100%', padding: 4, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' },
-  pillTrack: { width: '100%', borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
+  pillTrack: { width: '100%', height: 46, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
   pillFill: { height: '100%', borderRadius: 26, backgroundColor: COLORS.cyan },
-  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 16 },
   pillAmountText: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6 },
   pillAmountDivider: { fontSize: 22, color: 'rgba(255,255,255,0.3)', fontWeight: '300' },
   pillAmountTotal: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
-  unallocatedChip: {
-    flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 7,
-    marginTop: 10, backgroundColor: 'rgba(255,255,255,0.09)', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
-  },
-  unallocatedDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.yellowGreen },
-  unallocatedHint: { fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: '600' },
 
-  // Sections
-  sectionBlock: { paddingHorizontal: 24, marginTop: 28 },
+  sectionBlock: { paddingHorizontal: 24, marginTop: 20 },
   sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   sectionTitle: { fontSize: 17, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
-  seeAllText: { fontSize: 13, color: COLORS.black, fontWeight: '600' },
+  seeAllText: { fontSize: 13, color: COLORS.deepTeal, fontWeight: '700' },
 
-  // Quick Budget
-  quickBudgetCard: {
-    width: QUICK_BUDGET_CARD_WIDTH,
-    padding: 16,
-    borderRadius: 20,
-    justifyContent: 'space-between',
-    minHeight: 110,
+  dateStripContainer: {
+    gap: 8,
+    paddingVertical: 4,
   },
-  quickBudgetIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
+  dateBox: {
+    width: 54,
+    height: 72,
+    borderRadius: 16,
+    backgroundColor: COLORS.card,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
   },
-  quickBudgetName: {
-    fontSize: 13,
+  dateBoxToday: {
+    backgroundColor: COLORS.headerDark,
+    borderColor: COLORS.headerDark,
+  },
+  dateBoxBorderSelected: {
+    borderColor: COLORS.headerDark,
+    backgroundColor: COLORS.card,
+  },
+  dateDayName: {
+    fontSize: 10,
     fontWeight: '700',
+    color: COLORS.textMuted,
+    marginBottom: 2,
   },
-  quickBudgetAmount: {
+  dateDayNumber: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.darkOlive,
+  },
+  dateTextToday: {
+    color: '#FFFFFF',
+  },
+  dateTextBorderSelected: {
+    color: COLORS.headerDark,
+  },
+  dotContainer: {
+    height: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  pendingDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: COLORS.olive,
+  },
+  pendingDotToday: {
+    backgroundColor: COLORS.yellowGreen,
+  },
+  pendingDotBorderSelected: {
+    backgroundColor: COLORS.deepTeal,
+  },
+
+  // Statistics Styles
+  statsCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 24,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  circleContainer: {
+    width: 180,
+    height: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  innerCircle: {
+    position: 'absolute',
+    width: 130,
+    height: 130,
+    borderRadius: 65,
+    backgroundColor: 'COLORS.card',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  statsLabel: {
     fontSize: 11,
-    opacity: 0.8,
-    marginTop: 2,
-    fontWeight: '500',
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginBottom: 2,
   },
-
-
-  debtListContainer: {
+  statsAmount: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.darkOlive,
+    letterSpacing: -0.5,
+  },
+  legendContainer: {
+    width: '100%',
+    marginTop: 16,
     gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: 16,
   },
-  debtCardItem: {
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  legendLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.card,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    
+    gap: 8,
+    flex: 1,
+    marginRight: 12,
   },
-  debtItemLeft: {
+  legendColorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  legendCategoryName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
+  legendRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendAmount: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.black,
+  },
+  legendPercentage: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  emptyLegendText: {
+    textAlign: 'center',
+    fontSize: 13,
+    color: COLORS.textMuted,
+    paddingVertical: 10,
+  },
+  lineGraphSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  graphWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 8,
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: COLORS.overlay,
+    justifyContent: 'flex-end',
+  },
+  
+  modalContainer: {
+    backgroundColor: COLORS.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 40,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+    shadowColor: COLORS.modalShadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
+modalContainer2: {
+    backgroundColor: COLORS.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 40,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+    shadowColor: COLORS.modalShadow,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  modalHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     flex: 1,
-    marginRight: 12,
+    marginRight: 10,
   },
-  friendAvatarImageRow: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-  },
-  friendAvatarFallbackRow: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  friendAvatarInitialRow: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  friendNameRowText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.black,
-    flex: 1,
-  },
-  debtItemRight: {
-    alignItems: 'flex-end',
-  },
-  owesYouLabel: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  owesYouAmountText: {
-    fontSize: 15,
+  modalTitle: {
+    fontSize: 18,
     fontWeight: '700',
-    color: '#7EA00E', // Warm amber/orange tone for owed money, or use COLORS.olive
+    color: COLORS.darkOlive,
   },
-  // Upcoming Dues
-  dueCardsContainer: { gap: 10 },
+  modalSubtitle: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBody: {
+    gap: 10,
+    paddingBottom: 20,
+  },
+
   reminderCardHome: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -1196,86 +1608,125 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  transactionCardsContainer: { gap: 10 },
-
-  emptyIconWrapper: { marginBottom: 10 },
-  addDueButton: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, paddingVertical: 10, paddingHorizontal: 20,
-    borderRadius: 24, backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7',
-  },
-  addDueButtonText: { fontSize: 13, color: COLORS.olive, fontWeight: '600' },
-  emptyBox: {
-    padding: 28, backgroundColor: COLORS.card, borderRadius: 22, alignItems: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.06, shadowRadius: 12
-  },
-  emptyText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
-
-  // Modal — same floating-card treatment (scrim tint + shadow spec) as Split
-  modalOverlay: { flex: 1, backgroundColor: COLORS.overlay, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  modalContainer: {
-    backgroundColor: '#FFFFFF', width: '100%', padding: 28, borderRadius: 28,
-    shadowColor: COLORS.modalShadow, shadowOpacity: 0.28, shadowRadius: 32, shadowOffset: { width: 0, height: 18 }, elevation: 16,
-  },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20 },
-  modalIconWrapper: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#F0FDF4', justifyContent: 'center', alignItems: 'center' },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
-  modalCategoryName: { fontSize: 13, color: COLORS.textMuted, marginTop: 2, fontWeight: '500' },
-  modalSubText: { fontSize: 14, color: COLORS.textMuted, marginBottom: 12, lineHeight: 20 },
-  modalHintText: { fontSize: 13, color: COLORS.olive, fontWeight: '700', marginBottom: 16 },
-  inputWrapper: { marginBottom: 16 },
-  inputLabel: { fontSize: 13, fontWeight: '600', color: COLORS.darkOlive, marginBottom: 8 },
-  modalInput: {
-    borderWidth: 1.5, borderColor: '#E2E8F0', padding: 16, borderRadius: 16, fontSize: 18, fontWeight: '600',
-    color: COLORS.darkOlive, backgroundColor: COLORS.bg, paddingLeft: 20,
-  },
-  modalButtonsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 8 },
-  modalButton: { paddingVertical: 14, paddingHorizontal: 24, borderRadius: 16, justifyContent: 'center', alignItems: 'center', minWidth: 100 },
-  cancelBtn: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
-  cancelBtnText: { color: '#475569', fontWeight: '600', fontSize: 14 },
-  confirmBtn: {
-    backgroundColor: COLORS.deepTeal, shadowColor: COLORS.deepTeal, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2, shadowRadius: 12, elevation: 4,
-  },
-  confirmBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-
   calendarBadgeHome: {
-  width: 48,
-  height: 48,
-  borderRadius: 10,
-  backgroundColor: 'rgba(255, 255, 255, 0.6)',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginRight: 12,
-},
-calendarMonthHome: {
-  fontSize: 10,
-  fontWeight: '700',
-  color: COLORS.deepTeal,
-  letterSpacing: 0.5,
-},
-calendarDayHome: {
-  fontSize: 16,
-  fontWeight: '800',
-  color: COLORS.deepTeal,
-  lineHeight: 18,
-},
-// Add these to your StyleSheet.create({...})
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  deleteButtonHome: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
 
-dateText: {
-  color: '#FFFFFF',
-  fontSize: 16,
-  fontWeight: 'bold',
+  // Form Styles for Add Reminder
+  formContainer: {
+    gap: 12,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+  },
+  textInput: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: COLORS.black,
+  },
+  categoryScroll: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  categoryChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    marginRight: 8,
+  },
+  categoryChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
+  submitButton: {
+    backgroundColor: COLORS.headerDark,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  submitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emptyStateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    gap: 8,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.darkOlive,
+    marginTop: 4,
+  },
+  emptyStateText: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+  },
+  inlineErrorContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#FEF2F2',
+  borderColor: '#FCA5A5',
+  borderWidth: 1,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRadius: 8,
+  marginBottom: 16,
+  gap: 8,
 },
-dateMonthText: {
-  color: '#FFFFFF',
-  fontSize: 10,
-  fontWeight: '600',
-  lineHeight: 12,
+inlineErrorText: {
+  color: '#DC2626',
+  fontSize: 13,
+  fontWeight: '500',
+  flex: 1,
 },
-dateDayText: {
-  color: '#FFFFFF',
-  fontSize: 14,
-  fontWeight: 'bold',
-  lineHeight: 16,
+inlineSuccessContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: 'rgba(126, 160, 14, 0.1)',
+  borderColor: 'rgba(126, 160, 14, 0.3)',
+  borderWidth: 1,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  borderRadius: 8,
+  marginBottom: 16,
+  gap: 8,
+},
+inlineSuccessText: {
+  color: COLORS.olive,
+  fontSize: 13,
+  fontWeight: '500',
+  flex: 1,
 },
 });
