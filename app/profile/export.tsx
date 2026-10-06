@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '../(spenderTabs)/profile';
 import { supabase } from '../../lib/supabase';
 
@@ -27,6 +27,9 @@ export default function ExportScreen() {
   const [incomePeriods, setIncomePeriods] = useState<any[]>([]);
   const [selectedIncomeId, setSelectedIncomeId] = useState<string | null>(null);
 
+  // Modern Inline Alert State: { type: 'error' | 'success' | 'info', message: string } | null
+  const [inlineAlert, setInlineAlert] = useState<{ type: 'error' | 'success' | 'info'; message: string } | null>(null);
+
   useEffect(() => {
     fetchUserRoleAndOptions();
   }, []);
@@ -35,6 +38,7 @@ export default function ExportScreen() {
   const fetchUserRoleAndOptions = async () => {
     try {
       setLoadingMeta(true);
+      setInlineAlert(null);
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) throw new Error("No authenticated user found.");
       
@@ -97,7 +101,7 @@ export default function ExportScreen() {
       }
     } catch (error: any) {
       console.error("Error fetching export metadata:", error.message);
-      Alert.alert("Error", "Failed to load export options based on your role.");
+      setInlineAlert({ type: 'error', message: "Failed to load export options based on your role." });
     } finally {
       setLoadingMeta(false);
     }
@@ -131,6 +135,7 @@ export default function ExportScreen() {
   const handleExport = async () => {
     if (!userId) return;
     setIsExporting(true);
+    setInlineAlert(null);
 
     try {
       let csvContent = "";
@@ -168,12 +173,12 @@ export default function ExportScreen() {
 
       if (userRole === 'Sponsor') {
         if (!selectedSpenderId) {
-          Alert.alert("Selection Required", "Please select a spender first.");
+          setInlineAlert({ type: 'error', message: "Please select a spender first before exporting." });
           setIsExporting(false);
           return;
         }
         if (!selectedAllowanceId) {
-          Alert.alert("Selection Required", "Please select an allowance period to export.");
+          setInlineAlert({ type: 'error', message: "Please select an allowance period to export." });
           setIsExporting(false);
           return;
         }
@@ -210,7 +215,7 @@ export default function ExportScreen() {
 
       } else if (userRole === 'Spender') {
         if (!selectedAllowanceId) {
-          Alert.alert("Selection Required", "Please select an allowance period to export.");
+          setInlineAlert({ type: 'error', message: "Please select an allowance period to export." });
           setIsExporting(false);
           return;
         }
@@ -247,7 +252,7 @@ export default function ExportScreen() {
 
       } else {
         if (!selectedIncomeId) {
-          Alert.alert("Selection Required", "Please select an income period to export.");
+          setInlineAlert({ type: 'error', message: "Please select an income period to export." });
           setIsExporting(false);
           return;
         }
@@ -292,8 +297,9 @@ export default function ExportScreen() {
 
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(file.uri);
+        setInlineAlert({ type: 'success', message: "File generated successfully!" });
       } else {
-        Alert.alert("Success", `File generated successfully at: ${file.uri}`);
+        setInlineAlert({ type: 'success', message: `File generated successfully at: ${file.uri}` });
       }
 
       // Insert log into the Supabase 'logs' table
@@ -306,7 +312,7 @@ export default function ExportScreen() {
 
     } catch (error: any) {
       console.error("Export error:", error.message);
-      Alert.alert("Export Failed", error.message || "An error occurred while generating your report.");
+      setInlineAlert({ type: 'error', message: error.message || "An error occurred while generating your report." });
     } finally {
       setIsExporting(false);
     }
@@ -342,6 +348,30 @@ export default function ExportScreen() {
           <View style={styles.roleBadge}>
             <Text style={styles.roleBadgeText}>Role: {userRole}</Text>
           </View>
+
+          {/* INLINE ALERT BANNER */}
+          {inlineAlert && (
+            <View style={[
+              styles.inlineAlertContainer, 
+              inlineAlert.type === 'error' ? styles.alertError : styles.alertSuccess
+            ]}>
+              <Ionicons 
+                name={inlineAlert.type === 'error' ? "alert-circle-outline" : "checkmark-circle-outline"} 
+                size={18} 
+                color={inlineAlert.type === 'error' ? "#DC2626" : "#059669"} 
+                style={{ marginRight: 8, marginTop: 1 }}
+              />
+              <Text style={[
+                styles.inlineAlertText,
+                inlineAlert.type === 'error' ? styles.alertTextError : styles.alertTextSuccess
+              ]}>
+                {inlineAlert.message}
+              </Text>
+              <TouchableOpacity onPress={() => setInlineAlert(null)} style={{ marginLeft: 8 }}>
+                <Ionicons name="close" size={16} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* SPONSOR FLOW: Select Spender First */}
           {userRole === 'Sponsor' && (
@@ -529,6 +559,38 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   roleBadgeText: { fontSize: 12, fontWeight: '600', color: '#475569' },
+  
+  /* Modern Inline Alert Styles */
+  inlineAlertContainer: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+  },
+  alertError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+  },
+  alertSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  inlineAlertText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  alertTextError: {
+    color: '#991B1B',
+  },
+  alertTextSuccess: {
+    color: '#065F46',
+  },
+
   sectionContainer: { width: '100%', marginBottom: 20 },
   label: { fontSize: 14, fontWeight: '600', color: '#334155', marginBottom: 10 },
   noDataText: { fontSize: 13, color: '#94A3B8', fontStyle: 'italic', marginBottom: 12 },

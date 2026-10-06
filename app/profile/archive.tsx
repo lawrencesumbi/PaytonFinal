@@ -22,10 +22,21 @@ export default function ArchiveScreen() {
   // Fullscreen photo modal state
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
-  // Modern Custom Action Dialog State
+  // Modern Inline Alert Message State
+  const [alertBanner, setAlertBanner] = useState<{
+    visible: boolean;
+    type: 'success' | 'error' | 'info' | 'warning';
+    message: string;
+  }>({
+    visible: false,
+    type: 'info',
+    message: '',
+  });
+
+  // Modern Custom Action Dialog State (Now used strictly for destructive/restoration confirmation choices)
   const [dialogConfig, setDialogConfig] = useState<{
     visible: boolean;
-    type: 'delete' | 'unarchive' | 'error';
+    type: 'delete' | 'unarchive';
     title: string;
     message: string;
     itemToProcess: any | null;
@@ -40,6 +51,15 @@ export default function ArchiveScreen() {
   useEffect(() => {
     fetchArchivedData();
   }, []);
+
+  const showAlertBanner = (type: 'success' | 'error' | 'info' | 'warning', message: string, autoDismiss = true) => {
+    setAlertBanner({ visible: true, type, message });
+    if (autoDismiss) {
+      setTimeout(() => {
+        setAlertBanner((prev) => ({ ...prev, visible: false }));
+      }, 4000);
+    }
+  };
 
   const fetchArchivedData = async () => {
     try {
@@ -81,6 +101,7 @@ export default function ArchiveScreen() {
       }
     } catch (err) {
       console.error('Error fetching archive:', err);
+      showAlertBanner('error', 'Failed to load archive data.');
     } finally {
       setLoading(false);
     }
@@ -114,6 +135,7 @@ export default function ArchiveScreen() {
       setExpenses(data || []);
     } else {
       console.error('Error fetching expenses with category:', error.message);
+      showAlertBanner('error', 'Could not load associated expenses.');
     }
     setLoadingExpenses(false);
   };
@@ -159,9 +181,8 @@ export default function ArchiveScreen() {
           .eq('id', itemToProcess.id);
 
         if (error) {
-          showErrorDialog('Deletion Failed', error.message);
+          showAlertBanner('error', error.message);
         } else {
-          // Insert log for deletion
           if (currentUserId) {
             await supabase.from('logs').insert({
               user_id: currentUserId,
@@ -171,6 +192,7 @@ export default function ArchiveScreen() {
 
           setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
           closeDialog();
+          showAlertBanner('success', `Successfully deleted "${itemName}".`);
         }
       } else if (type === 'unarchive') {
         const { error } = await supabase
@@ -179,9 +201,8 @@ export default function ArchiveScreen() {
           .eq('id', itemToProcess.id);
 
         if (error) {
-          showErrorDialog('Restoration Failed', error.message);
+          showAlertBanner('error', error.message);
         } else {
-          // Insert log for restoration / unarchiving
           if (currentUserId) {
             await supabase.from('logs').insert({
               user_id: currentUserId,
@@ -191,22 +212,13 @@ export default function ArchiveScreen() {
 
           setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
           closeDialog();
+          showAlertBanner('success', `Successfully restored "${itemName}" to active budgets.`);
         }
       }
     } catch (err) {
       console.error('Error executing dialog action:', err);
-      showErrorDialog('Unexpected Error', 'An unexpected error occurred while processing your request.');
+      showAlertBanner('error', 'An unexpected error occurred while processing your request.');
     }
-  };
-
-  const showErrorDialog = (title: string, message: string) => {
-    setDialogConfig({
-      visible: true,
-      type: 'error',
-      title,
-      message,
-      itemToProcess: null,
-    });
   };
 
   const closeDialog = () => {
@@ -305,6 +317,21 @@ export default function ArchiveScreen() {
     return desc.includes(query) || categoryName.includes(query);
   });
 
+  const getAlertStyles = (type: string) => {
+    switch (type) {
+      case 'success':
+        return { bg: '#ecfdf5', border: '#10b981', text: '#065f46', icon: 'checkmark-circle-outline' };
+      case 'error':
+        return { bg: '#fef2f2', border: '#ef4444', text: '#991b1b', icon: 'alert-circle-outline' };
+      case 'warning':
+        return { bg: '#fffbeb', border: '#f59e0b', text: '#92400e', icon: 'warning-outline' };
+      default:
+        return { bg: '#f0fdf4', border: '#3b82f6', text: '#1e40af', icon: 'information-circle-outline' };
+    }
+  };
+
+  const currentAlertStyle = getAlertStyles(alertBanner.type);
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
@@ -321,6 +348,17 @@ export default function ArchiveScreen() {
         </Text>
         <View style={{ width: 20 }} />
       </View>
+
+      {/* Modern Inline Alert Banner */}
+      {alertBanner.visible && (
+        <View style={[styles.inlineAlertContainer, { backgroundColor: currentAlertStyle.bg, borderColor: currentAlertStyle.border }]}>
+          <Ionicons name={currentAlertStyle.icon as any} size={18} color={currentAlertStyle.border} style={{ marginRight: 8 }} />
+          <Text style={[styles.inlineAlertText, { color: currentAlertStyle.text }]}>{alertBanner.message}</Text>
+          <TouchableOpacity onPress={() => setAlertBanner((prev) => ({ ...prev, visible: false }))} style={{ marginLeft: 'auto', padding: 2 }}>
+            <Ionicons name="close" size={16} color={currentAlertStyle.text} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.centerContainer}>
@@ -506,21 +544,18 @@ export default function ArchiveScreen() {
         />
       )}
 
-      {/* Modern Custom Alert Dialog Modal */}
+      {/* Confirmation Modal (kept solely for critical destructive/restoration action confirmations) */}
       <Modal visible={dialogConfig.visible} transparent={true} animationType="fade">
         <View style={styles.dialogOverlay}>
           <View style={styles.dialogContainer}>
             <View style={[
               styles.dialogIconContainer, 
-              { backgroundColor: dialogConfig.type === 'delete' || dialogConfig.type === 'error' ? '#fef2f2' : '#e6f4f1' }
+              { backgroundColor: dialogConfig.type === 'delete' ? '#fef2f2' : '#e6f4f1' }
             ]}>
               <Ionicons 
-                name={
-                  dialogConfig.type === 'delete' ? 'trash-outline' : 
-                  dialogConfig.type === 'unarchive' ? 'arrow-undo-outline' : 'alert-circle-outline'
-                } 
+                name={dialogConfig.type === 'delete' ? 'trash-outline' : 'arrow-undo-outline'} 
                 size={24} 
-                color={dialogConfig.type === 'delete' || dialogConfig.type === 'error' ? '#ef4444' : '#0f766e'} 
+                color={dialogConfig.type === 'delete' ? '#ef4444' : '#0f766e'} 
               />
             </View>
 
@@ -528,28 +563,20 @@ export default function ArchiveScreen() {
             <Text style={styles.dialogMessage}>{dialogConfig.message}</Text>
 
             <View style={styles.dialogButtonRow}>
-              {dialogConfig.type !== 'error' ? (
-                <>
-                  <TouchableOpacity style={styles.dialogCancelButton} onPress={closeDialog}>
-                    <Text style={styles.dialogCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[
-                      styles.dialogConfirmButton, 
-                      { backgroundColor: dialogConfig.type === 'delete' ? '#ef4444' : '#0f766e' }
-                    ]} 
-                    onPress={handleExecuteDialogAction}
-                  >
-                    <Text style={styles.dialogConfirmText}>
-                      {dialogConfig.type === 'delete' ? 'Delete' : 'Restore'}
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity style={[styles.dialogConfirmButton, { backgroundColor: '#173D45', flex: 1 }]} onPress={closeDialog}>
-                  <Text style={styles.dialogConfirmText}>Okay</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity style={styles.dialogCancelButton} onPress={closeDialog}>
+                <Text style={styles.dialogCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[
+                  styles.dialogConfirmButton, 
+                  { backgroundColor: dialogConfig.type === 'delete' ? '#ef4444' : '#0f766e' }
+                ]} 
+                onPress={handleExecuteDialogAction}
+              >
+                <Text style={styles.dialogConfirmText}>
+                  {dialogConfig.type === 'delete' ? 'Delete' : 'Restore'}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -592,6 +619,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.headerDark,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
+  },
+  inlineAlertContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  inlineAlertText: {
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
   backBtnTouchable: { 
     width: 32,
@@ -883,7 +925,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#ef4444',
   },
-  // Custom Dialog Modal Styles
+  // Custom Dialog Modal Styles (Reserved strictly for confirmations)
   dialogOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
