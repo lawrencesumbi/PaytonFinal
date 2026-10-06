@@ -691,13 +691,24 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
           </View>
 
           <View style={styles.balanceAmountRow}>
-            <Text style={styles.pillAmountText}>
-              ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
-            </Text>
-            <Text style={styles.pillAmountDivider}>/</Text>
-            <Text style={styles.pillAmountTotal}>
-              ₱{summary ? summary.totalIncome.toLocaleString('en-US') : '0'}
-            </Text>
+            <View style={styles.balanceAmountLeft}>
+              <Text style={styles.pillAmountText}>
+                ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
+              </Text>
+              <Text style={styles.pillAmountDivider}>/</Text>
+              <Text style={styles.pillAmountTotal}>
+                ₱{summary ? summary.totalIncome.toLocaleString('en-US') : '0'}
+              </Text>
+            </View>
+
+            {/* Income Icon Button */}
+            <TouchableOpacity 
+              style={styles.incomeIconButton} 
+              onPress={() => router.push('/income')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="add-circle-outline" size={14} color={COLORS.deepTeal} />
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -1321,7 +1332,7 @@ const styles = StyleSheet.create({
   pillTrackOuter: { width: '100%', padding: 4, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' },
   pillTrack: { width: '100%', height: 46, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
   pillFill: { height: '100%', borderRadius: 26, backgroundColor: COLORS.cyan },
-  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 16 },
+  balanceAmountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 16 },
   pillAmountText: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6 },
   pillAmountDivider: { fontSize: 22, color: 'rgba(255,255,255,0.3)', fontWeight: '300' },
   pillAmountTotal: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
@@ -1728,5 +1739,22 @@ inlineSuccessText: {
   fontSize: 13,
   fontWeight: '500',
   flex: 1,
+},
+balanceAmountLeft: {
+  flexDirection: 'row', alignItems: 'baseline', gap: 8,
+},
+incomeIconButton: {
+  backgroundColor: COLORS.yellowGreen, // Solid theme color for the button background
+  width: 20,
+  height: 20,
+  borderRadius: 14,             // Makes it a perfect circle
+  justifyContent: 'center',
+  alignItems: 'center',
+  shadowColor: '#000',          // Optional subtle shadow
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.2,
+  shadowRadius: 1.41,
+  marginLeft: 8,
+  marginBottom: 20,
 },
 });

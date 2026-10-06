@@ -230,7 +230,7 @@ export default function PersonalLayout() {
 
         {/* Hidden routes */}
         <Tabs.Screen name="profile" options={{ href: null }} />
-        
+        <Tabs.Screen name="income" options={{ href: null }} />
       </Tabs>
 
 
