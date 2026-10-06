@@ -56,6 +56,9 @@ function TransactionsScreenContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
 
+  // Global Inline Success Alert State (for screen-level notices like deletion)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
   // Add/Edit Expense Modal States
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [amountInput, setAmountInput] = useState('');
@@ -295,7 +298,6 @@ function TransactionsScreenContent() {
 
         if (error) throw error;
 
-        // Log the successful expense update matching your logs table schema
         await supabase.from('logs').insert({
           user_id: user.id,
           details: `updated expense "${descriptionInput.trim()}" (${numericAmount}).`,
@@ -312,7 +314,6 @@ function TransactionsScreenContent() {
 
         if (error) throw error;
 
-        // Log the successful expense creation matching your logs table schema
         await supabase.from('logs').insert({
           user_id: user.id,
           details: `added expense "${descriptionInput.trim()}" (${numericAmount}).`,
@@ -350,7 +351,6 @@ function TransactionsScreenContent() {
 
       if (error) throw error;
 
-      // Fetch current user and log the deletion action matching your logs table schema
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         await supabase.from('logs').insert({
@@ -361,6 +361,11 @@ function TransactionsScreenContent() {
 
       setIsDeleteModalVisible(false);
       setTransactionToDelete(null);
+      
+      // Trigger Modern Inline Success Alert on screen
+      setSuccessMessage('Transaction deleted successfully!');
+      setTimeout(() => setSuccessMessage(null), 3500);
+
       fetchTransactions();
     } catch (err: any) {
       console.error('Error deleting expense:', err.message);
@@ -462,6 +467,17 @@ function TransactionsScreenContent() {
         }
       >
         <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
+          {/* MODERN INLINE SUCCESS ALERT BANNER */}
+          {successMessage && (
+            <View style={styles.screenInlineSuccessContainer}>
+              <Ionicons name="checkmark-circle" size={18} color="#16A34A" style={{ marginRight: 8 }} />
+              <Text style={styles.screenInlineSuccessText}>{successMessage}</Text>
+              <TouchableOpacity onPress={() => setSuccessMessage(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={16} color="#16A34A" />
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.searchContainer}>
             <View style={styles.searchWrapper}>
               <Ionicons name="search-outline" size={18} color="#94A3B8" style={{ marginRight: 8 }} />
@@ -739,6 +755,11 @@ const styles = StyleSheet.create({
   searchContainer: { paddingVertical: 4, marginTop: 4 },
   searchWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, paddingHorizontal: 12, height: 42 },
   searchInput: { flex: 1, fontSize: 13, color: '#0F172A', paddingVertical: 0 },
+  
+  // Modern Screen-Level Inline Success Banner Styles
+  screenInlineSuccessContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#86EFAC', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, marginBottom: 12 },
+  screenInlineSuccessText: { flex: 1, color: '#16A34A', fontSize: 13, fontWeight: '600' },
+
   emptyTransactions: { alignItems: 'center', justifyContent: 'center', paddingVertical: 50, paddingHorizontal: 36, gap: 8 },
   emptyIconContainer: { width: 56, height: 56, borderRadius: 14, backgroundColor: '#EFF4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   emptyText: { fontSize: 15, fontWeight: '700', color: '#2D3748', letterSpacing: -0.3 },

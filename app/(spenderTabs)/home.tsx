@@ -448,6 +448,25 @@ const handleCreateReminder = async () => {
     return;
   }
 
+  
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(newDueDate)) {
+    setErrorMessage('Invalid due date. Please use YYYY-MM-DD.');
+    return;
+  }
+
+  // 3. Optional: Validate if it's a real calendar date (e.g., catching "2026-02-31")
+  const parsedDate = new Date(newDueDate);
+  const timestamp = parsedDate.getTime();
+  
+  if (
+    isNaN(timestamp) || 
+    parsedDate.toISOString().slice(0, 10) !== newDueDate
+  ) {
+    setErrorMessage('Please enter a valid calendar date (YYYY-MM-DD).');
+    return;
+  }
+
   try {
     setSubmitting(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -519,10 +538,23 @@ const confirmDeleteReminder = async () => {
     }
 
     fetchDashboardData();
+    
+    // 1. Clear any old errors and set your success message
+    setErrorMessage(null);
+    setSuccessMessage(`Successfully deleted "${reminderToDelete.title || 'reminder'}"`);
+
+    // 2. Close the delete confirmation modal and clear temporary deletion state
     setDeleteModalVisible(false);
     setReminderToDelete(null);
+
+    // 3. Optional: Automatically clear the success banner after 4 seconds
+    setTimeout(() => {
+      setSuccessMessage(null);
+    }, 4000);
+
   } catch (error: unknown) {
     console.error('Error deleting reminder:', extractErrorMessage(error));
+    setSuccessMessage(null); // Clear any old success message on failure
     setErrorMessage('Failed to delete reminder.');
   } finally {
     setIsDeleting(false);
