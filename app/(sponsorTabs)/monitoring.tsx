@@ -76,6 +76,16 @@ export default function MonitoringScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
+  // Success Banner State
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const triggerSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    setTimeout(() => {
+      setSuccessMessage(null);
+    }, 3500);
+  };
+
   // Custom Alert State
   const [alertConfig, setAlertConfig] = useState<CustomAlertConfig>({
     visible: false,
@@ -148,7 +158,7 @@ export default function MonitoringScreen() {
     }, [spenderId])
   );
 
-const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
+  const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
     setAlertConfig({
       visible: true,
       title: 'Archive Allowance',
@@ -179,6 +189,7 @@ const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
           }
 
           fetchMonitoringData();
+          triggerSuccess(`Allowance "${allowanceName}" archived successfully.`);
         }
       },
     });
@@ -212,6 +223,7 @@ const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
           }
 
           fetchMonitoringData();
+          triggerSuccess(`Allowance "${allowanceName}" permanently deleted.`);
         }
       },
     });
@@ -286,6 +298,14 @@ const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
         <Text style={styles.headerTitle} numberOfLines={1}>{spenderName}</Text>
         <View style={{ width: 36 }} />
       </View>
+
+      {/* Modern Inline Success Banner */}
+      {successMessage ? (
+        <View style={styles.successBanner}>
+          <Ionicons name="checkmark-circle" size={18} color={COLORS.successGreen} />
+          <Text style={styles.successBannerText}>{successMessage}</Text>
+        </View>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
@@ -548,6 +568,31 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     letterSpacing: 0.3,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 4,
+    gap: 8,
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  successBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#166534',
+    flex: 1,
   },
   contentContainer: {
     flex: 1,

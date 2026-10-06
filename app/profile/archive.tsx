@@ -159,7 +159,7 @@ export default function ArchiveScreen() {
       visible: true,
       type: 'unarchive',
       title: 'Restore Allowance',
-      message: `Do you want to restore "${item.allowance_name}" back to active budgets?`,
+      message: `Do you want to restore "${item.allowance_name}" back to active records?`,
       itemToProcess: item,
     });
   };
@@ -212,7 +212,7 @@ export default function ArchiveScreen() {
 
           setInactiveItems((prev) => prev.filter((i) => i.id !== itemToProcess.id));
           closeDialog();
-          showAlertBanner('success', `Successfully restored "${itemName}" to active budgets.`);
+          showAlertBanner('success', `Successfully restored "${itemName}" to active records.`);
         }
       }
     } catch (err) {
