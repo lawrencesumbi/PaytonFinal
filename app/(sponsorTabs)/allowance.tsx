@@ -1088,6 +1088,7 @@ const styles = StyleSheet.create({
   },
   dayCellSelected: {
     backgroundColor: '#00f7ff',
+    borderRadius: 30,
   },
   dayCellInRange: {
     backgroundColor: '#bafdff',
