@@ -81,14 +81,14 @@ export default function ArchiveScreen() {
       const today = new Date().toISOString().split('T')[0];
 
       if (profile.role === 'Personal') {
-        const { data: incomes, error } = await supabase
+        const { data: income, error } = await supabase
           .from('income')
           .select('*')
           .eq('user_id', user.id)
-          .lt('end_date', today)
+          .eq('is_archived', true)
           .order('end_date', { ascending: false });
 
-        if (!error) setInactiveItems(incomes || []);
+        if (!error) setInactiveItems(income || []);
       } else {
         const { data: allowances, error } = await supabase
           .from('allowances')
@@ -152,14 +152,12 @@ export default function ArchiveScreen() {
   };
 
   const confirmUnarchiveItem = (item: any) => {
-    const isIncome = !!item.source_name;
-    if (isIncome) return;
-
+    const itemName = item.allowance_name || item.source_name;
     setDialogConfig({
       visible: true,
       type: 'unarchive',
-      title: 'Restore Allowance',
-      message: `Do you want to restore "${item.allowance_name}" back to active records?`,
+      title: 'Restore Record',
+      message: `Do you want to restore "${itemName}" back to active records?`,
       itemToProcess: item,
     });
   };
@@ -170,11 +168,10 @@ export default function ArchiveScreen() {
 
     try {
       const itemName = itemToProcess.allowance_name || itemToProcess.source_name;
+      const isIncome = !!itemToProcess.source_name;
+      const tableName = isIncome ? 'income' : 'allowances';
 
       if (type === 'delete') {
-        const isIncome = !!itemToProcess.source_name;
-        const tableName = isIncome ? 'income' : 'allowances';
-
         const { error } = await supabase
           .from(tableName)
           .delete()
@@ -196,7 +193,7 @@ export default function ArchiveScreen() {
         }
       } else if (type === 'unarchive') {
         const { error } = await supabase
-          .from('allowances')
+          .from(tableName)
           .update({ is_archived: false })
           .eq('id', itemToProcess.id);
 
@@ -521,7 +518,7 @@ export default function ArchiveScreen() {
 
               {/* Action Buttons Row */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {!item.source_name && userRole !== 'Spender' && (
+                {userRole !== 'Spender' && (
                   <TouchableOpacity 
                     style={styles.unarchiveBtn} 
                     onPress={() => confirmUnarchiveItem(item)}
@@ -544,7 +541,7 @@ export default function ArchiveScreen() {
         />
       )}
 
-      {/* Confirmation Modal (kept solely for critical destructive/restoration action confirmations) */}
+      {/* Confirmation Modal */}
       <Modal visible={dialogConfig.visible} transparent={true} animationType="fade">
         <View style={styles.dialogOverlay}>
           <View style={styles.dialogContainer}>

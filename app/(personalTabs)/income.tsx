@@ -3,18 +3,18 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    StatusBar as NativeStatusBar,
-    Platform,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  StatusBar as NativeStatusBar,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
@@ -27,6 +27,7 @@ interface IncomeItem {
   start_date: string;
   end_date: string;
   received_at: string;
+  is_archived?: boolean;
 }
 
 export default function IncomeScreen() {
@@ -35,9 +36,8 @@ export default function IncomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [incomes, setIncomes] = useState<IncomeItem[]>([]);
 
-  // Modal State
+  // Modal State (Edit removed)
   const [modalVisible, setModalVisible] = useState(false);
-  const [editingIncome, setEditingIncome] = useState<IncomeItem | null>(null);
   const [sourceName, setSourceName] = useState('');
   const [amount, setAmount] = useState('');
   const [startDate, setStartDate] = useState('');
@@ -73,20 +73,10 @@ export default function IncomeScreen() {
     const d = new Date();
     const todayStr = d.toISOString().split('T')[0];
 
-    setEditingIncome(null);
     setSourceName('');
     setAmount('');
     setStartDate(todayStr);
     setEndDate('');
-    setModalVisible(true);
-  };
-
-  const handleOpenEditModal = (item: IncomeItem) => {
-    setEditingIncome(item);
-    setSourceName(item.source_name);
-    setAmount(String(item.amount));
-    setStartDate(item.start_date);
-    setEndDate(item.end_date);
     setModalVisible(true);
   };
 
@@ -114,11 +104,9 @@ export default function IncomeScreen() {
       return;
     }
 
-    // Check for Overlapping Dates with existing incomes
-    const hasOverlap = incomes.some((item) => {
-      if (editingIncome && item.id === editingIncome.id) {
-        return false;
-      }
+    // Check for Overlapping Dates with existing non-archived incomes
+    const activeOrPendingIncomes = incomes.filter(item => !item.is_archived);
+    const hasOverlap = activeOrPendingIncomes.some((item) => {
       return startDate <= item.end_date && endDate >= item.start_date;
     });
 
@@ -141,19 +129,12 @@ export default function IncomeScreen() {
         amount: parsedAmount,
         start_date: startDate,
         end_date: endDate,
-        received_at: editingIncome ? editingIncome.received_at : new Date().toISOString(),
+        received_at: new Date().toISOString(),
+        is_archived: false,
       };
 
-      if (editingIncome) {
-        const { error } = await supabase
-          .from('income')
-          .update(payload)
-          .eq('id', editingIncome.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('income').insert([payload]);
-        if (error) throw error;
-      }
+      const { error } = await supabase.from('income').insert([payload]);
+      if (error) throw error;
 
       setModalVisible(false);
       fetchIncomes();
@@ -162,6 +143,31 @@ export default function IncomeScreen() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleArchiveIncome = (id: string) => {
+    Alert.alert(
+      'Archive Income',
+      'Are you sure you want to archive this income record?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Archive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('income')
+                .update({ is_archived: true })
+                .eq('id', id);
+              if (error) throw error;
+              fetchIncomes();
+            } catch (err: any) {
+              Alert.alert('Error', err.message);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleDeleteIncome = (id: string) => {
@@ -194,7 +200,7 @@ export default function IncomeScreen() {
     return start <= today && end >= today;
   };
 
-  const activeIncomes = incomes.filter((i) => isIncomeActive(i.start_date, i.end_date));
+  const activeIncomes = incomes.filter((i) => !i.is_archived && isIncomeActive(i.start_date, i.end_date));
 
   if (loading) {
     return (
@@ -248,7 +254,7 @@ export default function IncomeScreen() {
               <IncomeCard
                 key={item.id}
                 item={item}
-                onEdit={() => handleOpenEditModal(item)}
+                onArchive={() => handleArchiveIncome(item.id)}
                 onDelete={() => handleDeleteIncome(item.id)}
               />
             ))
@@ -256,11 +262,11 @@ export default function IncomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Add / Edit Modal */}
+      {/* Add Modal Only */}
       <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>{editingIncome ? 'Edit Income' : 'Add Income'}</Text>
+            <Text style={styles.modalTitle}>Add Income</Text>
 
             <TextInput
               style={styles.modalInput}
@@ -310,7 +316,7 @@ export default function IncomeScreen() {
                 {submitting ? (
                   <ActivityIndicator color="#FFFFFF" size="small" />
                 ) : (
-                  <Text style={styles.confirmBtnText}>{editingIncome ? 'Update' : 'Save'}</Text>
+                  <Text style={styles.confirmBtnText}>Save</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -321,8 +327,7 @@ export default function IncomeScreen() {
   );
 }
 
-// Fixed Card Component with side-by-side header & properly constrained buttons
-function IncomeCard({ item, onEdit, onDelete }: { item: IncomeItem; onEdit: () => void; onDelete: () => void }) {
+function IncomeCard({ item, onArchive, onDelete }: { item: IncomeItem; onArchive: () => void; onDelete: () => void }) {
   return (
     <View style={styles.incomeCard}>
       {/* Top Row: Icon + Title/Badge & Amount */}
@@ -355,9 +360,9 @@ function IncomeCard({ item, onEdit, onDelete }: { item: IncomeItem; onEdit: () =
         </View>
 
         <View style={styles.actionButtonsRow}>
-          <TouchableOpacity onPress={onEdit} style={styles.actionButton}>
-            <Ionicons name="pencil-outline" size={14} color="#334155" />
-            <Text style={styles.actionButtonText}>Edit</Text>
+          <TouchableOpacity onPress={onArchive} style={[styles.actionButton, styles.archiveButtonBorder]}>
+            <Ionicons name="archive-outline" size={14} color="#D97706" />
+            <Text style={[styles.actionButtonText, styles.archiveButtonText]}>Archive</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={onDelete} style={[styles.actionButton, styles.deleteButtonBorder]}>
             <Ionicons name="trash-outline" size={14} color="#E11D48" />
@@ -537,6 +542,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#334155',
+  },
+  archiveButtonBorder: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FEF3C7',
+  },
+  archiveButtonText: {
+    color: '#D97706',
   },
   deleteButtonBorder: {
     backgroundColor: '#FFF5F5',
