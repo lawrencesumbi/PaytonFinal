@@ -206,76 +206,72 @@ export default function ScanReceiptScreen() {
 
                   let targetAllowanceId = paramAllowanceId;
 
-                  // 1. Check if allowance exists for the user if not provided in params
-                  if (!targetAllowanceId) {
-                    const { data: latestAllowance } = await supabase
-                      .from('allowances')
-                      .select('id')
-                      .eq('spender_id', user.id)
-                      .order('received_at', { ascending: false })
-                      .limit(1)
-                      .single();
+                  // 1. Get the latest allowance ID for inserting the expense
+                  const { data: latestAllowance, error: latestError } = await supabase
+                    .from('allowances')
+                    .select('id')
+                    .eq('spender_id', user.id)
+                    .order('received_at', { ascending: false })
+                    .limit(1)
+                    .single();
 
-                    if (!latestAllowance) {
-                      setAlertConfig({
-                        visible: true,
-                        title: "No Allowance Found",
-                        message: "No active allowance was detected for your account. Please set up an allowance before logging expenses.",
-                        type: 'warning',
-                        buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
-                      });
-                      setFrozenPhoto(null);
-                      return;
-                    }
-                    targetAllowanceId = latestAllowance.id;
-                  } else {
-                    // Verify the provided paramAllowanceId actually exists
+                  if (latestError || !latestAllowance) {
+                    setAlertConfig({
+                      visible: true,
+                      title: "No Allowance Found",
+                      message: "No active allowance was detected for your account. Please set up an allowance before logging expenses.",
+                      type: 'warning',
+                      buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+                    });
+                    setFrozenPhoto(null);
+                    return;
+                  }
+
+                  targetAllowanceId = latestAllowance.id;
+
+                  // If a specific allowance ID was passed in params, verify it exists
+                  if (paramAllowanceId) {
                     const { data: specificAllowance } = await supabase
                       .from('allowances')
                       .select('id')
-                      .eq('id', targetAllowanceId)
+                      .eq('id', paramAllowanceId)
                       .single();
 
-                    if (!specificAllowance) {
-                      setAlertConfig({
-                        visible: true,
-                        title: "No Allowance Found",
-                        message: "No allowance was detected for this transaction.",
-                        type: 'warning',
-                        buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
-                      });
-                      setFrozenPhoto(null);
-                      return;
+                    if (specificAllowance) {
+                      targetAllowanceId = specificAllowance.id;
                     }
                   }
 
-                  // 2. Calculate remaining allowance amount
-                  const { data: allowanceDetails, error: allowanceError } = await supabase
+                  // 2. Calculate total available allowance across ALL allowances for this spender
+                  const { data: allAllowances, error: allowancesError } = await supabase
                     .from('allowances')
-                    .select('amount')
-                    .eq('id', targetAllowanceId)
-                    .single();
+                    .select('id, amount')
+                    .eq('spender_id', user.id);
 
-                  if (allowanceError || !allowanceDetails) {
+                  if (allowancesError || !allAllowances || allAllowances.length === 0) {
                     throw new Error("Could not retrieve allowance details.");
                   }
 
+                  const totalAllowanceAmount = allAllowances.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+                  const allowanceIds = allAllowances.map(item => item.id);
+
+                  // 3. Calculate total spent across ALL allowances
                   const { data: spentData, error: spentError } = await supabase
                     .from('expenses')
                     .select('amount')
-                    .eq('allowance_id', targetAllowanceId);
+                    .in('allowance_id', allowanceIds);
 
                   if (spentError) throw spentError;
 
                   const totalSpent = (spentData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-                  const remainingAllowance = Number(allowanceDetails.amount) - totalSpent;
+                  const remainingTotalAllowance = totalAllowanceAmount - totalSpent;
 
-                  // Check if expense amount is greater than remaining allowance
-                  if (Number(totalAmount) > remainingAllowance) {
+                  // 4. Check if expense amount is greater than the cumulative remaining allowance
+                  if (Number(totalAmount) > remainingTotalAllowance) {
                     setAlertConfig({
                       visible: true,
-                      title: "Budget Exceeded",
-                      message: `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your remaining allowance balance (₱${remainingAllowance.toFixed(2)}).`,
+                      title: "Amount Exceeded",
+                      message: `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your total remaining allowance balance across all funds (₱${remainingTotalAllowance.toFixed(2)}).`,
                       type: 'warning',
                       buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
                     });

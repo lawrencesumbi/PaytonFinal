@@ -234,55 +234,67 @@ function TransactionsScreenContent() {
       }
 
       let targetAllowanceId = allowanceIdInput;
-      let currentAllowance: any = null;
-
+      let activeAllowances: any[] = [];
+      
       if (targetAllowanceId) {
         const { data: specificAllowance } = await supabase
           .from('allowances')
           .select('*')
           .eq('id', targetAllowanceId)
           .single();
-        currentAllowance = specificAllowance;
+        if (specificAllowance) activeAllowances = [specificAllowance];
       }
 
-      if (!currentAllowance) {
-        const { data: latestAllowance } = await supabase
+      if (activeAllowances.length === 0) {
+        const { data: allAllowances, error: allowanceErr } = await supabase
           .from('allowances')
           .select('*')
           .eq('spender_id', user.id)
-          .order('received_at', { ascending: false })
-          .limit(1)
-          .single();
+          .eq('is_archived', false)
+          .order('received_at', { ascending: false }); // Sort to get the latest allowance first
 
-        if (latestAllowance) {
-          currentAllowance = latestAllowance;
-          targetAllowanceId = latestAllowance.id;
-        }
+        if (allowanceErr) throw allowanceErr;
+        activeAllowances = allAllowances || [];
       }
 
-      if (!currentAllowance) {
-        setModalError('Cannot save expense: No active allowance found.');
+      if (activeAllowances.length === 0) {
+        setModalError('Cannot save expense: No active allowances found.');
         setIsSubmitting(false);
         return;
       }
 
-      let expensesQuery = supabase
+      // Calculate total available amount across all valid allowances
+      const totalAllowanceBudget = activeAllowances.reduce((sum, item) => sum + Number(item.amount), 0);
+
+      // Get all expenses linked to these allowances
+      const allowanceIds = activeAllowances.map(a => a.id);
+      const { data: allExpenses, error: expErr } = await supabase
         .from('expenses')
-        .select('amount')
-        .eq('allowance_id', targetAllowanceId);
+        .select('id, amount')
+        .in('allowance_id', allowanceIds);
 
-      if (editingTransaction) {
-        expensesQuery = expensesQuery.neq('id', editingTransaction.id);
-      }
+      if (expErr) throw expErr;
 
-      const { data: existingExpenses } = await expensesQuery;
-      const totalSpent = (existingExpenses || []).reduce((sum, item) => sum + Number(item.amount), 0);
-      const remainingBalance = Number(currentAllowance.amount) - totalSpent;
+      // Filter out current editing transaction if updating
+      const filteredExpenses = (allExpenses || []).filter(item => {
+        if (editingTransaction && item.id === editingTransaction.id) {
+          return false;
+        }
+        return true;
+      });
+
+      const totalSpent = filteredExpenses.reduce((sum, item) => sum + Number(item.amount), 0);
+      const remainingBalance = totalAllowanceBudget - totalSpent;
 
       if (numericAmount > remainingBalance) {
-        setModalError(`Expense exceeds remaining allowance balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
+        setModalError(`Expense exceeds total remaining allowance balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
         setIsSubmitting(false);
         return;
+      }
+
+      // Default target allowance ID for new inserts (grabs the latest one since it's sorted)
+      if (!targetAllowanceId && activeAllowances.length > 0) {
+        targetAllowanceId = activeAllowances[0].id;
       }
 
       if (editingTransaction) {

@@ -206,76 +206,72 @@ export default function ScanReceiptScreen() {
 
                   let targetIncomeId = paramIncomeId;
 
-                  // 1. Check if income exists for the user if not provided in params
-                  if (!targetIncomeId) {
-                    const { data: latestIncome } = await supabase
-                      .from('income')
-                      .select('id')
-                      .eq('user_id', user.id)
-                      .order('received_at', { ascending: false })
-                      .limit(1)
-                      .single();
+                  // 1. Get the latest income ID for inserting the expense
+                  const { data: latestIncome, error: latestError } = await supabase
+                    .from('income')
+                    .select('id')
+                    .eq('user_id', user.id)
+                    .order('received_at', { ascending: false })
+                    .limit(1)
+                    .single();
 
-                    if (!latestIncome) {
-                      setAlertConfig({
-                        visible: true,
-                        title: "No Income Found",
-                        message: "No active income was detected for your account. Please set up an income source before logging expenses.",
-                        type: 'warning',
-                        buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
-                      });
-                      setFrozenPhoto(null);
-                      return;
-                    }
-                    targetIncomeId = latestIncome.id;
-                  } else {
-                    // Verify the provided paramIncomeId actually exists
+                  if (latestError || !latestIncome) {
+                    setAlertConfig({
+                      visible: true,
+                      title: "No Income Found",
+                      message: "No active income was detected for your account. Please set up an income before logging expenses.",
+                      type: 'warning',
+                      buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
+                    });
+                    setFrozenPhoto(null);
+                    return;
+                  }
+
+                  targetIncomeId = latestIncome.id;
+
+                  // If a specific income ID was passed in params, verify it exists
+                  if (paramIncomeId) {
                     const { data: specificIncome } = await supabase
                       .from('income')
                       .select('id')
-                      .eq('id', targetIncomeId)
+                      .eq('id', paramIncomeId)
                       .single();
 
-                    if (!specificIncome) {
-                      setAlertConfig({
-                        visible: true,
-                        title: "No Income Found",
-                        message: "No income was detected for this transaction.",
-                        type: 'warning',
-                        buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
-                      });
-                      setFrozenPhoto(null);
-                      return;
+                    if (specificIncome) {
+                      targetIncomeId = specificIncome.id;
                     }
                   }
 
-                  // 2. Calculate remaining income amount
-                  const { data: incomeDetails, error: incomeError } = await supabase
+                  // 2. Calculate total available income across ALL income for this personal
+                  const { data: allIncomes, error: incomeError } = await supabase
                     .from('income')
-                    .select('amount')
-                    .eq('id', targetIncomeId)
-                    .single();
+                    .select('id, amount')
+                    .eq('user_id', user.id);
 
-                  if (incomeError || !incomeDetails) {
+                  if (incomeError || !allIncomes || allIncomes.length === 0) {
                     throw new Error("Could not retrieve income details.");
                   }
 
+                  const totalIncomeAmount = allIncomes.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+                  const incomeIds = allIncomes.map(item => item.id);
+
+                  // 3. Calculate total spent across ALL income for this personal
                   const { data: spentData, error: spentError } = await supabase
                     .from('expenses')
                     .select('amount')
-                    .eq('income_id', targetIncomeId);
+                    .in('income_id', incomeIds);
 
                   if (spentError) throw spentError;
 
                   const totalSpent = (spentData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-                  const remainingIncome = Number(incomeDetails.amount) - totalSpent;
+                  const remainingTotalIncome = totalIncomeAmount - totalSpent;
 
-                  // Check if expense amount is greater than remaining income
-                  if (Number(totalAmount) > remainingIncome) {
+                  // 4. Check if expense amount is greater than the cumulative remaining income
+                  if (Number(totalAmount) > remainingTotalIncome) {
                     setAlertConfig({
                       visible: true,
-                      title: "Budget Exceeded",
-                      message: `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your remaining income balance (₱${remainingIncome.toFixed(2)}).`,
+                      title: "Amount Exceeded",
+                      message: `The scanned amount (₱${Number(totalAmount).toFixed(2)}) is greater than your total remaining income balance across all funds (₱${remainingTotalIncome.toFixed(2)}).`,
                       type: 'warning',
                       buttons: [{ text: "Got It", onPress: () => setAlertConfig(prev => ({ ...prev, visible: false })) }]
                     });

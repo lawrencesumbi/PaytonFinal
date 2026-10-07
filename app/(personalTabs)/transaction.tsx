@@ -234,55 +234,67 @@ function TransactionsScreenContent() {
       }
 
       let targetIncomeId = incomeIdInput;
-      let currentIncome: any = null;
-
+      let activeIncomes: any[] = [];
+      
       if (targetIncomeId) {
         const { data: specificIncome } = await supabase
-          .from('income')
+          .from('incomes')
           .select('*')
           .eq('id', targetIncomeId)
           .single();
-        currentIncome = specificIncome;
+        if (specificIncome) activeIncomes = [specificIncome];
       }
 
-      if (!currentIncome) {
-        const { data: latestIncome } = await supabase
+      if (activeIncomes.length === 0) {
+        const { data: allIncomes, error: incomeErr } = await supabase
           .from('income')
           .select('*')
           .eq('user_id', user.id)
-          .order('received_at', { ascending: false })
-          .limit(1)
-          .single();
+          .eq('is_archived', false)
+          .order('received_at', { ascending: false }); // Sort to get the latest income first
 
-        if (latestIncome) {
-          currentIncome = latestIncome;
-          targetIncomeId = latestIncome.id;
-        }
+        if (incomeErr) throw incomeErr;
+        activeIncomes = allIncomes || [];
       }
 
-      if (!currentIncome) {
-        setModalError('Cannot save expense: No active income found.');
+      if (activeIncomes.length === 0) {
+        setModalError('Cannot save expense: No active incomes found.');
         setIsSubmitting(false);
         return;
       }
 
-      let expensesQuery = supabase
+      // Calculate total available amount across all valid incomes
+      const totalIncomeBudget = activeIncomes.reduce((sum, item) => sum + Number(item.amount), 0);
+
+      // Get all expenses linked to these incomes
+      const incomeIds = activeIncomes.map(a => a.id);
+      const { data: allExpenses, error: expErr } = await supabase
         .from('expenses')
-        .select('amount')
-        .eq('income_id', targetIncomeId);
+        .select('id, amount')
+        .in('income_id', incomeIds);
 
-      if (editingTransaction) {
-        expensesQuery = expensesQuery.neq('id', editingTransaction.id);
-      }
+      if (expErr) throw expErr;
 
-      const { data: existingExpenses } = await expensesQuery;
-      const totalSpent = (existingExpenses || []).reduce((sum, item) => sum + Number(item.amount), 0);
-      const remainingBalance = Number(currentIncome.amount) - totalSpent;
+      // Filter out current editing transaction if updating
+      const filteredExpenses = (allExpenses || []).filter(item => {
+        if (editingTransaction && item.id === editingTransaction.id) {
+          return false;
+        }
+        return true;
+      });
+
+      const totalSpent = filteredExpenses.reduce((sum, item) => sum + Number(item.amount), 0);
+      const remainingBalance = totalIncomeBudget - totalSpent;
 
       if (numericAmount > remainingBalance) {
-        setModalError(`Expense exceeds remaining income balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
+        setModalError(`Expense exceeds total remaining income balance (₱${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}).`);
         setIsSubmitting(false);
         return;
+      }
+
+      // Default target income ID for new inserts (grabs the latest one since it's sorted)
+      if (!targetIncomeId && activeIncomes.length > 0) {
+        targetIncomeId = activeIncomes[0].id;
       }
 
       if (editingTransaction) {
