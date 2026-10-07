@@ -98,7 +98,9 @@ export default function InsightScreen() {
                 Analyze these pacing metrics (${isPersonal ? 'Personal Income Source' : 'Spender Allowance'}):
                 ${JSON.stringify(metrics)}
 
-                CRITICAL INSTRUCTION: Always use the Philippine Peso sign (₱) for all monetary values. Never use dollars ($). Ensure any generated text summaries, tips, or strings strictly use '₱' instead of '$'.
+                CRITICAL INSTRUCTIONS:
+    1. Always use the Philippine Peso sign (₱) for all monetary values. Never use dollars ($).
+    2. MATHEMATICAL CONSISTENCY CHECK: Before writing "insightSummary", verify all comparisons. If remaining_balance is greater than pending_reminders, do NOT state that it is less than them. Ensure your text reflects the exact relative values provided in the JSON payload.
 
                 Rules:
                 1. "pacingStatus": WARNING if current_daily_avg > safe_daily_limit, CRITICAL if remaining_balance < pending_reminders, else ON_TRACK.
@@ -364,11 +366,11 @@ export default function InsightScreen() {
                                 <View style={styles.metricsRow}>
                                     <View style={styles.metricCard}>
                                         <Text style={styles.metricLabel}>Safe Daily Limit</Text>
-                                        <Text style={styles.metricValue}>₱{item.pacingData.safeDailyLimit.toFixed(2)}</Text>
+                                        <Text style={styles.metricValue}>₱{item.pacingData.safeDailyLimit!= null ? item.pacingData.safeDailyLimit.toFixed(2) : '0.00'}</Text>
                                     </View>
                                     <View style={styles.metricCard}>
                                         <Text style={styles.metricLabel}>Runway Left</Text>
-                                        <Text style={styles.metricValue}>{item.pacingData.projectedRunwayDays} Days</Text>
+                                        <Text style={styles.metricValue}>{item.pacingData.projectedRunwayDays ?? '0'} Days</Text>
                                     </View>
                                 </View>
 
