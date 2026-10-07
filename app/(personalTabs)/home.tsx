@@ -569,7 +569,49 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. Update reminder status to 'paid'
+    // 1. Fetch the user's active (non-archived) income records[cite: 1]
+    const { data: incomes, error: incomeFetchError } = await supabase
+      .from('income')
+      .select('amount')
+      .eq('user_id', user.id)
+      .eq('is_archived', false);
+
+    if (incomeFetchError) throw incomeFetchError;
+
+    if (!incomes || incomes.length === 0) {
+      setErrorMessage('Cannot settle reminder: No income records found.');
+      return;
+    }
+
+    const totalIncome = incomes.reduce((sum, item) => sum + Number(item.amount), 0);
+
+    // 2. Fetch expenses only where the associated allowance has is_archived = false
+    // Note: Replace 'allowances' with the exact foreign table name if it differs in your schema
+    const { data: expenses, error: expenseFetchError } = await supabase
+      .from('expenses')
+      .select(`
+        amount,
+        income!inner (
+          is_archived
+        )
+      `)
+      .eq('user_id', user.id)
+      .eq('income.is_archived', false);
+
+    if (expenseFetchError) throw expenseFetchError;
+
+    const totalExpenses = expenses ? expenses.reduce((sum, item) => sum + Number(item.amount), 0) : 0;
+
+    // 3. Calculate the actual remaining balance
+    const remaining = totalIncome - totalExpenses;
+
+    // 4. Check if the reminder amount exceeds the remaining balance
+    if (reminder.amount > remaining) {
+      setErrorMessage(`Cannot settle reminder: The amount (${reminder.amount}) exceeds your remaining balance (${remaining}).`);
+      return;
+    }
+
+    // 5. Update reminder status to 'paid'
     const { error: updateError } = await supabase
       .from('reminders')
       .update({ status: 'paid' })
@@ -577,7 +619,7 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
 
     if (updateError) throw updateError;
 
-    // 2. Insert record into the expenses table
+    // 6. Insert record into the expenses table
     const { error: expenseError } = await supabase
       .from('expenses')
       .insert({
