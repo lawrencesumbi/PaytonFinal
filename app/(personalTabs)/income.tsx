@@ -11,6 +11,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -36,7 +37,7 @@ const formatDate = (dateStr: string) => {
   const [year, month, day] = dateStr.split('-').map(Number);
   const date = new Date(year, month - 1, day);
   if (isNaN(date.getTime())) return dateStr;
-  
+
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -73,19 +74,50 @@ export default function IncomeScreen() {
   const [tempStartDate, setTempStartDate] = useState<string>('');
   const [tempEndDate, setTempEndDate] = useState<string>('');
 
-  const fetchIncomes = async () => {
+  const [enableBudgetAllocation, setEnableBudgetAllocation] = useState(false);
+  const [allocationModalVisible, setAllocationModalVisible] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [categoryAllocations, setCategoryAllocations] = useState<Record<string, string>>({});
+
+  const getRemainingBalance = () => {
+    const totalIncome = parseFloat(amount) || 0;
+    const totalAllocated = Object.values(categoryAllocations).reduce<number>((sum, val) => sum + (parseFloat(val) || 0), 0);
+    return totalIncome - totalAllocated;
+  };
+
+  const handleAllocationChange = (categoryId: string, value: string) => {
+    setCategoryAllocations((prev) => ({
+      ...prev,
+      [categoryId]: value,
+    }));
+  };
+
+  const fetchData = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data, error } = await supabase
+      // 1. Fetch Incomes
+      const { data: incomeData, error: incomeError } = await supabase
         .from('income')
         .select('*')
         .eq('user_id', user.id)
         .order('received_at', { ascending: false });
 
-      if (error) throw error;
-      setIncomes(data || []);
+      if (incomeError) throw incomeError;
+      setIncomes(incomeData || []);
+
+      // 2. Fetch Categories (Allows both user-specific and global/NULL categories)
+const { data: categoryData, error: categoryError } = await supabase
+  .from('categories')
+  .select('*')
+  .or(`user_id.eq.${user.id},user_id.is.null`);
+
+if (categoryError) throw categoryError;
+setCategories(categoryData || []);
+
     } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
@@ -97,11 +129,10 @@ export default function IncomeScreen() {
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
-      fetchIncomes();
+      fetchData();
     }, [])
   );
 
-  // Helper to calculate start & end dates based on selected coverage period chip
   const handleSelectPeriod = (period: string) => {
     setSelectedPeriod(period);
     const now = new Date();
@@ -152,6 +183,8 @@ export default function IncomeScreen() {
   const handleResetForm = () => {
     setSourceName('');
     setAmount('');
+    setCategoryAllocations({});
+    setEnableBudgetAllocation(false);
     handleSelectPeriod('Today');
   };
 
@@ -164,6 +197,11 @@ export default function IncomeScreen() {
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       Alert.alert('Validation Error', 'Please enter a valid amount.');
+      return;
+    }
+
+    if (enableBudgetAllocation && getRemainingBalance() !== 0) {
+      Alert.alert('Allocation Error', 'Please allocate the exact income amount across categories (Remaining must be ₱0.00).');
       return;
     }
 
@@ -180,7 +218,9 @@ export default function IncomeScreen() {
 
     try {
       setSubmitting(true);
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) return;
 
       const payload = {
@@ -193,11 +233,29 @@ export default function IncomeScreen() {
         is_archived: false,
       };
 
-      const { error } = await supabase.from('income').insert([payload]);
-      if (error) throw error;
+      const { data: incomeData, error: insertError } = await supabase.from('income').insert([payload]).select().single();
+      if (insertError) throw insertError;
+
+      if (enableBudgetAllocation) {
+        const budgetEntries = Object.entries(categoryAllocations)
+          .filter(([_, val]) => parseFloat(val) > 0)
+          .map(([categoryId, val]) => ({
+            user_id: user.id,
+            category_id: categoryId,
+            income_id: incomeData.id,
+            allocated_amount: parseFloat(val),
+          }));
+
+        if (budgetEntries.length > 0) {
+          const { error: budgetError } = await supabase.from('budgets').insert(budgetEntries);
+          if (budgetError) throw budgetError;
+        }
+      }
 
       setModalVisible(false);
-      fetchIncomes();
+      setCategoryAllocations({});
+      setEnableBudgetAllocation(false);
+      fetchData();
     } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
@@ -215,12 +273,9 @@ export default function IncomeScreen() {
           text: 'Archive',
           onPress: async () => {
             try {
-              const { error } = await supabase
-                .from('income')
-                .update({ is_archived: true })
-                .eq('id', id);
+              const { error } = await supabase.from('income').update({ is_archived: true }).eq('id', id);
               if (error) throw error;
-              fetchIncomes();
+              fetchData();
             } catch (err: any) {
               Alert.alert('Error', err.message);
             }
@@ -243,7 +298,7 @@ export default function IncomeScreen() {
             try {
               const { error } = await supabase.from('income').delete().eq('id', id);
               if (error) throw error;
-              fetchIncomes();
+              fetchData();
             } catch (err: any) {
               Alert.alert('Error', err.message);
             }
@@ -255,10 +310,9 @@ export default function IncomeScreen() {
 
   const activeIncomes = incomes.filter((i) => !i.is_archived);
 
-  // Calendar builder helper functions
   const handleDayPress = (dateStr: string) => {
     const todayStr = toLocalDateString(new Date());
-    if (dateStr < todayStr) return; // Prevent picking past dates
+    if (dateStr < todayStr) return;
 
     if (!tempStartDate || (tempStartDate && tempEndDate)) {
       setTempStartDate(dateStr);
@@ -292,7 +346,7 @@ export default function IncomeScreen() {
     for (let day = 1; day <= totalDays; day++) {
       const dateObj = new Date(year, month, day);
       const dateStr = toLocalDateString(dateObj);
-      
+
       const isPast = dateStr < todayStr;
       const isStart = tempStartDate === dateStr;
       const isEnd = tempEndDate === dateStr;
@@ -339,7 +393,6 @@ export default function IncomeScreen() {
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Modern Financial Header Banner */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
           <TouchableOpacity style={styles.iconCircleButton} onPress={() => router.back()} activeOpacity={0.7}>
@@ -356,7 +409,7 @@ export default function IncomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchIncomes(); }} tintColor="#1F4F59" />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor="#1F4F59" />
         }
       >
         <View style={styles.bodyCard}>
@@ -388,7 +441,7 @@ export default function IncomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Modernized Bottom Sheet / Modal */}
+      {/* Add Income Modal */}
       <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <ScrollView contentContainerStyle={styles.modalScrollContent}>
@@ -419,7 +472,6 @@ export default function IncomeScreen() {
                 onChangeText={setAmount}
               />
 
-              {/* Coverage Period Selection Chips */}
               <Text style={styles.inputLabel}>Coverage Period</Text>
               <View style={styles.chipsGrid}>
                 {['Today', 'This Week', 'Next Week', 'This Month', 'Next Month', 'Custom'].map((period) => {
@@ -446,6 +498,23 @@ export default function IncomeScreen() {
                 </Text>
               </View>
 
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleTextContainer}>
+                  <Text style={[styles.inputLabel, { marginBottom: 2 }]}>Set Budget Allocation</Text>
+                  <Text style={styles.toggleSubtext}>Allocate this income across categories</Text>
+                </View>
+                <Switch
+                  trackColor={{ false: '#CBD5E1', true: '#1F4F59' }}
+                  thumbColor={enableBudgetAllocation ? '#FFFFFF' : '#F1F5F9'}
+                  ios_backgroundColor="#CBD5E1"
+                  onValueChange={(value) => {
+                    setEnableBudgetAllocation(value);
+                    if (value) setAllocationModalVisible(true);
+                  }}
+                  value={enableBudgetAllocation}
+                />
+              </View>
+
               <View style={styles.modalButtonsRow}>
                 <TouchableOpacity style={[styles.modalButton, styles.cancelBtn]} onPress={handleResetForm} disabled={submitting}>
                   <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -463,7 +532,7 @@ export default function IncomeScreen() {
         </View>
       </Modal>
 
-      {/* Custom Date Range Picker Modal */}
+      {/* Calendar Modal */}
       <Modal animationType="fade" transparent={true} visible={calendarModalVisible} onRequestClose={() => setCalendarModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.calendarModalContainer}>
@@ -474,7 +543,6 @@ export default function IncomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Month Header Switcher */}
             <View style={styles.calendarMonthHeader}>
               <Text style={styles.calendarMonthTitle}>
                 {currentCalendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
@@ -489,19 +557,14 @@ export default function IncomeScreen() {
               </View>
             </View>
 
-            {/* Day Names Row */}
             <View style={styles.calendarDaysOfWeek}>
               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
                 <Text key={d} style={styles.calendarDayOfWeekText}>{d}</Text>
               ))}
             </View>
 
-            {/* Calendar Grid */}
-            <View style={styles.calendarGrid}>
-              {renderCalendarDays()}
-            </View>
+            <View style={styles.calendarGrid}>{renderCalendarDays()}</View>
 
-            {/* Calendar Actions */}
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelBtn]}
@@ -525,6 +588,80 @@ export default function IncomeScreen() {
                 <Text style={styles.confirmBtnText}>Save</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Budget Allocation Modal */}
+      <Modal animationType="slide" transparent={true} visible={allocationModalVisible} onRequestClose={() => setAllocationModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxWidth: 400, width: '90%' }]}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>Allocate Budget</Text>
+              <TouchableOpacity onPress={() => setAllocationModalVisible(false)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={18} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <View
+              style={[
+                styles.previewDateBox,
+                {
+                  backgroundColor: getRemainingBalance() === 0 ? '#DCFCE7' : '#FEF3C7',
+                  borderColor: getRemainingBalance() === 0 ? '#BBF7D0' : '#FDE68A',
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name={getRemainingBalance() === 0 ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+                size={16}
+                color={getRemainingBalance() === 0 ? '#166534' : '#92400E'}
+              />
+              <Text style={[styles.previewDateText, { fontWeight: '600', color: getRemainingBalance() === 0 ? '#166534' : '#92400E' }]}>
+                Remaining to Allocate: ₱{getRemainingBalance().toFixed(2)}
+              </Text>
+            </View>
+
+            <ScrollView contentContainerStyle={{ paddingVertical: 10 }} showsVerticalScrollIndicator={false}>
+              {categories.length === 0 ? (
+                <Text style={{ textAlign: 'center', color: '#64748B', marginVertical: 20 }}>No categories found. Please add categories first.</Text>
+              ) : (
+                categories.map((cat) => (
+                  <View key={cat.id} style={styles.allocationRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                      <Ionicons name={cat.icon || 'folder-outline'} size={18} color={cat.color || '#1F4F59'} style={{ marginRight: 8 }} />
+                      <Text style={[styles.inputLabel, { marginBottom: 0, color: '#334155' }]}>{cat.name}</Text>
+                    </View>
+                    <TextInput
+                      style={[styles.modalInput, { width: 110, textAlign: 'right', marginBottom: 0 }]}
+                      placeholder="0.00"
+                      placeholderTextColor="#94A3B8"
+                      keyboardType="numeric"
+                      value={categoryAllocations[cat.id] || ''}
+                      onChangeText={(val) => handleAllocationChange(cat.id, val)}
+                    />
+                  </View>
+                ))
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[
+                styles.confirmBtn, 
+                { 
+                  marginTop: 12, 
+                  paddingVertical: 14, 
+                  borderRadius: 12, 
+                  alignItems: 'center', 
+                  opacity: getRemainingBalance() !== 0 ? 0.6 : 1 
+                }
+              ]}
+              disabled={getRemainingBalance() !== 0}
+              onPress={() => setAllocationModalVisible(false)}
+            >
+              <Text style={styles.confirmBtnText}>Confirm Allocation</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -558,9 +695,7 @@ function IncomeCard({ item, onArchive, onDelete }: { item: IncomeItem; onArchive
         <View style={styles.dateContainer}>
           <Ionicons name="calendar-outline" size={13} color="#64748B" />
           <Text style={styles.dateText}>
-            {isSameDate 
-              ? formatDate(item.start_date) 
-              : `${formatDate(item.start_date)} → ${formatDate(item.end_date)}`}
+            {isSameDate ? formatDate(item.start_date) : `${formatDate(item.start_date)} → ${formatDate(item.end_date)}`}
           </Text>
         </View>
 
@@ -737,7 +872,7 @@ const styles = StyleSheet.create({
     borderColor: '#FFE3E3',
   },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', width: '100%', padding: 20 },
+  modalScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', width: '100%',padding: 20 },
   modalContainer: { backgroundColor: '#FFFFFF', width: '100%', padding: 24, borderRadius: 24, shadowColor: '#1F4F59', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 5 },
   calendarModalContainer: { backgroundColor: '#FFFFFF', width: '90%', maxWidth: 380, padding: 20, borderRadius: 24, shadowColor: '#1F4F59', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 5 },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -808,8 +943,7 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: '#475569', fontWeight: '600', fontSize: 13 },
   confirmBtn: { backgroundColor: '#1F4F59' },
   confirmBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
-  
-  // Calendar Styles
+
   calendarMonthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   calendarMonthTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
   calendarNavRow: { flexDirection: 'row', gap: 8 },
@@ -819,9 +953,36 @@ const styles = StyleSheet.create({
   calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
   calendarDayCell: { width: '14.28%', aspectRatio: 1, justifyContent: 'center', alignItems: 'center', marginVertical: 2 },
   calendarDayCellDisabled: { opacity: 0.3 },
-  calendarCellInRange: { backgroundColor: '#CCFBF1' },
-  calendarCellEndpoint: { backgroundColor: '#00D2FF', borderRadius: 20 },
+  calendarCellInRange: { backgroundColor: '#bafdff' },
+  calendarCellEndpoint: { backgroundColor: '#00f7ff', borderRadius: 20 },
   calendarDayText: { fontSize: 13, fontWeight: '600', color: '#334155' },
   calendarDayTextDisabled: { color: '#94A3B8' },
   calendarDayTextSelected: { color: '#0F172A', fontWeight: '700' },
+
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 14,
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  toggleTextContainer: {
+    flex: 1,
+    marginRight: 10,
+  },
+  toggleSubtext: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  allocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    backgroundColor: '#FFFFFF',
+  },
 });
