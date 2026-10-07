@@ -517,19 +517,50 @@ const handleCreateSplitDirectly = async () => {
   setLoading(true);
 
   try {
-    // 1. Fetch the user's most recent allowance dynamically
+    // 1. Fetch the user's most recent active allowance dynamically (including its amount)
     let activeAllowanceId = null;
     const { data: latestAllowance, error: allowFetchErr } = await supabase
       .from('allowances')
-      .select('id')
+      .select('id, amount')
       .eq('spender_id', user.id)
-      .eq('is_archived', false) // Optional: ensure it's not archived
+      .eq('is_archived', false) // ensure it's not archived
       .order('received_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!allowFetchErr && latestAllowance) {
-      activeAllowanceId = latestAllowance.id;
+    if (allowFetchErr) throw allowFetchErr;
+
+    // Validation: Ensure an active allowance exists
+    if (!latestAllowance) {
+      setSplitFormMessage({ 
+        text: 'No active allowance found. Please create an allowance before splitting expenses.', 
+        type: 'error' 
+      });
+      setLoading(false);
+      return;
+    }
+
+    activeAllowanceId = latestAllowance.id;
+
+    // 1b. Fetch all expenses linked to this active allowance to calculate total spent
+    const { data: allowanceExpenses, error: expFetchErr } = await supabase
+      .from('expenses')
+      .select('amount')
+      .eq('allowance_id', activeAllowanceId);
+
+    if (expFetchErr) throw expFetchErr;
+
+    const totalExpenses = (allowanceExpenses || []).reduce((sum, exp) => sum + (exp.amount || 0), 0);
+    const remainingBalance = latestAllowance.amount - totalExpenses;
+
+    // Validation: Ensure split amount does not exceed remaining balance
+    if (numericAmount > remainingBalance) {
+      setSplitFormMessage({ 
+        text: `Split amount (${numericAmount}) exceeds your remaining allowance balance (${remainingBalance.toFixed(2)}).`, 
+        type: 'error' 
+      });
+      setLoading(false);
+      return;
     }
 
     // 2. Insert into split_expenses table
@@ -543,7 +574,7 @@ const handleCreateSplitDirectly = async () => {
           personal_share: ownerShare,
           created_at: new Date().toISOString(),
           split_type: splitType,
-          category_id: selectedCategoryId, // <-- Added category_id here
+          category_id: selectedCategoryId,
         },
       ])
       .select()
@@ -636,12 +667,28 @@ const handleConfirmSettlePayment = async () => {
   setLoading(true);
 
   try {
+    // 1. Validate that an active allowance exists FIRST before changing any data
+    const { data: latestAllowance, error: allowFetchErr } = await supabase
+      .from('allowances')
+      .select('id, amount')
+      .eq('spender_id', user.id)
+      .eq('is_archived', false)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (allowFetchErr) throw allowFetchErr;
+    
+    if (!latestAllowance) {
+      throw new Error('No active allowance found. Please create an active allowance before settling payments.');
+    }
+
     const friendName = selectedFriendToSettle.friends?.full_name || 'Friend';
     const currentOwed = selectedFriendToSettle.owed_amount || 0;
     const newOwed = Math.max(0, currentOwed - paidVal);
     const isFullyPaid = newOwed === 0;
 
-    // 1. Update split_friends table
+    // 2. Update split_friends table
     const { error: updateFriendErr } = await supabase
       .from('split_friends')
       .update({
@@ -653,31 +700,21 @@ const handleConfirmSettlePayment = async () => {
 
     if (updateFriendErr) throw updateFriendErr;
 
-    // 2. Fetch the user's active/recent allowance and add the received payment to it
-    const { data: latestAllowance, error: allowFetchErr } = await supabase
+    // 3. Add the received payment to the active allowance found earlier
+    const currentAllowanceAmount = parseFloat(latestAllowance.amount) || 0;
+    const updatedAllowanceAmount = currentAllowanceAmount + paidVal;
+
+    const { error: allowUpdateErr } = await supabase
       .from('allowances')
-      .select('id, amount')
-      .eq('spender_id', user.id)
-      .eq('is_archived', false)
-      .order('received_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .update({ amount: updatedAllowanceAmount })
+      .eq('id', latestAllowance.id);
 
-    if (!allowFetchErr && latestAllowance) {
-      const currentAllowanceAmount = parseFloat(latestAllowance.amount) || 0;
-      const updatedAllowanceAmount = currentAllowanceAmount + paidVal;
-
-      const { error: allowUpdateErr } = await supabase
-        .from('allowances')
-        .update({ amount: updatedAllowanceAmount })
-        .eq('id', latestAllowance.id);
-
-      if (allowUpdateErr) {
-        console.error('Failed to update allowance amount:', allowUpdateErr.message);
-      }
+    if (allowUpdateErr) {
+      console.error('Failed to update allowance amount:', allowUpdateErr.message);
+      throw allowUpdateErr;
     }
 
-    // Log the successful settlement payment action matching your logs table schema
+    // 4. Log the successful settlement payment action matching your logs table schema
     await supabase.from('logs').insert({
       user_id: user.id,
       details: `settled split payment of ₱${paidVal.toFixed(2)} from "${friendName}".`,
@@ -710,11 +747,14 @@ const handleConfirmSettlePayment = async () => {
     }
 
     fetchData(user.id);
-  } catch (err: any) {
-    setSettleActionMessage({ 
-      text: err.message || 'Failed to record payment.', 
-      type: 'error' 
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Failed to record payment.';
+    setSettleActionMessage({
+      text: errorMessage,
+      type: 'error',
     });
+    // Automatically clear the error message after 4 seconds
+    setTimeout(() => setSettleActionMessage(null), 4000);
   } finally {
     setLoading(false);
     setSelectedFriendToSettle(null);

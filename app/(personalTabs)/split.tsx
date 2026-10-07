@@ -517,19 +517,50 @@ const handleCreateSplitDirectly = async () => {
   setLoading(true);
 
   try {
-    // 1. Fetch the user's most recent income dynamically
+    // 1. Fetch the user's most recent active income dynamically (including its amount)
     let activeIncomeId = null;
     const { data: latestIncome, error: incomeFetchErr } = await supabase
       .from('income')
-      .select('id')
+      .select('id, amount')
       .eq('user_id', user.id)
-      .eq('is_archived', false) // Optional: ensure it's not archived
+      .eq('is_archived', false) // ensure it's not archived
       .order('received_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!incomeFetchErr && latestIncome) {
-      activeIncomeId = latestIncome.id;
+    if (incomeFetchErr) throw incomeFetchErr;
+
+    // Validation: Ensure an active income exists
+    if (!latestIncome) {
+      setSplitFormMessage({ 
+        text: 'No active income found. Please create an income before splitting expenses.', 
+        type: 'error' 
+      });
+      setLoading(false);
+      return;
+    }
+
+    activeIncomeId = latestIncome.id;
+
+    // 1b. Fetch all expenses linked to this active income to calculate total spent
+    const { data: incomeExpenses, error: expFetchErr } = await supabase
+      .from('expenses')
+      .select('amount')
+      .eq('income_id', activeIncomeId);
+
+    if (expFetchErr) throw expFetchErr;
+
+    const totalExpenses = (incomeExpenses || []).reduce((sum, exp) => sum + (exp.amount || 0), 0);
+    const remainingBalance = latestIncome.amount - totalExpenses;
+
+    // Validation: Ensure split amount does not exceed remaining balance
+    if (numericAmount > remainingBalance) {
+      setSplitFormMessage({ 
+        text: `Split amount (${numericAmount}) exceeds your remaining income balance (${remainingBalance.toFixed(2)}).`, 
+        type: 'error' 
+      });
+      setLoading(false);
+      return;
     }
 
     // 2. Insert into split_expenses table
@@ -543,7 +574,7 @@ const handleCreateSplitDirectly = async () => {
           personal_share: ownerShare,
           created_at: new Date().toISOString(),
           split_type: splitType,
-          category_id: selectedCategoryId, // <-- Added category_id here
+          category_id: selectedCategoryId,
         },
       ])
       .select()
@@ -636,12 +667,28 @@ const handleConfirmSettlePayment = async () => {
   setLoading(true);
 
   try {
+    // 1. Validate that an active income exists FIRST before changing any data
+    const { data: latestIncome, error: incomeFetchErr } = await supabase
+      .from('income')
+      .select('id, amount')
+      .eq('user_id', user.id)
+      .eq('is_archived', false)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (incomeFetchErr) throw incomeFetchErr;
+    
+    if (!latestIncome) {
+      throw new Error('No active income found. Please create an active income before settling payments.');
+    }
+
     const friendName = selectedFriendToSettle.friends?.full_name || 'Friend';
     const currentOwed = selectedFriendToSettle.owed_amount || 0;
     const newOwed = Math.max(0, currentOwed - paidVal);
     const isFullyPaid = newOwed === 0;
 
-    // 1. Update split_friends table
+    // 2. Update split_friends table
     const { error: updateFriendErr } = await supabase
       .from('split_friends')
       .update({
@@ -653,31 +700,21 @@ const handleConfirmSettlePayment = async () => {
 
     if (updateFriendErr) throw updateFriendErr;
 
-    // 2. Fetch the user's active/recent income and add the received payment to it
-    const { data: latestIncome, error: incomeFetchErr } = await supabase
+    // 3. Add the received payment to the active income found earlier
+    const currentIncomeAmount = parseFloat(latestIncome.amount) || 0;
+    const updatedIncomeAmount = currentIncomeAmount + paidVal;
+
+    const { error: incomeUpdateErr } = await supabase
       .from('income')
-      .select('id, amount')
-      .eq('user_id', user.id)
-      .eq('is_archived', false)
-      .order('received_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .update({ amount: updatedIncomeAmount })
+      .eq('id', latestIncome.id);
 
-    if (!incomeFetchErr && latestIncome) {
-      const currentIncomeAmount = parseFloat(latestIncome.amount) || 0;
-      const updatedIncomeAmount = currentIncomeAmount + paidVal;
-
-      const { error: incomeUpdateErr } = await supabase
-        .from('income')
-        .update({ amount: updatedIncomeAmount })
-        .eq('id', latestIncome.id);
-
-      if (incomeUpdateErr) {
-        console.error('Failed to update income amount:', incomeUpdateErr.message);
-      }
+    if (incomeUpdateErr) {
+      console.error('Failed to update income amount:', incomeUpdateErr.message);
+      throw incomeUpdateErr;
     }
 
-    // Log the successful settlement payment action matching your logs table schema
+    // 4. Log the successful settlement payment action matching your logs table schema
     await supabase.from('logs').insert({
       user_id: user.id,
       details: `settled split payment of ₱${paidVal.toFixed(2)} from "${friendName}".`,
@@ -710,11 +747,14 @@ const handleConfirmSettlePayment = async () => {
     }
 
     fetchData(user.id);
-  } catch (err: any) {
-    setSettleActionMessage({ 
-      text: err.message || 'Failed to record payment.', 
-      type: 'error' 
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Failed to record payment.';
+    setSettleActionMessage({
+      text: errorMessage,
+      type: 'error',
     });
+    // Automatically clear the error message after 4 seconds
+    setTimeout(() => setSettleActionMessage(null), 4000);
   } finally {
     setLoading(false);
     setSelectedFriendToSettle(null);

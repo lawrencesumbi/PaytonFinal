@@ -749,7 +749,7 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
               onPress={() => router.push('/income')}
               activeOpacity={0.7}
             >
-              <Ionicons name="add-circle-outline" size={14} color={COLORS.deepTeal} />
+              <Ionicons name="add-outline" size={18} color={COLORS.deepTeal} />
             </TouchableOpacity>
           </View>
         </View>
@@ -1797,6 +1797,5 @@ incomeIconButton: {
   shadowOpacity: 0.2,
   shadowRadius: 1.41,
   marginLeft: 8,
-  marginBottom: 20,
 },
 });
