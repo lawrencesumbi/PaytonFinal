@@ -366,11 +366,11 @@ export default function InsightScreen() {
                                 <View style={styles.metricsRow}>
                                     <View style={styles.metricCard}>
                                         <Text style={styles.metricLabel}>Safe Daily Limit</Text>
-                                        <Text style={styles.metricValue}>₱{item.pacingData.safeDailyLimit!= null ? item.pacingData.safeDailyLimit.toFixed(2) : '0.00'}</Text>
+                                        <Text style={styles.metricValue}>₱{item?.pacingData?.safeDailyLimit != null ? Number(item.pacingData.safeDailyLimit).toFixed(2) : '0.00'}</Text>
                                     </View>
                                     <View style={styles.metricCard}>
                                         <Text style={styles.metricLabel}>Runway Left</Text>
-                                        <Text style={styles.metricValue}>{item.pacingData.projectedRunwayDays ?? '0'} Days</Text>
+                                        <Text style={styles.metricValue}>{item?.pacingData?.projectedRunwayDays ?? '0'} Days</Text>
                                     </View>
                                 </View>
 
