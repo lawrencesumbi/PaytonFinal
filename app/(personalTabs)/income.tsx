@@ -82,7 +82,7 @@ export default function IncomeScreen() {
         .from('income')
         .select('*')
         .eq('user_id', user.id)
-        .order('start_date', { ascending: false });
+        .order('received_at', { ascending: false });
 
       if (error) throw error;
       setIncomes(data || []);
@@ -253,13 +253,7 @@ export default function IncomeScreen() {
     );
   };
 
-  const isIncomeActive = (start: string, end: string) => {
-    const d = new Date();
-    const today = toLocalDateString(d);
-    return start <= today && end >= today;
-  };
-
-  const activeIncomes = incomes.filter((i) => !i.is_archived && isIncomeActive(i.start_date, i.end_date));
+  const activeIncomes = incomes.filter((i) => !i.is_archived);
 
   // Calendar builder helper functions
   const handleDayPress = (dateStr: string) => {
@@ -367,9 +361,9 @@ export default function IncomeScreen() {
       >
         <View style={styles.bodyCard}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Active Income</Text>
+            <Text style={styles.sectionTitle}>All Income Streams</Text>
             <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{activeIncomes.length} Active</Text>
+              <Text style={styles.countBadgeText}>{activeIncomes.length} Total</Text>
             </View>
           </View>
 
@@ -378,7 +372,7 @@ export default function IncomeScreen() {
               <View style={styles.emptyIconBox}>
                 <Ionicons name="receipt-outline" size={28} color="#1F4F59" />
               </View>
-              <Text style={styles.emptyTitle}>No Active Income</Text>
+              <Text style={styles.emptyTitle}>No Income Found</Text>
               <Text style={styles.emptyText}>Tap the '+' icon above to add a new income stream.</Text>
             </View>
           ) : (
