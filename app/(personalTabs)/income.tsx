@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,19 +30,48 @@ interface IncomeItem {
   is_archived?: boolean;
 }
 
+// Helper function to format "YYYY-MM-DD" into words (e.g., "Oct 7, 2026")
+const formatDate = (dateStr: string) => {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (isNaN(date.getTime())) return dateStr;
+  
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
+// Helper to format date into YYYY-MM-DD local string
+const toLocalDateString = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function IncomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [incomes, setIncomes] = useState<IncomeItem[]>([]);
 
-  // Modal State (Edit removed)
+  // Modal State
   const [modalVisible, setModalVisible] = useState(false);
   const [sourceName, setSourceName] = useState('');
   const [amount, setAmount] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('Today');
   const [submitting, setSubmitting] = useState(false);
+
+  // Custom Calendar Picker Modal State
+  const [calendarModalVisible, setCalendarModalVisible] = useState(false);
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
+  const [tempStartDate, setTempStartDate] = useState<string>('');
+  const [tempEndDate, setTempEndDate] = useState<string>('');
 
   const fetchIncomes = async () => {
     try {
@@ -65,19 +94,65 @@ export default function IncomeScreen() {
     }
   };
 
-  useEffect(() => {
-    fetchIncomes();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      fetchIncomes();
+    }, [])
+  );
+
+  // Helper to calculate start & end dates based on selected coverage period chip
+  const handleSelectPeriod = (period: string) => {
+    setSelectedPeriod(period);
+    const now = new Date();
+    const todayStr = toLocalDateString(now);
+
+    if (period === 'Today') {
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (period === 'This Week') {
+      const dayOfWeek = now.getDay();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - dayOfWeek);
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      setStartDate(toLocalDateString(startOfWeek));
+      setEndDate(toLocalDateString(endOfWeek));
+    } else if (period === 'Next Week') {
+      const dayOfWeek = now.getDay();
+      const startOfNextWeek = new Date(now);
+      startOfNextWeek.setDate(now.getDate() - dayOfWeek + 7);
+      const endOfNextWeek = new Date(startOfNextWeek);
+      endOfNextWeek.setDate(startOfNextWeek.getDate() + 6);
+      setStartDate(toLocalDateString(startOfNextWeek));
+      setEndDate(toLocalDateString(endOfNextWeek));
+    } else if (period === 'This Month') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      setStartDate(toLocalDateString(startOfMonth));
+      setEndDate(toLocalDateString(endOfMonth));
+    } else if (period === 'Next Month') {
+      const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const endOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+      setStartDate(toLocalDateString(startOfNextMonth));
+      setEndDate(toLocalDateString(endOfNextMonth));
+    } else if (period === 'Custom') {
+      setTempStartDate(startDate || todayStr);
+      setTempEndDate(endDate || todayStr);
+      setCurrentCalendarDate(startDate ? new Date(startDate) : now);
+      setCalendarModalVisible(true);
+    }
+  };
 
   const handleOpenAddModal = () => {
-    const d = new Date();
-    const todayStr = d.toISOString().split('T')[0];
+    handleResetForm();
+    setModalVisible(true);
+  };
 
+  const handleResetForm = () => {
     setSourceName('');
     setAmount('');
-    setStartDate(todayStr);
-    setEndDate('');
-    setModalVisible(true);
+    handleSelectPeriod('Today');
   };
 
   const handleSaveIncome = async () => {
@@ -92,7 +167,6 @@ export default function IncomeScreen() {
       return;
     }
 
-    // Basic Date Format Validation (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
       Alert.alert('Validation Error', 'Dates must be in YYYY-MM-DD format.');
@@ -101,20 +175,6 @@ export default function IncomeScreen() {
 
     if (startDate > endDate) {
       Alert.alert('Validation Error', 'Start Date cannot be later than End Date.');
-      return;
-    }
-
-    // Check for Overlapping Dates with existing non-archived incomes
-    const activeOrPendingIncomes = incomes.filter(item => !item.is_archived);
-    const hasOverlap = activeOrPendingIncomes.some((item) => {
-      return startDate <= item.end_date && endDate >= item.start_date;
-    });
-
-    if (hasOverlap) {
-      Alert.alert(
-        'Date Overlap Error',
-        'This income date range overlaps with an existing income record. Please choose a different date range.'
-      );
       return;
     }
 
@@ -193,20 +253,90 @@ export default function IncomeScreen() {
     );
   };
 
-  // Status helper based on local date
   const isIncomeActive = (start: string, end: string) => {
     const d = new Date();
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = toLocalDateString(d);
     return start <= today && end >= today;
   };
 
   const activeIncomes = incomes.filter((i) => !i.is_archived && isIncomeActive(i.start_date, i.end_date));
 
+  // Calendar builder helper functions
+  const handleDayPress = (dateStr: string) => {
+    const todayStr = toLocalDateString(new Date());
+    if (dateStr < todayStr) return; // Prevent picking past dates
+
+    if (!tempStartDate || (tempStartDate && tempEndDate)) {
+      setTempStartDate(dateStr);
+      setTempEndDate('');
+    } else if (tempStartDate && !tempEndDate) {
+      if (dateStr < tempStartDate) {
+        setTempStartDate(dateStr);
+      } else {
+        setTempEndDate(dateStr);
+      }
+    }
+  };
+
+  const changeMonth = (direction: number) => {
+    const newDate = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth() + direction, 1);
+    setCurrentCalendarDate(newDate);
+  };
+
+  const renderCalendarDays = () => {
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const todayStr = toLocalDateString(new Date());
+
+    const days = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+      days.push(<View key={`empty-${i}`} style={styles.calendarDayCell} />);
+    }
+
+    for (let day = 1; day <= totalDays; day++) {
+      const dateObj = new Date(year, month, day);
+      const dateStr = toLocalDateString(dateObj);
+      
+      const isPast = dateStr < todayStr;
+      const isStart = tempStartDate === dateStr;
+      const isEnd = tempEndDate === dateStr;
+      const isInRange = tempStartDate && tempEndDate && dateStr > tempStartDate && dateStr < tempEndDate;
+
+      days.push(
+        <TouchableOpacity
+          key={dateStr}
+          style={[
+            styles.calendarDayCell,
+            isPast && styles.calendarDayCellDisabled,
+            isInRange && styles.calendarCellInRange,
+            (isStart || isEnd) && styles.calendarCellEndpoint,
+          ]}
+          onPress={() => handleDayPress(dateStr)}
+          activeOpacity={isPast ? 1 : 0.7}
+          disabled={isPast}
+        >
+          <Text
+            style={[
+              styles.calendarDayText,
+              isPast && styles.calendarDayTextDisabled,
+              (isStart || isEnd) && styles.calendarDayTextSelected,
+            ]}
+          >
+            {day}
+          </Text>
+        </TouchableOpacity>
+      );
+    }
+    return days;
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.loadingCenter]}>
         <StatusBar style="light" />
-        <ActivityIndicator size="large" color="#38B2AC" />
+        <ActivityIndicator size="large" color="#1F4F59" />
       </View>
     );
   }
@@ -215,15 +345,15 @@ export default function IncomeScreen() {
     <View style={styles.container}>
       <StatusBar style="light" />
 
-      {/* Header */}
+      {/* Modern Financial Header Banner */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.iconCircleButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back-outline" size={20} color="#FFFFFF" />
+          <TouchableOpacity style={styles.iconCircleButton} onPress={() => router.back()} activeOpacity={0.7}>
+            <Ionicons name="arrow-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Income Sources</Text>
-          <TouchableOpacity style={styles.iconCircleButton} onPress={handleOpenAddModal}>
-            <Ionicons name="add-outline" size={24} color="#FFFFFF" />
+          <Text style={styles.headerTitle}>Income Management</Text>
+          <TouchableOpacity style={styles.iconCircleButton} onPress={handleOpenAddModal} activeOpacity={0.7}>
+            <Ionicons name="add" size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
@@ -232,22 +362,24 @@ export default function IncomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchIncomes(); }} colors={['#1B494E']} />
+          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchIncomes(); }} tintColor="#1F4F59" />
         }
       >
         <View style={styles.bodyCard}>
-          {/* Active Income Section */}
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Active Income</Text>
             <View style={styles.countBadge}>
-              <Text style={styles.countBadgeText}>{activeIncomes.length}</Text>
+              <Text style={styles.countBadgeText}>{activeIncomes.length} Active</Text>
             </View>
           </View>
 
           {activeIncomes.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="wallet-outline" size={36} color="#CBD5E1" />
-              <Text style={styles.emptyText}>No active income stream found.</Text>
+              <View style={styles.emptyIconBox}>
+                <Ionicons name="receipt-outline" size={28} color="#1F4F59" />
+              </View>
+              <Text style={styles.emptyTitle}>No Active Income</Text>
+              <Text style={styles.emptyText}>Tap the '+' icon above to add a new income stream.</Text>
             </View>
           ) : (
             activeIncomes.map((item) => (
@@ -262,62 +394,141 @@ export default function IncomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Add Modal Only */}
-      <Modal animationType="slide" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
+      {/* Modernized Bottom Sheet / Modal */}
+      <Modal animationType="fade" transparent={true} visible={modalVisible} onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Add Income</Text>
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Source Name (e.g. Allowance, Salary)"
-              placeholderTextColor="#94A3B8"
-              value={sourceName}
-              onChangeText={setSourceName}
-            />
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Amount (₱)"
-              placeholderTextColor="#94A3B8"
-              keyboardType="numeric"
-              value={amount}
-              onChangeText={setAmount}
-            />
-
-            <View style={styles.dateRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>Start Date</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#94A3B8"
-                  value={startDate}
-                  onChangeText={setStartDate}
-                />
+          <ScrollView contentContainerStyle={styles.modalScrollContent}>
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeaderRow}>
+                <Text style={styles.modalTitle}>Add Income</Text>
+                <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseBtn}>
+                  <Ionicons name="close" size={18} color="#64748B" />
+                </TouchableOpacity>
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>End Date</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#94A3B8"
-                  value={endDate}
-                  onChangeText={setEndDate}
-                />
+
+              <Text style={styles.inputLabel}>Source Name</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="e.g. Salary, Freelance, Allowance"
+                placeholderTextColor="#94A3B8"
+                value={sourceName}
+                onChangeText={setSourceName}
+              />
+
+              <Text style={styles.inputLabel}>Amount (₱)</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="0.00"
+                placeholderTextColor="#94A3B8"
+                keyboardType="numeric"
+                value={amount}
+                onChangeText={setAmount}
+              />
+
+              {/* Coverage Period Selection Chips */}
+              <Text style={styles.inputLabel}>Coverage Period</Text>
+              <View style={styles.chipsGrid}>
+                {['Today', 'This Week', 'Next Week', 'This Month', 'Next Month', 'Custom'].map((period) => {
+                  const isSelected = selectedPeriod === period;
+                  return (
+                    <TouchableOpacity
+                      key={period}
+                      style={[styles.chipButton, isSelected && styles.chipButtonSelected]}
+                      onPress={() => handleSelectPeriod(period)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                        {period}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.previewDateBox}>
+                <Ionicons name="calendar-outline" size={14} color="#1F4F59" />
+                <Text style={styles.previewDateText}>
+                  {startDate && endDate ? (startDate === endDate ? formatDate(startDate) : `${formatDate(startDate)} → ${formatDate(endDate)}`) : 'Select period'}
+                </Text>
+              </View>
+
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity style={[styles.modalButton, styles.cancelBtn]} onPress={handleResetForm} disabled={submitting}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.modalButton, styles.confirmBtn]} onPress={handleSaveIncome} disabled={submitting}>
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.confirmBtnText}>Save Income</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* Custom Date Range Picker Modal */}
+      <Modal animationType="fade" transparent={true} visible={calendarModalVisible} onRequestClose={() => setCalendarModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.calendarModalContainer}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>Select Date Range</Text>
+              <TouchableOpacity onPress={() => setCalendarModalVisible(false)} style={styles.modalCloseBtn}>
+                <Ionicons name="close" size={18} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Month Header Switcher */}
+            <View style={styles.calendarMonthHeader}>
+              <Text style={styles.calendarMonthTitle}>
+                {currentCalendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </Text>
+              <View style={styles.calendarNavRow}>
+                <TouchableOpacity onPress={() => changeMonth(-1)} style={styles.calendarNavBtn}>
+                  <Ionicons name="chevron-back" size={18} color="#0F172A" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => changeMonth(1)} style={styles.calendarNavBtn}>
+                  <Ionicons name="chevron-forward" size={18} color="#0F172A" />
+                </TouchableOpacity>
               </View>
             </View>
 
+            {/* Day Names Row */}
+            <View style={styles.calendarDaysOfWeek}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+                <Text key={d} style={styles.calendarDayOfWeekText}>{d}</Text>
+              ))}
+            </View>
+
+            {/* Calendar Grid */}
+            <View style={styles.calendarGrid}>
+              {renderCalendarDays()}
+            </View>
+
+            {/* Calendar Actions */}
             <View style={styles.modalButtonsRow}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelBtn]} onPress={() => setModalVisible(false)} disabled={submitting}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelBtn]}
+                onPress={() => {
+                  setTempStartDate('');
+                  setTempEndDate('');
+                }}
+              >
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButton, styles.confirmBtn]} onPress={handleSaveIncome} disabled={submitting}>
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.confirmBtnText}>Save</Text>
-                )}
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmBtn]}
+                onPress={() => {
+                  if (tempStartDate) {
+                    setStartDate(tempStartDate);
+                    setEndDate(tempEndDate || tempStartDate);
+                  }
+                  setCalendarModalVisible(false);
+                }}
+              >
+                <Text style={styles.confirmBtnText}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -328,20 +539,17 @@ export default function IncomeScreen() {
 }
 
 function IncomeCard({ item, onArchive, onDelete }: { item: IncomeItem; onArchive: () => void; onDelete: () => void }) {
+  const isSameDate = item.start_date === item.end_date;
+
   return (
     <View style={styles.incomeCard}>
-      {/* Top Row: Icon + Title/Badge & Amount */}
       <View style={styles.cardHeaderRow}>
         <View style={styles.cardHeaderLeft}>
           <View style={styles.statusBadge}>
-            <Ionicons name="trending-up-outline" size={20} color="#319795" />
+            <Ionicons name="wallet" size={18} color="#1F4F59" />
           </View>
           <View style={styles.titleWrapper}>
             <Text style={styles.sourceText} numberOfLines={1}>{item.source_name}</Text>
-            <View style={styles.pillBadge}>
-              <View style={styles.pillDot} />
-              <Text style={styles.pillText}>Active Stream</Text>
-            </View>
           </View>
         </View>
 
@@ -352,21 +560,22 @@ function IncomeCard({ item, onArchive, onDelete }: { item: IncomeItem; onArchive
 
       <View style={styles.cardDivider} />
 
-      {/* Bottom Row: Date Range & Action Buttons */}
       <View style={styles.cardFooterRow}>
         <View style={styles.dateContainer}>
           <Ionicons name="calendar-outline" size={13} color="#64748B" />
-          <Text style={styles.dateText}>{item.start_date} → {item.end_date}</Text>
+          <Text style={styles.dateText}>
+            {isSameDate 
+              ? formatDate(item.start_date) 
+              : `${formatDate(item.start_date)} → ${formatDate(item.end_date)}`}
+          </Text>
         </View>
 
         <View style={styles.actionButtonsRow}>
-          <TouchableOpacity onPress={onArchive} style={[styles.actionButton, styles.archiveButtonBorder]}>
-            <Ionicons name="archive-outline" size={14} color="#D97706" />
-            <Text style={[styles.actionButtonText, styles.archiveButtonText]}>Archive</Text>
+          <TouchableOpacity onPress={onArchive} style={[styles.actionButton, styles.archiveButtonBorder]} activeOpacity={0.7}>
+            <Ionicons name="archive-outline" size={13} color="#D97706" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={onDelete} style={[styles.actionButton, styles.deleteButtonBorder]}>
-            <Ionicons name="trash-outline" size={14} color="#E11D48" />
-            <Text style={[styles.actionButtonText, styles.deleteButtonText]}>Delete</Text>
+          <TouchableOpacity onPress={onDelete} style={[styles.actionButton, styles.deleteButtonBorder]} activeOpacity={0.7}>
+            <Ionicons name="trash-outline" size={13} color="#E11D48" />
           </TouchableOpacity>
         </View>
       </View>
@@ -375,30 +584,31 @@ function IncomeCard({ item, onArchive, onDelete }: { item: IncomeItem; onArchive
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
   loadingCenter: { justifyContent: 'center', alignItems: 'center' },
   headerContainer: {
     backgroundColor: '#1F4F59',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? (NativeStatusBar.currentHeight ? NativeStatusBar.currentHeight + 12 : 40) : 10,
+    paddingTop: Platform.OS === 'android' ? (NativeStatusBar.currentHeight ? NativeStatusBar.currentHeight + 16 : 44) : 16,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
     paddingBottom: 20,
-    borderBottomLeftRadius: 30, borderBottomRightRadius: 30,
   },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2 },
   iconCircleButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  scrollContent: { flexGrow: 1, backgroundColor: '#F8FAF8', borderTopLeftRadius: 32, borderTopRightRadius: 32, },
+  scrollContent: { flexGrow: 1, backgroundColor: '#F8FAFC' },
   bodyCard: {
     flex: 1,
-    backgroundColor: '#F8FAF8',
-    paddingTop: 24,
+    backgroundColor: '#F8FAFC',
+    paddingTop: 22,
     paddingHorizontal: 20,
     paddingBottom: 40,
   },
@@ -408,39 +618,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#1B494E' },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1F4F59' },
   countBadge: {
     backgroundColor: '#E6FFFA',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 10,
+    borderRadius: 20,
   },
-  countBadgeText: { fontSize: 13, fontWeight: '700', color: '#319795' },
+  countBadgeText: { fontSize: 11, fontWeight: '700', color: '#1F4F59' },
   emptyContainer: {
-    paddingVertical: 40,
+    paddingVertical: 48,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: '#E2E8F0',
     borderStyle: 'dashed',
+    marginTop: 4,
   },
-  emptyText: { fontSize: 14, color: '#94A3B8', marginTop: 8, fontWeight: '500' },
-  
-  // Income Card Styles
+  emptyIconBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: '#F0FDFA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emptyTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A', marginBottom: 4 },
+  emptyText: { fontSize: 12, color: '#64748B', fontWeight: '500', textAlign: 'center', paddingHorizontal: 32 },
   incomeCard: {
     backgroundColor: '#FFFFFF',
     padding: 16,
-    borderRadius: 20,
-    marginBottom: 14,
+    borderRadius: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    shadowColor: '#1B494E',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
+    shadowColor: '#1F4F59',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
   },
   cardHeaderRow: {
     flexDirection: 'row',
@@ -455,9 +673,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     backgroundColor: '#E6FFFA',
     justifyContent: 'center',
     alignItems: 'center',
@@ -466,40 +684,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sourceText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 3,
-  },
-  pillBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#DEF7EC',
-    gap: 4,
-  },
-  pillDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: '#059669',
-  },
-  pillText: {
-    fontSize: 10,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#065F46',
+    color: '#0F172A',
   },
   amountContainer: {
     alignItems: 'flex-end',
     justifyContent: 'center',
   },
   amountText: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#1B494E',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1F4F59',
   },
   cardDivider: {
     height: 1,
@@ -514,13 +710,13 @@ const styles = StyleSheet.create({
   dateContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     flex: 1,
     marginRight: 6,
   },
   dateText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '500',
     color: '#64748B',
   },
   actionButtonsRow: {
@@ -531,54 +727,107 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
-    paddingVertical: 6,
-    paddingHorizontal: 9,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E2E8F0',
     gap: 4,
   },
-  actionButtonText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#334155',
-  },
   archiveButtonBorder: {
     backgroundColor: '#FFFBEB',
     borderColor: '#FEF3C7',
-  },
-  archiveButtonText: {
-    color: '#D97706',
   },
   deleteButtonBorder: {
     backgroundColor: '#FFF5F5',
     borderColor: '#FFE3E3',
   },
-  deleteButtonText: {
-    color: '#E11D48',
-  },
-
-  // Modal Styles
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.4)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { backgroundColor: '#FFFFFF', width: '88%', padding: 20, borderRadius: 24 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#0F172A', marginBottom: 16 },
-  inputLabel: { fontSize: 12, color: '#64748B', fontWeight: '600', marginBottom: 4 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', width: '100%', padding: 20 },
+  modalContainer: { backgroundColor: '#FFFFFF', width: '100%', padding: 24, borderRadius: 24, shadowColor: '#1F4F59', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 5 },
+  calendarModalContainer: { backgroundColor: '#FFFFFF', width: '90%', maxWidth: 380, padding: 20, borderRadius: 24, shadowColor: '#1F4F59', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 5 },
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#0F172A' },
+  modalCloseBtn: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  inputLabel: { fontSize: 12, color: '#475569', fontWeight: '600', marginBottom: 6, marginTop: 4 },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#CBD5E1',
     padding: 12,
     borderRadius: 12,
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontWeight: '500',
+    marginBottom: 4,
     backgroundColor: '#F8FAFC',
     color: '#0F172A',
   },
-  dateRow: { flexDirection: 'row', gap: 10 },
-  modalButtonsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 },
-  modalButton: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12 },
-  cancelBtn: { backgroundColor: '#F1F5F9' },
-  cancelBtnText: { color: '#475569', fontWeight: '600' },
+  chipsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  chipButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    width: '31%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chipButtonSelected: {
+    backgroundColor: '#1F4F59',
+    borderColor: '#1F4F59',
+  },
+  chipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  chipTextSelected: {
+    color: '#FFFFFF',
+  },
+  previewDateBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F0FDFA',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+  },
+  previewDateText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1F4F59',
+  },
+  modalButtonsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 12 },
+  modalButton: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, flex: 1, alignItems: 'center' },
+  cancelBtn: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  cancelBtnText: { color: '#475569', fontWeight: '600', fontSize: 13 },
   confirmBtn: { backgroundColor: '#1F4F59' },
-  confirmBtnText: { color: '#FFFFFF', fontWeight: '600' },
+  confirmBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
+  
+  // Calendar Styles
+  calendarMonthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  calendarMonthTitle: { fontSize: 15, fontWeight: '700', color: '#0F172A' },
+  calendarNavRow: { flexDirection: 'row', gap: 8 },
+  calendarNavBtn: { width: 32, height: 32, borderRadius: 10, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  calendarDaysOfWeek: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 8 },
+  calendarDayOfWeekText: { fontSize: 11, fontWeight: '600', color: '#64748B', width: '14.28%', textAlign: 'center' },
+  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 16 },
+  calendarDayCell: { width: '14.28%', aspectRatio: 1, justifyContent: 'center', alignItems: 'center', marginVertical: 2 },
+  calendarDayCellDisabled: { opacity: 0.3 },
+  calendarCellInRange: { backgroundColor: '#CCFBF1' },
+  calendarCellEndpoint: { backgroundColor: '#00D2FF', borderRadius: 20 },
+  calendarDayText: { fontSize: 13, fontWeight: '600', color: '#334155' },
+  calendarDayTextDisabled: { color: '#94A3B8' },
+  calendarDayTextSelected: { color: '#0F172A', fontWeight: '700' },
 });
