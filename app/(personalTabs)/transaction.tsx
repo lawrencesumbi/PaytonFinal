@@ -31,6 +31,7 @@ interface Transaction {
   spent_at: string;
   photo_url?: string | null;
   income_id?: string | null;
+  category_id?: string | null;
   categories: {
     name: string;
     icon: keyof typeof Ionicons.glyphMap;
@@ -45,6 +46,16 @@ interface Category {
   color: string;
 }
 
+interface BudgetWallet {
+  category_id: string;
+  category_name: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  allocated_amount: number;
+  spent_amount: number;
+  remaining_amount: number;
+}
+
 function TransactionsScreenContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -53,6 +64,7 @@ function TransactionsScreenContent() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [budgetWallets, setBudgetWallets] = useState<BudgetWallet[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showScrollTop, setShowScrollTop] = useState(false);
 
@@ -151,12 +163,14 @@ function TransactionsScreenContent() {
           spent_at,
           photo_url,
           income_id,
+          category_id,
           categories (
             name,
             icon,
             color
           ),
           income!inner (
+            id,
             is_archived
           )
         `)
@@ -177,6 +191,7 @@ function TransactionsScreenContent() {
           spent_at: expense.spent_at,
           photo_url: expense.photo_url || null,
           income_id: expense.income_id || null,
+          category_id: expense.category_id || null,
           categories: {
             name: rawCategory?.name || 'Uncategorized',
             icon: rawCategory?.icon || 'receipt-outline',
@@ -186,6 +201,74 @@ function TransactionsScreenContent() {
       });
 
       setTransactions(formattedData as Transaction[]);
+
+      // Fetch Budgets & Compute Budget Wallets per Category
+      const { data: incomeData } = await supabase
+        .from('income')
+        .select('id')
+        .eq('is_archived', false);
+
+      const activeIncomeIds = (incomeData || []).map((inc: any) => inc.id);
+
+      if (activeIncomeIds.length > 0) {
+        const { data: budgetData, error: budgetErr } = await supabase
+          .from('budgets')
+          .select(`
+            category_id,
+            allocated_amount,
+            income_id,
+            categories (
+              name,
+              icon,
+              color
+            )
+          `)
+          .in('income_id', activeIncomeIds);
+
+        if (!budgetErr && budgetData) {
+          // Aggregate budgets per category across active incomes
+          const walletMap: { [key: string]: BudgetWallet } = {};
+
+          budgetData.forEach((b: any) => {
+            const catId = b.category_id;
+            const rawCat = Array.isArray(b.categories) ? b.categories[0] : b.categories;
+            const allocated = Number(b.allocated_amount || 0);
+
+            if (!walletMap[catId]) {
+              walletMap[catId] = {
+                category_id: catId,
+                category_name: rawCat?.name || 'Category',
+                icon: rawCat?.icon || 'receipt-outline',
+                color: rawCat?.color || '#1F4F59',
+                allocated_amount: 0,
+                spent_amount: 0,
+                remaining_amount: 0,
+              };
+            }
+            walletMap[catId].allocated_amount += allocated;
+          });
+
+          // Calculate total spent per category from active expenses
+          formattedData.forEach((tx: any) => {
+            if (tx.category_id && walletMap[tx.category_id]) {
+              walletMap[tx.category_id].spent_amount += tx.amount;
+            }
+          });
+
+          // Compute remaining amounts
+          const wallets = Object.values(walletMap).map(w => ({
+            ...w,
+            remaining_amount: w.allocated_amount - w.spent_amount
+          }));
+
+          setBudgetWallets(wallets);
+        } else {
+          setBudgetWallets([]);
+        }
+      } else {
+        setBudgetWallets([]);
+      }
+
     } catch (error: any) {
       console.error('Fetch Transactions Error:', error.message);
     } finally {
@@ -238,7 +321,7 @@ function TransactionsScreenContent() {
       
       if (targetIncomeId) {
         const { data: specificIncome } = await supabase
-          .from('incomes')
+          .from('income')
           .select('*')
           .eq('id', targetIncomeId)
           .single();
@@ -251,7 +334,7 @@ function TransactionsScreenContent() {
           .select('*')
           .eq('user_id', user.id)
           .eq('is_archived', false)
-          .order('received_at', { ascending: false }); // Sort to get the latest income first
+          .order('received_at', { ascending: false });
 
         if (incomeErr) throw incomeErr;
         activeIncomes = allIncomes || [];
@@ -263,10 +346,7 @@ function TransactionsScreenContent() {
         return;
       }
 
-      // Calculate total available amount across all valid incomes
       const totalIncomeBudget = activeIncomes.reduce((sum, item) => sum + Number(item.amount), 0);
-
-      // Get all expenses linked to these incomes
       const incomeIds = activeIncomes.map(a => a.id);
       const { data: allExpenses, error: expErr } = await supabase
         .from('expenses')
@@ -275,7 +355,6 @@ function TransactionsScreenContent() {
 
       if (expErr) throw expErr;
 
-      // Filter out current editing transaction if updating
       const filteredExpenses = (allExpenses || []).filter(item => {
         if (editingTransaction && item.id === editingTransaction.id) {
           return false;
@@ -292,7 +371,6 @@ function TransactionsScreenContent() {
         return;
       }
 
-      // Default target income ID for new inserts (grabs the latest one since it's sorted)
       if (!targetIncomeId && activeIncomes.length > 0) {
         targetIncomeId = activeIncomes[0].id;
       }
@@ -374,7 +452,6 @@ function TransactionsScreenContent() {
       setIsDeleteModalVisible(false);
       setTransactionToDelete(null);
       
-      // Trigger Modern Inline Success Alert on screen
       setSuccessMessage('Transaction deleted successfully!');
       setTimeout(() => setSuccessMessage(null), 3500);
 
@@ -487,6 +564,71 @@ function TransactionsScreenContent() {
               <TouchableOpacity onPress={() => setSuccessMessage(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="close" size={16} color="#16A34A" />
               </TouchableOpacity>
+            </View>
+          )}
+
+          {/* HORIZONTAL BUDGET WALLETS CONTAINER */}
+          {budgetWallets.length > 0 && (
+            <View style={{ marginBottom: 16 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Budget Wallets
+              </Text>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                contentContainerStyle={{ gap: 10 }}
+              >
+                {budgetWallets.map((wallet) => {
+                  const walletColor = wallet.color || '#1F4F59';
+                  const isNegative = wallet.remaining_amount < 0;
+                  return (
+                    <View 
+                      key={wallet.category_id}
+                      style={{
+                        width: 170,
+                        backgroundColor: '#F8FAFC',
+                        borderRadius: 14,
+                        padding: 12,
+                        borderWidth: 1,
+                        borderColor: '#F1F5F9',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        <View style={{ 
+                          width: 28, 
+                          height: 28, 
+                          borderRadius: 8, 
+                          backgroundColor: `${walletColor}15`, 
+                          justifyContent: 'center', 
+                          alignItems: 'center', 
+                          marginRight: 8 
+                        }}>
+                          <Ionicons name={wallet.icon || 'receipt-outline'} size={14} color={walletColor} />
+                        </View>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B', flex: 1 }} numberOfLines={1}>
+                          {wallet.category_name}
+                        </Text>
+                      </View>
+
+                      <View>
+                        <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '500' }}>Remaining</Text>
+                        <Text 
+                          style={{ 
+                            fontSize: 14, 
+                            fontWeight: '800', 
+                            color: isNegative ? '#DC2626' : '#16A34A',
+                            marginTop: 1 
+                          }}
+                          numberOfLines={1}
+                        >
+                          {isNegative ? '-' : ''}₱{Math.abs(wallet.remaining_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
             </View>
           )}
 
