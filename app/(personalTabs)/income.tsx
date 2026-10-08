@@ -1,10 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   StatusBar as NativeStatusBar,
   Platform,
@@ -17,6 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
 
 import { supabase } from '../../lib/supabase';
 
@@ -31,7 +31,11 @@ interface IncomeItem {
   is_archived?: boolean;
 }
 
-// Helper function to format "YYYY-MM-DD" into words (e.g., "Oct 7, 2026")
+interface InlineMessage {
+  type: 'error' | 'success' | 'warning';
+  text: string;
+}
+
 const formatDate = (dateStr: string) => {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   const [year, month, day] = dateStr.split('-').map(Number);
@@ -45,7 +49,6 @@ const formatDate = (dateStr: string) => {
   });
 };
 
-// Helper to format date into YYYY-MM-DD local string
 const toLocalDateString = (d: Date) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -58,6 +61,20 @@ export default function IncomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [incomes, setIncomes] = useState<IncomeItem[]>([]);
+
+  // Inline Notification State
+  const [screenMessage, setScreenMessage] = useState<InlineMessage | null>(null);
+  const [modalMessage, setModalMessage] = useState<InlineMessage | null>(null);
+  const [allocationMessage, setAllocationMessage] = useState<InlineMessage | null>(null);
+
+  // Confirmation Action State (Replacing destructive/archive alert popups)
+  const [confirmConfig, setConfirmConfig] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning';
+    onConfirm: () => void;
+  }>({ visible: false, title: '', message: '', type: 'danger', onConfirm: () => {} });
 
   // Modal State
   const [modalVisible, setModalVisible] = useState(false);
@@ -79,6 +96,8 @@ export default function IncomeScreen() {
   const [categories, setCategories] = useState<any[]>([]);
   const [categoryAllocations, setCategoryAllocations] = useState<Record<string, string>>({});
 
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const getRemainingBalance = () => {
     const totalIncome = parseFloat(amount) || 0;
     const totalAllocated = Object.values(categoryAllocations).reduce<number>((sum, val) => sum + (parseFloat(val) || 0), 0);
@@ -94,12 +113,12 @@ export default function IncomeScreen() {
 
   const fetchData = async () => {
     try {
+      setScreenMessage(null);
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Fetch Incomes
       const { data: incomeData, error: incomeError } = await supabase
         .from('income')
         .select('*')
@@ -109,17 +128,15 @@ export default function IncomeScreen() {
       if (incomeError) throw incomeError;
       setIncomes(incomeData || []);
 
-      // 2. Fetch Categories (Allows both user-specific and global/NULL categories)
-const { data: categoryData, error: categoryError } = await supabase
-  .from('categories')
-  .select('*')
-  .or(`user_id.eq.${user.id},user_id.is.null`);
+      const { data: categoryData, error: categoryError } = await supabase
+        .from('categories')
+        .select('*')
+        .or(`user_id.eq.${user.id},user_id.is.null`);
 
-if (categoryError) throw categoryError;
-setCategories(categoryData || []);
-
+      if (categoryError) throw categoryError;
+      setCategories(categoryData || []);
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      setScreenMessage({ type: 'error', text: error.message });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -185,129 +202,153 @@ setCategories(categoryData || []);
     setAmount('');
     setCategoryAllocations({});
     setEnableBudgetAllocation(false);
+    setModalMessage(null);
+    setAllocationMessage(null);
     handleSelectPeriod('Today');
   };
 
   const handleSaveIncome = async () => {
-    if (!sourceName.trim() || !amount.trim() || !startDate.trim() || !endDate.trim()) {
-      Alert.alert('Validation Error', 'Please fill in all required fields.');
-      return;
-    }
+  setModalMessage(null);
+  if (!sourceName.trim() || !amount.trim() || !startDate.trim() || !endDate.trim()) {
+    setModalMessage({ type: 'error', text: 'Please fill in all required fields.' });
+    return;
+  }
 
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert('Validation Error', 'Please enter a valid amount.');
-      return;
-    }
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    setModalMessage({ type: 'error', text: 'Please enter a valid amount.' });
+    return;
+  }
 
-    if (enableBudgetAllocation && getRemainingBalance() !== 0) {
-      Alert.alert('Allocation Error', 'Please allocate the exact income amount across categories (Remaining must be ₱0.00).');
-      return;
-    }
+  if (enableBudgetAllocation && getRemainingBalance() !== 0) {
+    setModalMessage({ type: 'error', text: 'Please allocate exact income across categories (Remaining must be ₱0.00).' });
+    return;
+  }
 
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
-      Alert.alert('Validation Error', 'Dates must be in YYYY-MM-DD format.');
-      return;
-    }
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+    setModalMessage({ type: 'error', text: 'Dates must be in YYYY-MM-DD format.' });
+    return;
+  }
 
-    if (startDate > endDate) {
-      Alert.alert('Validation Error', 'Start Date cannot be later than End Date.');
-      return;
-    }
+  if (startDate > endDate) {
+    setModalMessage({ type: 'error', text: 'Start Date cannot be later than End Date.' });
+    return;
+  }
 
-    try {
-      setSubmitting(true);
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) return;
+  try {
+    setSubmitting(true);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
 
-      const payload = {
-        user_id: user.id,
-        source_name: sourceName.trim(),
-        amount: parsedAmount,
-        start_date: startDate,
-        end_date: endDate,
-        received_at: new Date().toISOString(),
-        is_archived: false,
-      };
+    const payload = {
+      user_id: user.id,
+      source_name: sourceName.trim(),
+      amount: parsedAmount,
+      start_date: startDate,
+      end_date: endDate,
+      received_at: new Date().toISOString(),
+      is_archived: false,
+    };
 
-      const { data: incomeData, error: insertError } = await supabase.from('income').insert([payload]).select().single();
-      if (insertError) throw insertError;
+    const { data: incomeData, error: insertError } = await supabase.from('income').insert([payload]).select().single();
+    if (insertError) throw insertError;
 
-      if (enableBudgetAllocation) {
-        const budgetEntries = Object.entries(categoryAllocations)
-          .filter(([_, val]) => parseFloat(val) > 0)
-          .map(([categoryId, val]) => ({
-            user_id: user.id,
-            category_id: categoryId,
-            income_id: incomeData.id,
-            allocated_amount: parseFloat(val),
-          }));
+    if (enableBudgetAllocation) {
+      const budgetEntries = Object.entries(categoryAllocations)
+        .filter(([_, val]) => parseFloat(val) > 0)
+        .map(([categoryId, val]) => ({
+          user_id: user.id,
+          category_id: categoryId,
+          income_id: incomeData.id,
+          allocated_amount: parseFloat(val),
+        }));
 
-        if (budgetEntries.length > 0) {
-          const { error: budgetError } = await supabase.from('budgets').insert(budgetEntries);
-          if (budgetError) throw budgetError;
-        }
+      if (budgetEntries.length > 0) {
+        const { error: budgetError } = await supabase.from('budgets').insert(budgetEntries);
+        if (budgetError) throw budgetError;
       }
+    }
 
+    // 1. Show success message inside the modal
+    setModalMessage({ type: 'success', text: 'Income added successfully!' });
+    fetchData();
+
+    // 2. Wait 1.5 seconds, then clear form states and close the modal
+    setTimeout(() => {
       setModalVisible(false);
+      setModalMessage(null);
       setCategoryAllocations({});
       setEnableBudgetAllocation(false);
-      fetchData();
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
+      // Optional: clear inputs here if you have a reset function like handleResetForm()
+    }, 1500);
 
-  const handleArchiveIncome = (id: string) => {
-    Alert.alert(
-      'Archive Income',
-      'Are you sure you want to archive this income record?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Archive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase.from('income').update({ is_archived: true }).eq('id', id);
-              if (error) throw error;
-              fetchData();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
-            }
-          },
-        },
-      ]
-    );
-  };
+  } catch (error: any) {
+    setModalMessage({ type: 'error', text: error.message });
+  } finally {
+    setSubmitting(false);
+  }
+};
 
-  const handleDeleteIncome = (id: string) => {
-    Alert.alert(
-      'Delete Income',
-      'Are you sure you want to delete this income record?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await supabase.from('income').delete().eq('id', id);
-              if (error) throw error;
-              fetchData();
-            } catch (err: any) {
-              Alert.alert('Error', err.message);
-            }
-          },
-        },
-      ]
-    );
-  };
+const showMessageWithTimeout = (type: 'success' | 'error', text: string) => {
+  // Clear any existing timeout to prevent overlapping clears
+  if (timeoutRef.current) {
+    clearTimeout(timeoutRef.current);
+  }
 
+  setScreenMessage({ type, text });
+
+  // Hide the message after 3 seconds (3000ms)
+  timeoutRef.current = setTimeout(() => {
+    setScreenMessage(null);
+  }, 3000);
+};
+
+const handleArchiveIncome = (id: string) => {
+  setConfirmConfig({
+    visible: true,
+    title: 'Archive Income',
+    message: 'Are you sure you want to archive this income record?',
+    type: 'warning',
+    onConfirm: async () => {
+      try {
+        const { error } = await supabase.from('income').update({ is_archived: true }).eq('id', id);
+        if (error) throw error;
+        
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+        fetchData();
+        showMessageWithTimeout('success', 'Income record archived successfully.');
+      } catch (err: any) {
+        showMessageWithTimeout('error', err.message);
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+      }
+    },
+  });
+};
+
+const handleDeleteIncome = (id: string) => {
+  setConfirmConfig({
+    visible: true,
+    title: 'Delete Income',
+    message: 'Are you sure you want to permanently delete this income record?',
+    type: 'danger',
+    onConfirm: async () => {
+      try {
+        const { error } = await supabase.from('income').delete().eq('id', id);
+        if (error) throw error;
+        
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+        fetchData();
+        showMessageWithTimeout('success', 'Income record deleted successfully.');
+      } catch (err: any) {
+        showMessageWithTimeout('error', err.message);
+        setConfirmConfig((prev) => ({ ...prev, visible: false }));
+      }
+    },
+  });
+};
   const activeIncomes = incomes.filter((i) => !i.is_archived);
 
   const handleDayPress = (dateStr: string) => {
@@ -413,6 +454,19 @@ setCategories(categoryData || []);
         }
       >
         <View style={styles.bodyCard}>
+          {screenMessage && (
+            <View style={[styles.inlineBanner, screenMessage.type === 'error' ? styles.bannerError : styles.bannerSuccess]}>
+              <Ionicons 
+                name={screenMessage.type === 'error' ? 'alert-circle-outline' : 'checkmark-circle-outline'} 
+                size={16} 
+                color={screenMessage.type === 'error' ? '#991B1B' : '#166534'} 
+              />
+              <Text style={[styles.bannerText, screenMessage.type === 'error' ? styles.bannerTextError : styles.bannerTextSuccess]}>
+                {screenMessage.text}
+              </Text>
+            </View>
+          )}
+
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>All Income Streams</Text>
             <View style={styles.countBadge}>
@@ -452,6 +506,22 @@ setCategories(categoryData || []);
                   <Ionicons name="close" size={18} color="#64748B" />
                 </TouchableOpacity>
               </View>
+
+              {/* Error Banner */}
+              {modalMessage && modalMessage.type === 'error' && (
+                <View style={[styles.inlineBanner, styles.bannerError, { marginBottom: 12 }]}>
+                  <Ionicons name="alert-circle-outline" size={16} color="#DC2626" />
+                  <Text style={[styles.bannerText, styles.bannerTextError]}>{modalMessage.text}</Text>
+                </View>
+              )}
+
+              {/* Success Banner */}
+              {modalMessage && modalMessage.type === 'success' && (
+                <View style={[styles.inlineBanner, styles.bannerSuccess, { marginBottom: 12 }]}>
+                  <Ionicons name="checkmark-circle-outline" size={16} color="#16A34A" />
+                  <Text style={[styles.bannerText, styles.bannerTextSuccess]}>{modalMessage.text}</Text>
+                </View>
+              )}
 
               <Text style={styles.inputLabel}>Source Name</Text>
               <TextInput
@@ -665,6 +735,39 @@ setCategories(categoryData || []);
           </View>
         </View>
       </Modal>
+
+      {/* Modern Inline Confirmation Modal */}
+      <Modal animationType="fade" transparent={true} visible={confirmConfig.visible} onRequestClose={() => setConfirmConfig(prev => ({ ...prev, visible: false }))}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxWidth: 340, width: '85%', padding: 22 }]}>
+            <View style={[styles.emptyIconBox, { backgroundColor: confirmConfig.type === 'danger' ? '#FEF2F2' : '#F0F5F2', alignSelf: 'center', marginBottom: 16 }]}>
+              <Ionicons 
+                name={confirmConfig.type === 'danger' ? 'trash-outline' : 'archive-outline'} 
+                size={24} 
+                color={confirmConfig.type === 'danger' ? '#DC2626' : '#1F4F59'} 
+              />
+            </View>
+            <Text style={[styles.modalTitle, { textAlign: 'center', marginBottom: 6 }]}>{confirmConfig.title}</Text>
+            <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginBottom: 20, lineHeight: 18 }}>
+              {confirmConfig.message}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelBtn]} 
+                onPress={() => setConfirmConfig(prev => ({ ...prev, visible: false }))}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.modalButton, { backgroundColor: confirmConfig.type === 'danger' ? '#DC2626' : '#1F4F59' }]} 
+                onPress={confirmConfig.onConfirm}
+              >
+                <Text style={[styles.confirmBtnText, { color: '#FFFFFF' }]}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -701,7 +804,7 @@ function IncomeCard({ item, onArchive, onDelete }: { item: IncomeItem; onArchive
 
         <View style={styles.actionButtonsRow}>
           <TouchableOpacity onPress={onArchive} style={[styles.actionButton, styles.archiveButtonBorder]} activeOpacity={0.7}>
-            <Ionicons name="archive-outline" size={13} color="#D97706" />
+            <Ionicons name="archive-outline" size={13} color="#1F4F59" />
           </TouchableOpacity>
           <TouchableOpacity onPress={onDelete} style={[styles.actionButton, styles.deleteButtonBorder]} activeOpacity={0.7}>
             <Ionicons name="trash-outline" size={13} color="#E11D48" />
@@ -855,21 +958,21 @@ const styles = StyleSheet.create({
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#F0F5F2',
     paddingVertical: 5,
     paddingHorizontal: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: '#F0F5F2',
     gap: 4,
   },
   archiveButtonBorder: {
-    backgroundColor: '#FFFBEB',
-    borderColor: '#FEF3C7',
+    backgroundColor: '#F0F5F2',
+    borderColor: '#F0F5F2',
   },
   deleteButtonBorder: {
     backgroundColor: '#FFF5F5',
-    borderColor: '#FFE3E3',
+    borderColor: '#FFF5F5',
   },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', alignItems: 'center' },
   modalScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', width: '100%',padding: 20 },
@@ -984,5 +1087,34 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
     backgroundColor: '#FFFFFF',
+  },
+  // Add these entries to your existing StyleSheet.create object:
+  inlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 14,
+    gap: 8,
+    borderWidth: 1,
+  },
+  bannerError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FEE2E2',
+  },
+  bannerSuccess: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#DCFCE7',
+  },
+  bannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  bannerTextError: {
+    color: '#DC2626',
+  },
+  bannerTextSuccess: {
+    color: '#166534',
   },
 });
