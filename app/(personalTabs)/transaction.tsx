@@ -568,69 +568,72 @@ function TransactionsScreenContent() {
           )}
 
           {/* HORIZONTAL BUDGET WALLETS CONTAINER */}
-          {budgetWallets.length > 0 && (
-            <View style={{ marginBottom: 16 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Budget Wallets
-              </Text>
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false} 
-                contentContainerStyle={{ gap: 10 }}
-              >
-                {budgetWallets.map((wallet) => {
-                  const walletColor = wallet.color || '#1F4F59';
-                  const isNegative = wallet.remaining_amount < 0;
-                  return (
-                    <View 
-                      key={wallet.category_id}
-                      style={{
-                        width: 170,
-                        backgroundColor: '#F8FAFC',
-                        borderRadius: 14,
-                        padding: 12,
-                        borderWidth: 1,
-                        borderColor: '#F1F5F9',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                        <View style={{ 
-                          width: 28, 
-                          height: 28, 
-                          borderRadius: 8, 
-                          backgroundColor: `${walletColor}15`, 
-                          justifyContent: 'center', 
-                          alignItems: 'center', 
-                          marginRight: 8 
-                        }}>
-                          <Ionicons name={wallet.icon || 'receipt-outline'} size={14} color={walletColor} />
-                        </View>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B', flex: 1 }} numberOfLines={1}>
-                          {wallet.category_name}
-                        </Text>
-                      </View>
+{budgetWallets.length > 0 && (
+  <View style={{ marginBottom: 16 }}>
+    <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      Budget Wallets
+    </Text>
+    <ScrollView 
+      horizontal 
+      showsHorizontalScrollIndicator={false} 
+      contentContainerStyle={{ gap: 10 }}
+    >
+      {/* Sort wallets so the lowest remaining budget appears first */}
+      {[...budgetWallets]
+        .sort((a, b) => a.remaining_amount - b.remaining_amount)
+        .map((wallet) => {
+          const walletColor = wallet.color || '#1F4F59';
+          const isNegative = wallet.remaining_amount < 0;
+          return (
+            <View 
+              key={wallet.category_id}
+              style={{
+                width: 170,
+                backgroundColor: '#F8FAFC',
+                borderRadius: 14,
+                padding: 12,
+                borderWidth: 1,
+                borderColor: '#F1F5F9',
+                justifyContent: 'space-between'
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ 
+                  width: 28, 
+                  height: 28, 
+                  borderRadius: 8, 
+                  backgroundColor: `${walletColor}15`, 
+                  justifyContent: 'center', 
+                  alignItems: 'center', 
+                  marginRight: 8 
+                }}>
+                  <Ionicons name={wallet.icon || 'receipt-outline'} size={14} color={walletColor} />
+                </View>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B', flex: 1 }} numberOfLines={1}>
+                  {wallet.category_name}
+                </Text>
+              </View>
 
-                      <View>
-                        <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '500' }}>Remaining</Text>
-                        <Text 
-                          style={{ 
-                            fontSize: 14, 
-                            fontWeight: '800', 
-                            color: isNegative ? '#DC2626' : '#16A34A',
-                            marginTop: 1 
-                          }}
-                          numberOfLines={1}
-                        >
-                          {isNegative ? '-' : ''}₱{Math.abs(wallet.remaining_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </ScrollView>
+              <View>
+                <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '500' }}>Remaining</Text>
+                <Text 
+                  style={{ 
+                    fontSize: 14, 
+                    fontWeight: '800', 
+                    color: isNegative ? '#DC2626' : '#16A34A',
+                    marginTop: 1 
+                  }}
+                  numberOfLines={1}
+                >
+                  {isNegative ? '-' : ''}₱{Math.abs(wallet.remaining_amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Text>
+              </View>
             </View>
-          )}
+          );
+        })}
+    </ScrollView>
+  </View>
+)}
 
           <View style={styles.searchContainer}>
             <View style={styles.searchWrapper}>
