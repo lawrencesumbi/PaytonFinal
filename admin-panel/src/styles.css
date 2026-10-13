@@ -861,6 +861,81 @@ body {
   margin: 0;
 }
 
+/* Compact spacing ug saktong sizing aron walay maputol */
+.ref-table-container {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.ref-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px; /* Gi-adjust ang font size gamay aron masigo tanan */
+}
+
+.ref-table th,
+.ref-table td {
+  padding: 10px 6px; /* Giminusan ang padding sa kilid aron dili maghuot */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-table th {
+  color: #64748b;
+  font-weight: 600;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 11px;
+  background-color: #f8fafc;
+  text-transform: uppercase;
+}
+
+.ref-table td {
+  border-bottom: 1px solid #e2e8f0;
+  color: #0f172a;
+}
+
+/* Button sizing adjustments para dili moawas sa cell */
+.ref-action-btn {
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ref-btn-suspend {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.ref-btn-suspend:hover:not(:disabled) {
+  background-color: #fee2e2;
+}
+
+.ref-btn-reactivate {
+  background-color: #ecfdf5;
+  color: #059669;
+  border-color: #a7f3d0;
+}
+
+.ref-btn-reactivate:hover:not(:disabled) {
+  background-color: #d1fae5;
+}
+
+.ref-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ref-panel-sub {
   font-size: 12px;
   color: #64748b;
@@ -899,7 +974,162 @@ body {
 .ref-search-btn:hover {
   background-color: #059669;
 }
+/* Custom Modal Styling - Anaa gyud sa tunga sa screen */
+.ref-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
 
+.ref-modal-content {
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: refModalFadeIn 0.2s ease-out;
+}
+
+@keyframes refModalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ref-modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.ref-modal-desc {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.ref-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ref-modal-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.ref-modal-input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+  outline: none;
+  color: #0f172a;
+  background-color: #f8fafc;
+  transition: border-color 0.2s;
+}
+
+.ref-modal-input:focus {
+  border-color: #10b981;
+  background-color: #ffffff;
+}
+
+.ref-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ref-modal-btn-cancel {
+  padding: 8px 16px;
+  background-color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.ref-modal-btn-cancel:hover {
+  background-color: #e2e8f0;
+}
+
+.ref-modal-btn-confirm {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.ref-modal-btn-confirm.danger {
+  background-color: #dc2626;
+}
+
+.ref-modal-btn-confirm.danger:hover {
+  background-color: #b91c1c;
+}
+
+.ref-modal-btn-confirm.success {
+  background-color: #059669;
+}
+
+.ref-modal-btn-confirm.success:hover {
+  background-color: #047857;
+}
+.text-center {
+  text-align: center;
+  align-items: center;
+}
+
+.ref-alert-icon-box {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: bold;
+  margin: 0 auto;
+}
+
+.ref-alert-icon-box.success {
+  background-color: #ecfdf5;
+  color: #059669;
+}
+
+.ref-alert-icon-box.error {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
 .ref-table {
   width: 100%;
   border-collapse: collapse;
@@ -1375,3 +1605,184 @@ body {
 
 .text-right { text-align: right; }
 .font-semibold { font-weight: 600; }
+
+/* --- Audit Logs Styling (Full Width Adjusted) --- */
+.audit-container {
+  padding: 24px;
+  width: 100%; /* Gi-100% width para mo-fit sa tibuok container/screen */
+  box-sizing: border-box;
+  font-family: inherit;
+  color: #1f2937;
+}
+
+.audit-header h1 {
+  font-size: 1.85rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: #111827;
+}
+
+.audit-subtitle {
+  color: #6b7280;
+  font-size: 0.95rem;
+  margin-bottom: 24px;
+}
+
+/* Controls / Search & Filters */
+.audit-controls {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.search-box {
+  flex: 1; /* Padasigon ang search box para mo-expand */
+  min-width: 280px;
+}
+
+.search-box input {
+  width: 100%; /* Full width sa iyang wrapper */
+  box-sizing: border-box;
+  padding: 11px 16px;
+  font-size: 0.95rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  background-color: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.filter-box select {
+  padding: 11px 16px;
+  font-size: 0.95rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  outline: none;
+  background-color: #fff;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.search-box input:focus,
+.filter-box select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Table Wrapper */
+.tablewrap {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  overflow-x: auto; /* Responsive gihapon sa mobile */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+table {
+  width: 100%; /* Gi-siguro nga 100% width gyud ang table */
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+th {
+  background-color: #f9fafb;
+  color: #374151;
+  font-weight: 600;
+  padding: 14px 20px; /* Gi-dugangan ang padding para mas hayahay */
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+
+td {
+  padding: 14px 20px; /* Gi-dugangan ang padding */
+  border-bottom: 1px solid #f3f4f6;
+  color: #4b5563;
+}
+
+tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+/* Badges for Actions */
+.badge {
+  display: inline-block;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.badge-login {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.badge-logout {
+  background-color: #f3f4f6;
+  color: #374151;
+}
+
+.badge-suspend_user {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-reactivate_user {
+   background-color: #d1fae5;
+  color: #065f46;
+}
+
+/* Pager / Pagination */
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 20px;
+  padding: 4px 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.pager button {
+  padding: 9px 18px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background-color: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  color: #374151;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+}
+
+.pager button:hover:not(:disabled) {
+  background-color: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.pager button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.muted {
+  color: #9ca3af;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.alert-error {
+  background-color: #fee2e2;
+  color: #991b1b;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
