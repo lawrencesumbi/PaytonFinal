@@ -9,10 +9,10 @@ import AuditLogs from "./pages/AuditLogs";
 export type AdminRole = "super_admin" | "support";
 type Page = "dashboard" | "users" | "audit";
 
-const NAV: { id: Page; label: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
-  { id: "users", label: "Users" },
-  { id: "audit", label: "Audit log" },
+const NAV: { id: Page; label: string; icon: string }[] = [
+  { id: "dashboard", label: "Dashboard", icon: "📊" },
+  { id: "users", label: "Users", icon: "👥" },
+  { id: "audit", label: "Audit log", icon: "⚡" },
 ];
 
 export default function App() {
@@ -30,7 +30,6 @@ export default function App() {
   }, []);
 
   // Ask the database whether this user is an administrator.
-  // (This only decides what the screen shows. The database functions enforce access themselves.)
   const userId = session?.user?.id ?? null;
   useEffect(() => {
     let cancelled = false;
@@ -64,31 +63,49 @@ export default function App() {
     await supabase.auth.signOut();
   }
 
-  if (checking) return <div className="center">Checking access…</div>;
+  if (checking) return <div className="loading-box">Checking access…</div>;
   if (!session || !adminRole) return <Login notice={notice} />;
 
   return (
-    <div className="shell">
-      <aside className="rail">
-        <div className="brand">Payton Admin</div>
-        <nav>
-          {NAV.map((n) => (
-            <button
-              key={n.id}
-              className={page === n.id ? "navbtn active" : "navbtn"}
-              onClick={() => setPage(n.id)}
-            >
-              {n.label}
-            </button>
-          ))}
-        </nav>
-        <div className="who">
-          <div className="who-email">{session.user.email}</div>
-          <div className="who-role">{adminRole === "super_admin" ? "Super admin" : "Support (read-only)"}</div>
-          <button className="linkbtn" onClick={logout}>Sign out</button>
+    <div className="vizora-layout">
+      {/* Sidebar Area */}
+      <aside className="vizora-sidebar">
+        <div>
+          <div className="vizora-brand">
+            <div className="vizora-logo-box">P</div>
+            Payton Admin
+          </div>
+
+          <nav className="vizora-nav">
+            {NAV.map((n) => (
+              <button
+                key={n.id}
+                className={page === n.id ? "vizora-nav-item active" : "vizora-nav-item"}
+                onClick={() => setPage(n.id)}
+              >
+                <span>{n.icon}</span> {n.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* User Info & Footer */}
+        <div className="vizora-sidebar-footer">
+          <div className="vizora-user-info">
+            <span className="vizora-user-email">{session.user.email}</span>
+            <span className="vizora-user-role">
+              {adminRole === "super_admin" ? "Super admin" : "Support (read-only)"}
+            </span>
+          </div>
+
+          <button className="vizora-signout-btn" onClick={logout}>
+            🚪 Sign out
+          </button>
         </div>
       </aside>
-      <main className="content">
+
+      {/* Main Pages Content */}
+      <main className="vizora-main">
         {page === "dashboard" && <Dashboard />}
         {page === "users" && <Users adminRole={adminRole} />}
         {page === "audit" && <AuditLogs />}
