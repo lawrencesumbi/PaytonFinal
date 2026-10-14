@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { supabase, formatDate } from "../lib/supabase";
+import { ACTION_LABELS } from "../lib/auditLabels";
 
 type Log = {
   id: number;
@@ -12,12 +13,6 @@ type Log = {
 };
 
 const PAGE_SIZE = 10; // Gi-set sa 10 kada page para dili hasol mag-scroll
-const ACTION_LABELS: Record<string, string> = {
-  login: "Signed in",
-  logout: "Signed out",
-  suspend_user: "Suspended a user",
-  reactivate_user: "Reactivated a user",
-};
 
 export default function AuditLogs() {
   const [page, setPage] = useState(0);
@@ -77,10 +72,9 @@ export default function AuditLogs() {
         <div className="filter-box">
           <select value={selectedAction} onChange={(e) => setSelectedAction(e.target.value)}>
             <option value="all">All Actions</option>
-            <option value="login">Signed in</option>
-            <option value="logout">Signed out</option>
-            <option value="suspend_user">Suspended a user</option>
-            <option value="reactivate_user">Reactivated a user</option>
+            {Object.entries(ACTION_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
           </select>
         </div>
       </div>

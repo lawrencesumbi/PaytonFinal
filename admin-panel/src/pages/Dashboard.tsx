@@ -31,7 +31,8 @@ export default function Dashboard() {
   const checkHealth = async () => {
     const started = performance.now();
     try {
-      await supabase.from("expenses").select("id", { count: "exact", head: true });
+      const { error: pingError } = await supabase.rpc("admin_role");
+      if (pingError) throw pingError;
       const elapsed = Math.round(performance.now() - started);
       setLatency(elapsed);
       if (elapsed > 1000) {
@@ -62,10 +63,10 @@ export default function Dashboard() {
   useEffect(() => {
     fetchStats();
 
-    // Auto-ping matag 10 segundos aron ma-update ang tinuod nga latency ug dynamic statuses
+    // Re-check connection speed once a minute (keeps free-tier traffic low)
     const interval = setInterval(() => {
       checkHealth();
-    }, 5000);
+    }, 60000);
 
     // Automatic DB changes listener (Realtime Update)
     const channel = supabase
@@ -316,7 +317,7 @@ export default function Dashboard() {
                 <p className="panel-sub">Realtime connection telemetry & dynamic system health</p>
               </div>
               <span style={{ fontSize: "11px", color: "#64748b", backgroundColor: "#f1f5f9", padding: "4px 8px", borderRadius: "6px" }}>
-                Auto-pinging every 5s
+                Re-checks every 60s
               </span>
             </div>
 
@@ -333,22 +334,14 @@ export default function Dashboard() {
                 </strong>
               </div>
 
-              {/* 2. Edge Functions Status (Dynamic) */}
+              {/* 2. Edge Functions: checked on the System monitoring page, not measured here */}
               <div className="vizora-status-box" style={{ flexDirection: "column", alignItems: "flex-start", gap: "8px", margin: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span className="vizora-dot" style={{ backgroundColor: edgeStatus === "healthy" ? "#10b981" : edgeStatus === "degraded" ? "#f59e0b" : "#dc2626" }} />
+                  <span className="vizora-dot" style={{ backgroundColor: "#94a3b8" }} />
                   <span style={{ fontWeight: 600, fontSize: "13px" }}>Edge Functions</span>
                 </div>
-                <strong 
-                  style={{ 
-                    color: edgeStatus === "healthy" ? "#059669" : edgeStatus === "degraded" ? "#b45309" : "#dc2626", 
-                    backgroundColor: edgeStatus === "healthy" ? "#ecfdf5" : edgeStatus === "degraded" ? "#fffbeb" : "#fef2f2", 
-                    padding: "4px 8px", 
-                    borderRadius: "6px", 
-                    fontSize: "12px" 
-                  }}
-                >
-                  {edgeStatus === "healthy" ? "Operational (200 OK)" : edgeStatus === "degraded" ? "Degraded Speed" : "Error (500)"}
+                <strong style={{ color: "#475569", backgroundColor: "#f1f5f9", padding: "4px 8px", borderRadius: "6px", fontSize: "12px" }}>
+                  See System monitoring
                 </strong>
               </div>
 
@@ -365,38 +358,16 @@ export default function Dashboard() {
 
             </div>
 
-            {/* AI Service Usage Telemetry Card (Naay dynamic API Latency Avg) */}
+            {/* AI usage is not recorded anywhere yet, so no figures are shown */}
             <div style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "16px" }}>✨</span>
-                  <span style={{ fontSize: "13px", fontWeight: "600", color: "#334155" }}>Google Gemini AI Service Usage</span>
-                </div>
-                <span style={{ fontSize: "11px", color: "#059669", backgroundColor: "#ecfdf5", padding: "2px 8px", borderRadius: "6px", fontWeight: "600" }}>
-                  Active Model: Gemini Pro / Flash
-                </span>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", textAlign: "center", marginTop: "12px" }}>
-                <div style={{ background: "#ffffff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontSize: "10px", color: "#64748b" }}>Receipt Scans (OCR)</div>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a", marginTop: "2px" }}>1,248</div>
-                </div>
-                <div style={{ background: "#ffffff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontSize: "10px", color: "#64748b" }}>Financial Chats</div>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: "#0f172a", marginTop: "2px" }}>3,892</div>
-                </div>
-                <div style={{ background: "#ffffff", padding: "10px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                  <div style={{ fontSize: "10px", color: "#64748b" }}>API Latency Avg</div>
-                  <div style={{ fontSize: "16px", fontWeight: "700", color: latencyStyle.color, marginTop: "2px" }}>
-                    {latency !== null ? `${latency} ms` : "310 ms"}
-                  </div>
-                </div>
-              </div>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>AI service usage</div>
+              <p style={{ fontSize: "12px", color: "#64748b", margin: "6px 0 0" }}>
+                Not tracked yet. The mobile app calls the AI service directly and does not record usage, so there is nothing real to show here.
+              </p>
             </div>
 
             <p style={{ color: "#9ca3af", fontSize: "11px", marginTop: "12px", textAlign: "right" }}>
-              Telemetry data synced live via Payton Admin RPC & Heartbeat Ping.
+              Connection speed is measured with a real call to the admin database function.
             </p>
           </div>
 

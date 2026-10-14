@@ -5,14 +5,22 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
 import AuditLogs from "./pages/AuditLogs";
+import Roles from "./pages/Roles";
+import Monitoring from "./pages/Monitoring";
+import Feedback from "./pages/Feedback";
+import Settings from "./pages/Settings";
 
 export type AdminRole = "super_admin" | "support";
-type Page = "dashboard" | "users" | "audit";
+type Page = "dashboard" | "users" | "audit" | "roles" | "monitoring" | "feedback" | "settings";
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "📊" },
   { id: "users", label: "Users", icon: "👥" },
   { id: "audit", label: "Audit log", icon: "⚡" },
+  { id: "roles", label: "Roles and permissions", icon: "🛡️" },
+  { id: "monitoring", label: "System monitoring", icon: "🩺" },
+  { id: "feedback", label: "Reports and feedback", icon: "💬" },
+  { id: "settings", label: "Settings", icon: "⚙️" },
 ];
 
 export default function App() {
@@ -92,7 +100,7 @@ export default function App() {
         {/* User Info & Footer */}
         <div className="vizora-sidebar-footer">
           <div className="vizora-user-info">
-            <span className="vizora-user-email">{session.user.email}</span>
+            <span className="vizora-user-email">{(session.user.user_metadata?.display_name as string | undefined) || session.user.email}</span>
             <span className="vizora-user-role">
               {adminRole === "super_admin" ? "Super admin" : "Support (read-only)"}
             </span>
@@ -109,6 +117,10 @@ export default function App() {
         {page === "dashboard" && <Dashboard />}
         {page === "users" && <Users adminRole={adminRole} />}
         {page === "audit" && <AuditLogs />}
+        {page === "roles" && <Roles adminRole={adminRole} />}
+        {page === "monitoring" && <Monitoring />}
+        {page === "feedback" && <Feedback adminRole={adminRole} />}
+        {page === "settings" && <Settings adminRole={adminRole} />}
       </main>
     </div>
   );
