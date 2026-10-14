@@ -1,6 +1,6 @@
 // app/help.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getAiModel } from '../../services/aiClient';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useRef, useState } from 'react';
@@ -23,9 +23,6 @@ interface Message {
   sender: 'user' | 'payton';
   text: string;
 }
-
-const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
 
 export default function HelpScreen() {
   const router = useRouter();
@@ -52,9 +49,7 @@ export default function HelpScreen() {
     setLoading(true);
 
     try {
-      if (!apiKey) throw new Error("Missing EXPO_PUBLIC_GEMINI_API_KEY in .env");
-
-      const model = genAI.getGenerativeModel({ 
+      const model = getAiModel('help', { 
         model: "gemini-3.5-flash-lite",
       });
 

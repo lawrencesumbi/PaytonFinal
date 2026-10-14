@@ -1,6 +1,6 @@
 // app/scan.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getAiModel } from '../../services/aiClient';
 import { decode } from 'base64-arraybuffer';
 import { CameraView, FlashMode, useCameraPermissions } from 'expo-camera';
 import { Stack, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
@@ -26,9 +26,6 @@ import Animated, {
 import { supabase } from '../../lib/supabase';
 
 const { width } = Dimensions.get('window');
-
-const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
 
 interface AlertConfig {
   visible: boolean;
@@ -138,7 +135,7 @@ export default function ScanReceiptScreen() {
         // Freeze frame with captured URI for smooth UX transition
         setFrozenPhoto(photo.uri);
 
-        const model = genAI.getGenerativeModel({ 
+        const model = getAiModel('scan', { 
           model: "gemini-3.5-flash-lite",
           generationConfig: {
             responseMimeType: "application/json",

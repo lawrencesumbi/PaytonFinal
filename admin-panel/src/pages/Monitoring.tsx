@@ -24,12 +24,35 @@ type EventRow = {
   details: { reason?: string | null } | null;
 };
 
+type History = {
+  heartbeat: { first_at: string | null; last_at: string | null; count_24h: number; gaps: { from: string; to: string }[] | null };
+  reminders: {
+    runs_7d: number;
+    failed_runs_7d: number;
+    last_run: { at: string; due: number; sent: number; failed: number; status: string } | null;
+  };
+};
+type AiUsage = {
+  days: number;
+  total_logged: number;
+  requests: number;
+  success: number;
+  error: number;
+  rate_limited: number;
+  avg_latency_ms: number | null;
+  tokens_total: number | null;
+  requests_with_token_data: number;
+  by_operation: Record<string, number>;
+  last_success_at: string | null;
+  last_error_at: string | null;
+  recent_errors: { at: string; operation: string; model: string; code: string | null }[] | null;
+};
+
 const LOADING: Check = { state: "loading", detail: "Checking…" };
 
 const NOT_MEASURED: { title: string; reason: string }[] = [
-  { title: "Uptime history", reason: "No uptime records are stored. The checks above are single measurements taken when this page loads." },
-  { title: "AI service (Gemini) availability and usage", reason: "The mobile app calls the AI service directly and does not log it, so there is nothing for the admin panel to read." },
-  { title: "Reminder email function (send-reminders)", reason: "It is not called from the admin panel, so its status is not checked here." },
+  { title: "Uptime percentage", reason: "Not calculated. The heartbeat history above shows only when the database ran its scheduled job." },
+  { title: "AI requests made before the proxy was switched on", reason: "They went directly from the phone to the AI provider and were never recorded." },
   { title: "Mobile app errors and crashes", reason: "The app does not report errors to any table the admin panel can read." },
 ];
 
@@ -42,6 +65,9 @@ export default function Monitoring() {
   const [eventsError, setEventsError] = useState("");
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
   const [running, setRunning] = useState(false);
+  const [history, setHistory] = useState<History | null>(null);
+  const [ai, setAi] = useState<AiUsage | null>(null);
+  const [extrasError, setExtrasError] = useState("");
 
   const run = useCallback(async () => {
     setRunning(true);
@@ -49,6 +75,7 @@ export default function Monitoring() {
     setDb(LOADING);
     setFn(LOADING);
     setEventsError("");
+    setExtrasError("");
 
     const checkAuth = async () => {
       const t = performance.now();
@@ -93,7 +120,27 @@ export default function Monitoring() {
       } else setEvents((data ?? []) as EventRow[]);
     };
 
-    await Promise.all([checkAuth(), checkDb(), checkFn(), loadEvents()]);
+    const loadExtras = async () => {
+      const [h, a] = await Promise.all([
+        supabase.rpc("admin_monitoring_history"),
+        supabase.rpc("admin_ai_usage_summary", { p_days: 7 }),
+      ]);
+      const failure = h.error ?? a.error;
+      if (failure) {
+        setExtrasError(
+          isMissingFunction(failure)
+            ? "Monitoring history functions are missing. Run supabase/migrations/003_monitoring_ai_feedback.sql first."
+            : "Could not load monitoring history."
+        );
+        setHistory(null);
+        setAi(null);
+        return;
+      }
+      setHistory(h.data as History);
+      setAi(a.data as AiUsage);
+    };
+
+    await Promise.all([checkAuth(), checkDb(), checkFn(), loadEvents(), loadExtras()]);
     setCheckedAt(new Date());
     setRunning(false);
   }, []);
@@ -161,6 +208,112 @@ export default function Monitoring() {
             <Metric label="Administrators" value={snapshot.admin_count} />
             <Metric label="Admin actions (last 24 hours, excluding sign-in)" value={snapshot.admin_actions_24h} />
             <Metric label="Last administrator action" value={snapshot.last_admin_action_at ? formatDate(snapshot.last_admin_action_at) : "None yet"} />
+          </div>
+        )}
+      </div>
+
+      {extrasError && <div className="alert alert-error" role="alert">{extrasError}</div>}
+
+      <div className="ref-panel">
+        <div className="ref-panel-header">
+          <div>
+            <h3 className="ref-panel-title">Database heartbeat history</h3>
+            <p className="ref-panel-sub">
+              A scheduled job writes a timestamp every 10 minutes while the database is running. Gaps mean it was not running (or the job was not).
+              This is a record, not an uptime percentage.
+            </p>
+          </div>
+        </div>
+        {!history && !extrasError && <div className="ref-state-cell">Loading history…</div>}
+        {history && !history.heartbeat.last_at && (
+          <div className="mod-note warn">
+            No heartbeat has been recorded. The scheduled job (pg_cron) may not be enabled. Check the notices after running migration 003.
+          </div>
+        )}
+        {history && history.heartbeat.last_at && (
+          <>
+            <div className="mod-grid">
+              <Metric label="Last recorded heartbeat" value={formatDate(history.heartbeat.last_at)} />
+              <Metric label="Heartbeats in the last 24 hours (144 possible)" value={history.heartbeat.count_24h} />
+              <Metric label="Recording since" value={formatDate(history.heartbeat.first_at)} />
+            </div>
+            <p className="ref-panel-sub" style={{ marginTop: 12 }}>
+              {history.heartbeat.gaps && history.heartbeat.gaps.length > 0
+                ? "Gaps longer than 25 minutes in the last 7 days (latest first):"
+                : "No gaps longer than 25 minutes in the last 7 days."}
+            </p>
+            {history.heartbeat.gaps && history.heartbeat.gaps.length > 0 && (
+              <ul className="mod-list">
+                {history.heartbeat.gaps.map((g) => (
+                  <li key={g.to}>{formatDate(g.from)} to {formatDate(g.to)}</li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="ref-panel">
+        <div className="ref-panel-header">
+          <div>
+            <h3 className="ref-panel-title">AI usage (through the proxy, last 7 days)</h3>
+            <p className="ref-panel-sub">Request metadata only. Prompts, receipts, and answers are never stored.</p>
+          </div>
+        </div>
+        {!ai && !extrasError && <div className="ref-state-cell">Loading AI usage…</div>}
+        {ai && ai.total_logged === 0 && (
+          <div className="mod-note">
+            No AI requests have been recorded yet. Requests appear here only after the mobile app is switched to the ai-proxy function.
+          </div>
+        )}
+        {ai && ai.total_logged > 0 && (
+          <>
+            <div className="mod-grid">
+              <Metric label="Requests" value={ai.requests} />
+              <Metric label="Succeeded" value={ai.success} />
+              <Metric label="Failed" value={ai.error} />
+              <Metric label="Blocked by the daily limit" value={ai.rate_limited} />
+              <Metric label="Average response time (successful)" value={ai.avg_latency_ms !== null ? `${ai.avg_latency_ms} ms` : "—"} />
+              <Metric
+                label={`Tokens (${ai.requests_with_token_data} requests reported token data)`}
+                value={ai.requests_with_token_data > 0 && ai.tokens_total !== null ? ai.tokens_total : "Not reported"}
+              />
+            </div>
+            <p className="ref-panel-sub" style={{ marginTop: 12 }}>
+              By type: {Object.entries(ai.by_operation).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}.
+              {" "}Last success: {ai.last_success_at ? formatDate(ai.last_success_at) : "none"}.
+              {" "}Last failure: {ai.last_error_at ? formatDate(ai.last_error_at) : "none"}.
+            </p>
+            {ai.recent_errors && ai.recent_errors.length > 0 && (
+              <ul className="mod-list">
+                {ai.recent_errors.map((e) => (
+                  <li key={e.at}>{formatDate(e.at)}: {e.operation} ({e.model}) failed with {e.code ?? "unknown error"}</li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="ref-panel">
+        <div className="ref-panel-header">
+          <div>
+            <h3 className="ref-panel-title">Reminder emails</h3>
+            <p className="ref-panel-sub">Recorded by the send-reminders function each time it runs.</p>
+          </div>
+        </div>
+        {!history && !extrasError && <div className="ref-state-cell">Loading…</div>}
+        {history && !history.reminders.last_run && (
+          <div className="mod-note">
+            No reminder runs have been recorded. They appear after the updated send-reminders function is deployed and runs.
+          </div>
+        )}
+        {history && history.reminders.last_run && (
+          <div className="mod-grid">
+            <Metric label="Last run" value={formatDate(history.reminders.last_run.at)} />
+            <Metric label="Last run: due, sent, failed" value={`${history.reminders.last_run.due}, ${history.reminders.last_run.sent}, ${history.reminders.last_run.failed}`} />
+            <Metric label="Runs in the last 7 days" value={history.reminders.runs_7d} />
+            <Metric label="Runs with problems (7 days)" value={history.reminders.failed_runs_7d} />
           </div>
         )}
       </div>

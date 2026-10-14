@@ -216,6 +216,7 @@ export default function SponsorProfileScreen() {
           <View style={styles.groupCard}>
             {[
               { id: 'help', label: 'Help Desk', icon: 'chatbubbles-outline', action: () => router.push('/profile/help' as any) },
+              { id: 'feedback', label: 'Send Feedback', icon: 'chatbox-ellipses-outline', action: () => router.push('/profile/feedback' as any) },
               { id: 'terms', label: 'Terms of Use', icon: 'document-attach-outline', action: () => router.push('/profile/terms' as any) },
               { id: 'about', label: 'App Version', icon: 'information-circle-outline', action: () => router.push('/profile/about' as any) },
             ].map((item, index, arr) => (

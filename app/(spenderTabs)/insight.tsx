@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getAiModel } from '../../services/aiClient';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useRef, useState } from 'react';
@@ -17,9 +17,6 @@ import {
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
-
-const apiKey = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
 
 interface PacingResult {
     pacingStatus: 'ON_TRACK' | 'WARNING' | 'CRITICAL';
@@ -89,7 +86,7 @@ export default function InsightScreen() {
                 throw new Error(isPersonal ? 'No active income period found.' : 'No active allowance found for this period.');
             }
 
-            const model = genAI.getGenerativeModel({ 
+            const model = getAiModel('insight', { 
                 model: "gemini-3.5-flash-lite",
                 generationConfig: { responseMimeType: "application/json" }
             });
@@ -183,7 +180,7 @@ export default function InsightScreen() {
                 .from('split_friends')
                 .select(`*, friends ( name )`);
 
-            const model = genAI.getGenerativeModel({ 
+            const model = getAiModel('coach', { 
                 model: "gemini-3.5-flash-lite",
                 generationConfig: { responseMimeType: "application/json" }
             });

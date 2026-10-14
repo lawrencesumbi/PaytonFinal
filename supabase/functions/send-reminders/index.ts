@@ -5,6 +5,13 @@ const EMAILJS_SERVICE_ID = Deno.env.get("EMAILJS_SERVICE_ID");
 const EMAILJS_TEMPLATE_ID = Deno.env.get("EMAILJS_TEMPLATE_ID");
 const EMAILJS_PUBLIC_KEY = Deno.env.get("EMAILJS_PUBLIC_KEY");
 
+// Records one row per run (counts only). A logging problem never stops reminders from being sent.
+// deno-lint-ignore no-explicit-any
+async function logRun(db: any, due: number, sent: number, failed: number, status: string) {
+  const { error } = await db.from("reminder_runs").insert({ due_count: due, sent_count: sent, failed_count: failed, status });
+  if (error) console.error("Could not record reminder run:", error.message);
+}
+
 serve(async (_req) => {
   try {
     // 1. Initialize Supabase Admin Client
@@ -28,19 +35,25 @@ serve(async (_req) => {
     if (remError) throw remError;
 
     if (!reminders || reminders.length === 0) {
+      await logRun(supabaseAdmin, 0, 0, 0, "ok");
       return new Response(JSON.stringify({ message: "No reminders due for today." }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
     // 4. Process each reminder
+    let sent = 0;
+    let failed = 0;
     for (const reminder of reminders) {
       // Get user email from Supabase Auth
       const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(
         reminder.user_id
       );
 
-      if (userError || !userData?.user?.email) continue;
+      if (userError || !userData?.user?.email) {
+        failed++;
+        continue;
+      }
       const userEmail = userData.user.email;
 
       // 5. Send email using EmailJS REST API
@@ -70,13 +83,22 @@ serve(async (_req) => {
 
       if (!emailResponse.ok) {
         console.error(`Failed to send email to ${userEmail}:`, responseText);
+        failed++;
+      } else {
+        sent++;
       }
     }
+
+    await logRun(supabaseAdmin, reminders.length, sent, failed, failed > 0 ? "partial" : "ok");
 
     return new Response(JSON.stringify({ success: true, count: reminders.length }), {
       headers: { "Content-Type": "application/json" },
     });
   } catch (error: any) {
+    await logRun(
+      createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""),
+      0, 0, 0, "error",
+    );
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
