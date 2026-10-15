@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase, formatDate } from "../lib/supabase";
+import { isMissingFunction } from "../lib/adminUtils";
 
 type Stats = {
   total_users: number;
@@ -20,12 +21,28 @@ const RECORD_LABELS: Record<string, string> = {
   split_expenses: "Split expenses",
 };
 
+// Same data source as System Monitoring: the admin_ai_usage_summary database function (7-day window).
+type AiUsage = {
+  total_logged: number;
+  requests: number;
+  success: number;
+  error: number;
+  rate_limited: number;
+  avg_latency_ms: number | null;
+  tokens_total: number | null;
+  requests_with_token_data: number;
+  last_success_at: string | null;
+  last_error_at: string | null;
+};
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
   const [latency, setLatency] = useState<number | null>(null);
   const [isLive, setIsLive] = useState(false);
   const [edgeStatus, setEdgeStatus] = useState<"healthy" | "degraded" | "down">("healthy");
+  const [ai, setAi] = useState<AiUsage | null>(null);
+  const [aiError, setAiError] = useState("");
 
   // Dynamic heartbeat health check para sa real-time latency ug status changes
   const checkHealth = async () => {
@@ -60,12 +77,28 @@ export default function Dashboard() {
     setStats(data as Stats);
   };
 
+  const fetchAi = async () => {
+    const { data, error: rpcError } = await supabase.rpc("admin_ai_usage_summary", { p_days: 7 });
+    if (rpcError) {
+      setAiError(
+        isMissingFunction(rpcError)
+          ? "AI usage data is not set up yet. Run migration 003_monitoring_ai_feedback.sql."
+          : "Could not load AI usage."
+      );
+      return;
+    }
+    setAiError("");
+    setAi(data as AiUsage);
+  };
+
   useEffect(() => {
     fetchStats();
+    fetchAi();
 
     // Re-check connection speed once a minute (keeps free-tier traffic low)
     const interval = setInterval(() => {
       checkHealth();
+      fetchAi();
     }, 60000);
 
     // Automatic DB changes listener (Realtime Update)
@@ -311,7 +344,7 @@ export default function Dashboard() {
 
           {/* Fully Dynamic Service Status & AI Usage Panel */}
           <div className="vizora-panel col-span-2">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div className="ref-panel-header" style={{ marginBottom: "16px" }}>
               <div>
                 <h2 className="panel-title">Service status & AI usage</h2>
                 <p className="panel-sub">Realtime connection telemetry & dynamic system health</p>
@@ -321,7 +354,7 @@ export default function Dashboard() {
               </span>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px", marginTop: "12px", marginBottom: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px", marginBottom: "16px" }}>
               
               {/* 1. Database & API Status */}
               <div className="vizora-status-box" style={{ flexDirection: "column", alignItems: "flex-start", gap: "8px", margin: 0 }}>
@@ -334,7 +367,7 @@ export default function Dashboard() {
                 </strong>
               </div>
 
-              {/* 2. Edge Functions: checked on the System monitoring page, not measured here */}
+              {/* 2. Edge Functions Status */}
               <div className="vizora-status-box" style={{ flexDirection: "column", alignItems: "flex-start", gap: "8px", margin: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span className="vizora-dot" style={{ backgroundColor: "#94a3b8" }} />
@@ -358,15 +391,54 @@ export default function Dashboard() {
 
             </div>
 
-            {/* AI usage is not recorded anywhere yet, so no figures are shown */}
-            <div style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px" }}>
-              <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>AI service usage</div>
-              <p style={{ fontSize: "12px", color: "#64748b", margin: "6px 0 0" }}>
-                Not tracked yet. The mobile app calls the AI service directly and does not record usage, so there is nothing real to show here.
-              </p>
+            {/* AI usage: read from the same database function as System Monitoring */}
+            <div style={{ backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "10px" }}>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "#334155" }}>AI service usage (7 days)</div>
+                {ai && ai.total_logged > 0 && (() => {
+                  const ok = ai.last_success_at && (!ai.last_error_at || new Date(ai.last_success_at) >= new Date(ai.last_error_at));
+                  const failed = !ok && ai.last_error_at;
+                  if (!ok && !failed) return null;
+                  return (
+                    <strong style={{ fontSize: "12px", padding: "4px 8px", borderRadius: "6px", color: ok ? "#059669" : "#dc2626", backgroundColor: ok ? "#ecfdf5" : "#fee2e2" }}>
+                      {ok ? "Last request succeeded" : "Last request failed"}
+                    </strong>
+                  );
+                })()}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", display: "flex", flexDirection: "column", gap: "6px" }}>
+                {aiError ? (
+                  <div>{aiError}</div>
+                ) : !ai ? (
+                  <div>Loading AI usage…</div>
+                ) : ai.total_logged === 0 ? (
+                  <div>No AI usage records available yet. Records appear only after requests pass through the AI proxy.</div>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "6px", borderBottom: "1px solid #e2e8f0" }}>
+                      <span>Total Requests:</span>
+                      <strong style={{ color: "#0f172a" }}>{ai.requests.toLocaleString()} ({ai.success.toLocaleString()} success, {ai.error.toLocaleString()} failed{ai.rate_limited > 0 ? `, ${ai.rate_limited} rate-limited` : ""})</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "6px", borderBottom: "1px solid #e2e8f0" }}>
+                      <span>Average Latency & Tokens:</span>
+                      <strong style={{ color: "#0f172a" }}>
+                        {ai.avg_latency_ms !== null ? `${ai.avg_latency_ms} ms` : "N/A"} 
+                        {ai.requests_with_token_data > 0 && ai.tokens_total !== null ? ` • ${ai.tokens_total.toLocaleString()} tokens` : ""}
+                      </strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>Last Activity:</span>
+                      <span style={{ color: "#334155" }}>
+                        Success: {ai.last_success_at ? formatDate(ai.last_success_at) : "None"}
+                        {ai.last_error_at ? ` | Error: ${formatDate(ai.last_error_at)}` : ""}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
 
-            <p style={{ color: "#9ca3af", fontSize: "11px", marginTop: "12px", textAlign: "right" }}>
+            <p style={{ color: "#9ca3af", fontSize: "11px", marginTop: "12px", textAlign: "right", marginBottom: 0 }}>
               Connection speed is measured with a real call to the admin database function.
             </p>
           </div>
