@@ -879,23 +879,26 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
             </View>
 
             {/* Category Breakdown Legend List */}
-            <View style={styles.legendContainer}>
-              {categoryStats.map((stat) => (
-                <View key={stat.categoryId} style={styles.legendRow}>
-                  <View style={styles.legendLeft}>
-                    <View style={[styles.legendColorDot, { backgroundColor: stat.color }]} />
-                    <Text style={styles.legendCategoryName} numberOfLines={1}>{stat.categoryName}</Text>
-                  </View>
-                  <View style={styles.legendRight}>
-                    <Text style={styles.legendAmount}>₱{stat.total.toLocaleString('en-US')}</Text>
-                    <Text style={styles.legendPercentage}>({stat.percentage.toFixed(1)}%)</Text>
-                  </View>
-                </View>
-              ))}
-              {categoryStats.length === 0 && (
-                <Text style={styles.emptyLegendText}>No expense records found.</Text>
-              )}
-            </View>
+<View style={styles.legendContainer}>
+  {categoryStats
+    .slice() // Creates a shallow copy so you don't mutate the original array
+    .sort((a, b) => b.total - a.total) // Sorts from highest to lowest
+    .map((stat) => (
+      <View key={stat.categoryId} style={styles.legendRow}>
+        <View style={styles.legendLeft}>
+          <View style={[styles.legendColorDot, { backgroundColor: stat.color }]} />
+          <Text style={styles.legendCategoryName} numberOfLines={1}>{stat.categoryName}</Text>
+        </View>
+        <View style={styles.legendRight}>
+          <Text style={styles.legendAmount}>₱{stat.total.toLocaleString('en-US')}</Text>
+          <Text style={styles.legendPercentage}>({stat.percentage.toFixed(1)}%)</Text>
+        </View>
+      </View>
+    ))}
+  {categoryStats.length === 0 && (
+    <Text style={styles.emptyLegendText}>No expense records found.</Text>
+  )}
+</View>
           </View>
         </View>
 

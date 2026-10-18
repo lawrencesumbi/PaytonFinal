@@ -30,7 +30,7 @@ export default function ForgotPasswordScreen() {
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
-      setErrorMessage('Email cannot be blank');
+      setErrorMessage('Email is a required field.');
       return;
     }
 
@@ -58,7 +58,7 @@ export default function ForgotPasswordScreen() {
       >
         <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
           
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => router.push('/login')} style={styles.backButton}>
             <Feather name="arrow-left" size={24} color="#085334" />
           </TouchableOpacity>
 
@@ -78,7 +78,7 @@ export default function ForgotPasswordScreen() {
 
           <View style={styles.form}>
             <View style={[styles.inputWrapper, errorMessage ? styles.inputWrapperError : null]}>
-              <Feather name="mail" color={errorMessage ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+              <Feather name="mail" color="#085334" size={20} style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
                 placeholder="Email Address"
@@ -184,8 +184,8 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   inputWrapperError: {
+    borderWidth: 1.5,
     borderColor: '#E53E3E',
-    backgroundColor: '#FFF5F5',
   },
   inputIcon: {
     marginRight: 12,

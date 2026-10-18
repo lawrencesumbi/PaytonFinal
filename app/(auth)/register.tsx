@@ -255,7 +255,7 @@ export default function RegisterScreen() {
             {/* Full Name Field */}
             <View style={styles.inputContainer}>
               <View style={[styles.inputWrapper, errors.fullName ? styles.inputErrorBorder : null]}>
-                <Feather name="user" color={errors.fullName ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <Feather name="user" color="#085334" size={20} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Full Name"
@@ -275,7 +275,7 @@ export default function RegisterScreen() {
             {/* Email Address Field */}
             <View style={styles.inputContainer}>
               <View style={[styles.inputWrapper, errors.email ? styles.inputErrorBorder : null]}>
-                <Feather name="mail" color={errors.email ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <Feather name="mail" color="#085334" size={20} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Email Address"
@@ -297,7 +297,7 @@ export default function RegisterScreen() {
             {/* Password Field */}
             <View style={styles.inputContainer}>
               <View style={[styles.inputWrapper, errors.password ? styles.inputErrorBorder : null]}>
-                <Feather name="lock" color={errors.password ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Password"
@@ -325,7 +325,7 @@ export default function RegisterScreen() {
             {/* Confirm Password Field */}
             <View style={styles.inputContainer}>
               <View style={[styles.inputWrapper, errors.confirmPassword ? styles.inputErrorBorder : null]}>
-                <Feather name="lock" color={errors.confirmPassword ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Confirm Password"
@@ -452,6 +452,7 @@ const styles = StyleSheet.create({
   inputErrorBorder: {
     borderWidth: 1.5,
     borderColor: '#E53E3E',
+    
   },
   errorText: {
     color: '#E53E3E',

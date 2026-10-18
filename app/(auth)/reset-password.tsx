@@ -38,7 +38,7 @@ export default function ResetPasswordScreen() {
     let hasError = false;
 
     if (!password) {
-      setPasswordError('Password cannot be blank');
+      setPasswordError('Password is a required field.');
       hasError = true;
     } else if (password.length < 8) {
       setPasswordError('Password must be at least 8 characters');
@@ -128,7 +128,7 @@ export default function ResetPasswordScreen() {
               <>
                 {/* New Password Input */}
                 <View style={[styles.inputWrapper, passwordError ? styles.inputWrapperError : null]}>
-                  <Feather name="lock" color={passwordError ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                  <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="New Password"
@@ -150,7 +150,7 @@ export default function ResetPasswordScreen() {
 
                 {/* Confirm Password Input */}
                 <View style={[styles.inputWrapper, confirmError ? styles.inputWrapperError : null]}>
-                  <Feather name="lock" color={confirmError ? "#E53E3E" : "#085334"} size={20} style={styles.inputIcon} />
+                  <Feather name="lock" color="#085334" size={20} style={styles.inputIcon} />
                   <TextInput
                     style={styles.input}
                     placeholder="Confirm New Password"
@@ -246,8 +246,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   inputWrapperError: {
+    borderWidth: 1.5,
     borderColor: '#E53E3E',
-    backgroundColor: '#FFF5F5',
   },
   inputIcon: { 
     marginRight: 12, 

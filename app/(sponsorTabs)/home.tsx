@@ -732,11 +732,11 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.headerBg,
+    backgroundColor: COLORS.deepTeal,
     paddingTop: Platform.OS === 'android' ? NativeStatusBar.currentHeight : 0,
   },
   heroContainer: {
-    backgroundColor: COLORS.headerBg,
+    backgroundColor: COLORS.deepTeal,
     paddingHorizontal: 30,
     paddingBottom: 24,
     borderBottomLeftRadius: 30,

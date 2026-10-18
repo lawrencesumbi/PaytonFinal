@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { getAiModel } from '../../services/aiClient';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useRef, useState } from 'react';
@@ -15,6 +14,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { getAiModel } from '../../services/aiClient';
 
 import { supabase } from '../../lib/supabase';
 
