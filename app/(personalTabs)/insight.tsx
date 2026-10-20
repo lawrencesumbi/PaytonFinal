@@ -122,12 +122,11 @@ export default function InsightScreen() {
                 pacingData: parsedData,
             };
             setMessages((prev) => [...prev, coachMsg]);
-        // Replace Alert.alert in your catch block with this:
         } catch (err: any) {
             const errorMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 sender: 'coach',
-                type: 'text', // or a custom 'error' type if your UI supports it
+                type: 'text',
                 content: `⚠️ Pacing Analysis Unavailable\n\n${err.message || 'We ran into an issue fetching your insights. Please try again in a moment.'}`
             };
             setMessages((prev) => [...prev, errorMsg]);
@@ -186,7 +185,7 @@ export default function InsightScreen() {
             });
 
             const classificationPrompt = `
-                You are Coach Payton, an intelligent AI financial coach with direct database access.
+                You are Coach Payton, an intelligent AI financial coach and advisor. You provide insights, spending behavior analysis, predictions, and suggestions. You do NOT log expenses directly.
                 User Message: "${userText}"
                 Active Pacing Metrics: ${JSON.stringify(metrics)}
                 Pending Reminders: ${JSON.stringify(remindersData || [])}
@@ -195,91 +194,28 @@ export default function InsightScreen() {
                 CRITICAL INSTRUCTION: Always use the Philippine Peso sign (₱) for all monetary values. Never use dollars ($).
 
                 Determine the intent of the user. Return a JSON object with:
-                - intent: "EXPENSE_LOG" or "DATABASE_QUERY" or "GENERAL_CHAT"
-                - expenseAmount: number or null (if intent is EXPENSE_LOG)
-                - expenseDescription: string or null (if intent is EXPENSE_LOG)
-                - categoryName: string or null (match closest like Food, Transport, Bills, etc.)
-                - replyText: string (Direct response to the user using '₱' for any amounts. If EXPENSE_LOG and amount > remaining_balance, reject it gracefully. If DATABASE_QUERY regarding reminders/debts, answer it using the provided pending reminders data. If GENERAL_CHAT, provide a coaching response.)
+                - intent: "DATABASE_QUERY" or "GENERAL_CHAT"
+                - replyText: string (Direct coaching response to the user using '₱' for any amounts. If the user asks to log an expense, gently remind them that you are an advisory coach providing insights and predictions, and guide them on how it affects their remaining balance ₱${metrics?.remaining_balance || 0}.)
             `;
 
             const classificationResult = await model.generateContent(classificationPrompt);
             const cleanClassificationText = classificationResult.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
             const parsedIntent = JSON.parse(cleanClassificationText);
 
-            if (parsedIntent.intent === 'EXPENSE_LOG' && parsedIntent.expenseAmount !== null) {
-                const expenseAmount = Number(parsedIntent.expenseAmount);
-                const remainingBalance = metrics?.remaining_balance || 0;
-
-                if (expenseAmount > remainingBalance) {
-                    const rejectionMsg: Message = {
-                        id: (Date.now() + 1).toString(),
-                        sender: 'coach',
-                        type: 'text',
-                        content: `⚠️ Sorry, I couldn't log that expense (₱${expenseAmount}). Your remaining balance is only ₱${remainingBalance}! Your budget is insufficient.`,
-                    };
-                    setMessages((prev) => [...prev, rejectionMsg]);
-                    return;
-                }
-
-                const activeId = metrics?.has_active_allowance ? (isPersonal ? metrics.income_id : metrics.allowance_id) : null;
-
-                let budgetId = null;
-                if (parsedIntent.categoryName) {
-                    const { data: catData } = await supabase
-                        .from('categories')
-                        .select('id')
-                        .ilike('name', `%${parsedIntent.categoryName}%`)
-                        .single();
-
-                    if (catData) {
-                        const { data: budgetData } = await supabase
-                            .from('budgets')
-                            .select('id')
-                            .eq(isPersonal ? 'income_id' : 'allowance_id', activeId)
-                            .eq('category_id', catData.id)
-                            .single();
-                        budgetId = budgetData?.id || null;
-                    }
-                }
-
-                const insertPayload: any = {
-                    amount: expenseAmount,
-                    description: parsedIntent.expenseDescription || userText,
-                    budget_id: budgetId,
-                };
-                if (isPersonal) {
-                    insertPayload.income_id = activeId;
-                } else {
-                    insertPayload.allowance_id = activeId;
-                }
-
-                const { error: insertError } = await supabase.from('expenses').insert([insertPayload]);
-                if (insertError) throw insertError;
-
-                const successMsg: Message = {
-                    id: (Date.now() + 1).toString(),
-                    sender: 'coach',
-                    type: 'text',
-                    content: `✅ I've logged your expense of ₱${expenseAmount} (${parsedIntent.expenseDescription || 'Expense'}). It's been approved as it fits within your allowance!`,
-                };
-                setMessages((prev) => [...prev, successMsg]);
-
-            } else {
-                const coachMsg: Message = {
-                    id: (Date.now() + 1).toString(),
-                    sender: 'coach',
-                    type: 'text',
-                    content: parsedIntent.replyText || "I received a response, but it doesn't make sense. Please try again!",
-                };
-                setMessages((prev) => [...prev, coachMsg]);
-            }
+            const coachMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                sender: 'coach',
+                type: 'text',
+                content: parsedIntent.replyText || "I received a response, but it doesn't make sense. Please try again!",
+            };
+            setMessages((prev) => [...prev, coachMsg]);
 
         } catch (err: any) {
             const errorMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 sender: 'coach',
                 type: 'text',
-                content: "I heard about a database connection issue. Please try again.",
+                content: "I encountered an issue fetching your data. Please try again.",
             };
             setMessages((prev) => [...prev, errorMsg]);
         } finally {
@@ -343,7 +279,7 @@ export default function InsightScreen() {
                                 <View style={styles.progressSection}>
                                     <View style={styles.progressLabels}>
                                         <Text style={styles.progressLabelText}>Spent: ₱{item.pacingData.total_spent || 0}</Text>
-                                        <Text style={styles.progressLabelText}>Income: ₱{item.pacingData.total_allowance || 0}</Text>
+                                        <Text style={styles.progressLabelText}>Allowance: ₱{item.pacingData.total_allowance || 0}</Text>
                                     </View>
                                     <View style={styles.progressBarBackground}>
                                         <View 
@@ -352,7 +288,10 @@ export default function InsightScreen() {
                                                 { 
                                                     width: `${Math.max(
                                                         0, 
-                                                        100 - (((item.pacingData.total_spent || 0) / (item.pacingData.total_allowance || 1)) * 100)
+                                                        Math.min(
+                                                            100, 
+                                                            ((item.pacingData.total_spent || 0) / (item.pacingData.total_allowance || 1)) * 100
+                                                        )
                                                     )}%` 
                                                 }
                                             ]} 
