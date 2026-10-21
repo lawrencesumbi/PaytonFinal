@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -17,6 +17,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import Svg, { Circle, G, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { supabase } from '../../lib/supabase';
@@ -126,8 +127,15 @@ function generateDateRange() {
       dayNumber: d.getDate(),
       monthStr: d.toLocaleString('en-US', { month: 'short' }).toUpperCase(),
       isToday: i === 0,
+      isSeeMore: false,
     });
   }
+
+  // Trailing "More" tile that opens the full month calendar
+  dates.push({
+    isSeeMore: true,
+  });
+
   return dates;
 }
 
@@ -175,6 +183,104 @@ interface DailyTrendItem {
   amount: number;
 }
 
+interface DueDatesCalendarModalProps {
+  visible: boolean;
+  selectedDate: string;
+  dues: ReminderItem[];
+  onClose: () => void;
+  onSelectDate: (dateString: string) => void;
+}
+
+function DueDatesCalendarModal({
+  visible,
+  selectedDate,
+  dues,
+  onClose,
+  onSelectDate,
+}: DueDatesCalendarModalProps) {
+  // Dates with at least one pending (unpaid) reminder get a dot indicator
+  const markedDates = useMemo(() => {
+    const marks: Record<string, any> = {};
+
+    dues.forEach((due) => {
+      if (due.status === 'pending') {
+        marks[due.due_date] = {
+          marked: true,
+          dotColor: COLORS.olive,
+        };
+      }
+    });
+
+    marks[selectedDate] = {
+      ...(marks[selectedDate] || {}),
+      selected: true,
+      selectedColor: COLORS.headerDark,
+      selectedTextColor: COLORS.white,
+      // keep the dot visible on the selected (dark) day
+      ...(marks[selectedDate]?.marked ? { dotColor: COLORS.yellowGreen } : {}),
+    };
+
+    return marks;
+  }, [dues, selectedDate]);
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <View>
+              <Text style={styles.modalTitle}>Upcoming Dues</Text>
+              <Text style={styles.modalSubtitle}>Tap a date to view its reminders</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseButton}>
+              <Ionicons name="close" size={20} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.calendarCard}>
+            <Calendar
+              current={selectedDate}
+              onDayPress={(day) => onSelectDate(day.dateString)}
+              markedDates={markedDates}
+              enableSwipeMonths
+              theme={{
+                backgroundColor: COLORS.card,
+                calendarBackground: COLORS.card,
+                textSectionTitleColor: COLORS.textMuted,
+                selectedDayBackgroundColor: COLORS.headerDark,
+                selectedDayTextColor: COLORS.white,
+                todayTextColor: COLORS.cyan,
+                dayTextColor: COLORS.darkOlive,
+                textDisabledColor: '#CBD5E1',
+                dotColor: COLORS.olive,
+                selectedDotColor: COLORS.yellowGreen,
+                arrowColor: COLORS.headerDark,
+                monthTextColor: COLORS.darkOlive,
+                textDayFontWeight: '600',
+                textMonthFontWeight: '700',
+                textDayHeaderFontWeight: '700',
+                textDayFontSize: 15,
+                textMonthFontSize: 17,
+                textDayHeaderFontSize: 12,
+              }}
+            />
+          </View>
+
+          <View style={styles.calendarLegendRow}>
+            <View style={styles.calendarLegendDot} />
+            <Text style={styles.calendarLegendText}>Has pending dues</Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function SpenderHomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -211,6 +317,8 @@ export default function SpenderHomeScreen() {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [reminderToDelete, setReminderToDelete] = useState<{ id: string; title: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
 
   const centerToday = (animated = false) => {
     const todayIndex = dateList.findIndex(item => item.isToday);
@@ -433,6 +541,22 @@ export default function SpenderHomeScreen() {
     setErrorMessage(null);    // <-- Add this
     setSuccessMessage(null); // <-- Add this
   };
+
+const handleCalendarDateSelect = (dateString: string) => {
+  // 1. Remember the picked date (drives filteredDues for the Scheduled Dues modal)
+  setSelectedDate(dateString);
+  setErrorMessage(null);
+  setSuccessMessage(null);
+
+  // 2. Close the calendar modal
+  setIsCalendarModalVisible(false);
+
+  // 3. Open the Scheduled Dues modal once the calendar has finished closing.
+  //    Presenting two RN Modals at the same moment is unreliable (esp. iOS),
+  //    so we wait for the dismiss animation. If the date has no reminders,
+  //    the modal shows its "All Clear" empty state.
+  setTimeout(() => setModalVisible(true), 350);
+};
 
 const handleCreateReminder = async () => {
   setErrorMessage(null);
@@ -771,14 +895,32 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
             onLayout={() => centerToday(false)}
           >
             {dateList.map((item) => {
-              const isSelected = selectedDate === item.dateString;
-              const hasPending = hasPendingOnDate(item.dateString);
+              // Trailing "More" tile opens the full calendar
+              if (item.isSeeMore) {
+                return (
+                  <TouchableOpacity
+                    key="see-more-calendar"
+                    activeOpacity={0.8}
+                    onPress={() => setIsCalendarModalVisible(true)}
+                    style={[styles.dateBox, styles.seeMoreDateBox]}
+                  >
+                    <Ionicons name="calendar-outline" size={18} color={COLORS.deepTeal} style={{ marginBottom: 4 }} />
+                    <Text style={styles.seeMoreLabel}>More</Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              const dateString = item.dateString;
+              if (!dateString) return null;
+
+              const isSelected = selectedDate === dateString;
+              const hasPending = hasPendingOnDate(dateString);
 
               return (
                 <TouchableOpacity
-                  key={item.dateString}
+                  key={dateString}
                   activeOpacity={hasPending ? 0.8 : 1}
-                  onPress={() => handleDatePress(item.dateString)}
+                  onPress={() => handleDatePress(dateString)}
                   style={[
                     styles.dateBox,
                     item.isToday ? styles.dateBoxToday : (isSelected && styles.dateBoxBorderSelected)
@@ -1298,6 +1440,15 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
           </View>
         </View>
       </Modal>
+
+      {/* Due Dates Calendar Modal */}
+      <DueDatesCalendarModal
+        visible={isCalendarModalVisible}
+        selectedDate={selectedDate}
+        dues={upcomingDues}
+        onClose={() => setIsCalendarModalVisible(false)}
+        onSelectDate={handleCalendarDateSelect}
+      />
     </View>
   );
 }
@@ -1463,7 +1614,7 @@ const styles = StyleSheet.create({
     width: 130,
     height: 130,
     borderRadius: 65,
-    backgroundColor: 'COLORS.card',
+    backgroundColor: COLORS.card,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1773,5 +1924,44 @@ inlineSuccessText: {
   fontSize: 13,
   fontWeight: '500',
   flex: 1,
+},
+seeMoreDateBox: {
+  justifyContent: 'center',
+  alignItems: 'center',
+  backgroundColor: COLORS.card,
+  borderStyle: 'dashed',
+  borderWidth: 1.5,
+  borderColor: COLORS.deepTeal,
+},
+seeMoreLabel: {
+  fontSize: 12,
+  fontWeight: '600',
+  color: COLORS.deepTeal,
+},
+calendarCard: {
+  backgroundColor: COLORS.card,
+  borderRadius: 20,
+  borderWidth: 1,
+  borderColor: '#E2E8F0',
+  paddingVertical: 8,
+  overflow: 'hidden',
+},
+calendarLegendRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+  marginTop: 14,
+},
+calendarLegendDot: {
+  width: 6,
+  height: 6,
+  borderRadius: 3,
+  backgroundColor: COLORS.olive,
+},
+calendarLegendText: {
+  fontSize: 12,
+  fontWeight: '600',
+  color: COLORS.textMuted,
 },
 });
