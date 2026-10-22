@@ -44,6 +44,14 @@ interface ConnectedSpender {
   avatar_url: string | null;
 }
 
+interface WalletTransaction {
+  id: string;
+  amount: number;
+  type: 'add' | 'deduct';
+  description: string | null;
+  created_at: string;
+}
+
 /* ---------- Design Tokens ---------- */
 const COLORS = {
   deepTeal: '#1F4F59',
@@ -58,16 +66,18 @@ const COLORS = {
   danger: '#DC2626',
   borderLight: '#E2ECE9',
   yellowGreen: '#cfee45e5',
+  success: '#15803d',
 };
 
 export default function HomeScreen() {
   const router = useRouter();
   const [spenderCards, setSpenderCards] = useState<SpenderAllowanceCardData[]>([]);
   const [connectedSpenders, setConnectedSpenders] = useState<ConnectedSpender[]>([]);
+  const [walletTransactions, setWalletTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [totalAllocated, setTotalAllocated] = useState(0);
-  const [totalRemaining, setTotalRemaining] = useState(0);
+  const [sponsorWalletBalance, setSponsorWalletBalance] = useState(0);
   const [sponsorProfile, setSponsorProfile] = useState<{ full_name: string; avatar_url: string | null; role: string | null } | null>(null);
 
   const [selectedSpenderId, setSelectedSpenderId] = useState<string | null>(null);
@@ -77,6 +87,15 @@ export default function HomeScreen() {
   const [spenderEmail, setSpenderEmail] = useState('');
   const [submittingSpender, setSubmittingSpender] = useState(false);
   const [addModalMessage, setAddModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+
+  // Modal States for Adding Wallet Balance
+  const [isWalletModalVisible, setIsWalletModalVisible] = useState(false);
+  const [walletAmountInput, setWalletAmountInput] = useState('');
+  const [submittingWallet, setSubmittingWallet] = useState(false);
+  const [walletModalMessage, setWalletModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+
+  // Modal States for Wallet History
+  const [isHistoryModalVisible, setIsHistoryModalVisible] = useState(false);
 
   // Modal States for Deleting Spender Connection
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
@@ -96,6 +115,31 @@ export default function HomeScreen() {
         .eq('id', user.id)
         .single();
       setSponsorProfile(profile);
+
+      // Fetch Sponsor Wallet Balance
+      const { data: walletData, error: walletError } = await supabase
+        .from('sponsor_wallets')
+        .select('balance')
+        .eq('sponsor_id', user.id)
+        .maybeSingle();
+
+      if (walletError && walletError.code !== 'PGRST116') {
+        console.error('Wallet error:', walletError.message);
+      }
+      setSponsorWalletBalance(walletData ? Number(walletData.balance) : 0);
+
+      // Fetch Wallet Transactions History
+      const { data: txData, error: txError } = await supabase
+        .from('sponsor_wallet_transactions')
+        .select('*')
+        .eq('sponsor_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (txError) {
+        console.error('Transactions error:', txError.message);
+      } else {
+        setWalletTransactions(txData || []);
+      }
 
       // 1. Fetch ALL allowances
       const { data: allowancesData, error: allowancesError } = await supabase
@@ -129,7 +173,6 @@ export default function HomeScreen() {
       if (connectedError) throw connectedError;
 
       let calculatedAllocated = 0;
-      let calculatedSpent = 0;
 
       const spendersMap = new Map<string, ConnectedSpender>();
       (connectedData || []).forEach((item: any) => {
@@ -153,7 +196,6 @@ export default function HomeScreen() {
         );
 
         calculatedAllocated += allowanceAmount;
-        calculatedSpent += spentForAllowance;
 
         const spenderId = item.spender_id;
         const spenderName = item.profiles?.full_name || 'Unknown';
@@ -181,7 +223,6 @@ export default function HomeScreen() {
         });
       });
 
-      // Compute remaining per card group
       spenderCardMap.forEach((card) => {
         card.totalRemaining = Math.max(0, card.totalAllocated - card.totalSpent);
       });
@@ -189,7 +230,6 @@ export default function HomeScreen() {
       setSpenderCards(Array.from(spenderCardMap.values()));
       setConnectedSpenders(Array.from(spendersMap.values()));
       setTotalAllocated(calculatedAllocated);
-      setTotalRemaining(Math.max(0, calculatedAllocated - calculatedSpent));
     } catch (e: any) {
       console.error('Error:', e.message);
     } finally {
@@ -213,6 +253,64 @@ export default function HomeScreen() {
     setSpenderEmail('');
     setAddModalMessage(null);
     setIsAddModalVisible(false);
+  };
+
+  const handleWalletSubmit = async () => {
+    setWalletModalMessage(null);
+    const amountNum = parseFloat(walletAmountInput);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setWalletModalMessage({ type: 'error', text: 'Palihug pagbutang og sakto nga kantidad.' });
+      return;
+    }
+
+    try {
+      setSubmittingWallet(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const newBalance = sponsorWalletBalance + amountNum;
+
+      // 1. Upsert wallet balance
+      const { error: upsertError } = await supabase
+        .from('sponsor_wallets')
+        .upsert({
+          sponsor_id: user.id,
+          balance: newBalance,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'sponsor_id' });
+
+      if (upsertError) throw upsertError;
+
+      // 2. Insert into transaction history table
+      const { error: txError } = await supabase
+        .from('sponsor_wallet_transactions')
+        .insert({
+          sponsor_id: user.id,
+          amount: amountNum,
+          type: 'add',
+          description: 'Added balance to wallet',
+        });
+
+      if (txError) throw txError;
+
+      await supabase.from('logs').insert({
+        user_id: user.id,
+        details: `gipadako ang wallet balance sa kantidad nga ₱${amountNum.toLocaleString()}.`,
+      });
+
+      setWalletModalMessage({ type: 'success', text: 'Naka-add na sa wallet balance!' });
+      setTimeout(() => {
+        setWalletAmountInput('');
+        setWalletModalMessage(null);
+        setIsWalletModalVisible(false);
+        fetchDashboardData(true);
+      }, 1200);
+
+    } catch (e: any) {
+      setWalletModalMessage({ type: 'error', text: e.message || 'Napakyas sa pag-update sa wallet.' });
+    } finally {
+      setSubmittingWallet(false);
+    }
   };
 
   const handleAddSpenderSubmit = async () => {
@@ -276,7 +374,6 @@ export default function HomeScreen() {
 
       if (insertError) throw insertError;
 
-      // Log the successful connection action matching your logs table schema
       await supabase.from('logs').insert({
         user_id: user.id,
         details: `connected spender "${targetProfile.full_name || spenderEmail}".`,
@@ -314,7 +411,6 @@ export default function HomeScreen() {
 
       if (error) throw error;
 
-      // Log the successful disconnection action matching your logs table schema
       await supabase.from('logs').insert({
         user_id: user.id,
         details: `disconnected spender "${spenderToDelete.full_name}".`,
@@ -378,34 +474,38 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Total Remaining Balance Card inside Hero */}
+        {/* Wallet Style Card inside Hero */}
         <View style={styles.balanceCard}>
-          <View style={styles.balanceTitleRow}>
-            <View style={styles.walletIconContainer}>
-              <Ionicons name="wallet-outline" size={12} color={COLORS.deepTeal} />
+          <View style={styles.walletHeaderRow}>
+            <View style={styles.walletTitleGroup}>
+              <View style={styles.walletIconContainer}>
+                <Ionicons name="wallet-outline" size={14} color={COLORS.deepTeal} />
+              </View>
+              <Text style={styles.heroLabel}>SPONSOR WALLET BALANCE</Text>
             </View>
-            <Text style={styles.heroLabel}>TOTAL REMAINING</Text>
-          </View>
-
-          <View style={styles.heroProgressTrack}>
-            <View 
-              style={[
-                styles.heroProgressBar, 
-                { 
-                  width: totalAllocated === 0 || totalRemaining === 0 
-                    ? '0%' 
-                    : `${Math.max(0, Math.min(100, ((totalRemaining / totalAllocated) * 100)))}%` 
-                }
-              ]} 
-            />
+            <View style={styles.walletActionsRow}>
+              {/* History Button */}
+              <TouchableOpacity 
+                style={styles.walletActionBtn} 
+                activeOpacity={0.8}
+                onPress={() => setIsHistoryModalVisible(true)}
+              >
+                <Ionicons name="time-outline" size={16} color={COLORS.white} />
+              </TouchableOpacity>
+              {/* Add Balance Button */}
+              <TouchableOpacity 
+                style={styles.walletActionBtn} 
+                activeOpacity={0.8}
+                onPress={() => setIsWalletModalVisible(true)}
+              >
+                <Ionicons name="add" size={18} color={COLORS.white} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.heroAmountRow}>
             <Text style={styles.heroRemainingAmount}>
-              ₱{totalRemaining.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-            </Text>
-            <Text style={styles.heroTotalAmount}>
-              {' / '}₱{totalAllocated.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+              ₱{sponsorWalletBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
             </Text>
           </View>
         </View>
@@ -583,6 +683,157 @@ export default function HomeScreen() {
           />
         )}
       </View>
+
+      {/* WALLET HISTORY MODAL */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isHistoryModalVisible}
+        onRequestClose={() => setIsHistoryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '80%' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Wallet Transactions</Text>
+              <TouchableOpacity onPress={() => setIsHistoryModalVisible(false)}>
+                <Ionicons name="close" size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Kasaysayan sa mga na-add ug na-deduct sa imong wallet.
+            </Text>
+
+            {walletTransactions.length === 0 ? (
+              <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>Wala pay rekord sa transaksyon.</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={walletTransactions}
+                keyExtractor={(item) => item.id}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ gap: 10, paddingBottom: 10 }}
+                renderItem={({ item }) => {
+                  const isAdd = item.type === 'add';
+                  const formattedDate = new Date(item.created_at).toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  });
+
+                  return (
+                    <View style={styles.txCardItem}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                        <View style={[styles.txIconBox, { backgroundColor: isAdd ? '#F0FDF4' : '#FEF2F2' }]}>
+                          <Ionicons 
+                            name={isAdd ? 'arrow-down-outline' : 'arrow-up-outline'} 
+                            size={16} 
+                            color={isAdd ? COLORS.success : COLORS.danger} 
+                          />
+                        </View>
+                        <View style={{ marginLeft: 10, flex: 1 }}>
+                          <Text style={styles.txDescText} numberOfLines={1}>
+                            {item.description || (isAdd ? 'Added Balance' : 'Deducted')}
+                          </Text>
+                          <Text style={styles.txDateText}>{formattedDate}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.txAmountText, { color: isAdd ? COLORS.success : COLORS.danger }]}>
+                        {isAdd ? '+' : '-'}₱{Number(item.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  );
+                }}
+              />
+            )}
+
+            <TouchableOpacity
+              style={[styles.modalSubmitBtn, { marginTop: 15, width: '100%' }]}
+              onPress={() => setIsHistoryModalVisible(false)}
+            >
+              <Text style={styles.modalSubmitText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ADD WALLET BALANCE MODAL */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isWalletModalVisible}
+        onRequestClose={() => setIsWalletModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Wallet Balance</Text>
+              <TouchableOpacity onPress={() => setIsWalletModalVisible(false)}>
+                <Ionicons name="close" size={22} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Ibutang ang kantidad nga gusto nimong i-add sa imong wallet balance.
+            </Text>
+
+            {walletModalMessage && (
+              <View style={[
+                styles.inlineBanner, 
+                walletModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
+              ]}>
+                <Ionicons 
+                  name={walletModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
+                  size={16} 
+                  color={walletModalMessage.type === 'success' ? '#15803d' : COLORS.danger} 
+                />
+                <Text style={[
+                  styles.bannerText, 
+                  { color: walletModalMessage.type === 'success' ? '#15803d' : COLORS.danger }
+                ]}>
+                  {walletModalMessage.text}
+                </Text>
+              </View>
+            )}
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="0.00"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="numeric"
+              value={walletAmountInput}
+              onChangeText={setWalletAmountInput}
+            />
+
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setIsWalletModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalSubmitBtn}
+                onPress={handleWalletSubmit}
+                disabled={submittingWallet}
+              >
+                {submittingWallet ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.modalSubmitText}>Add Balance</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* ADD SPENDER MODAL */}
       <Modal
@@ -773,12 +1024,35 @@ const styles = StyleSheet.create({
   dateBadgeText: { color: COLORS.white, fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   balanceCard: {
     marginTop: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
-  balanceTitleRow: {
+  walletHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  walletTitleGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  walletActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  walletActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     justifyContent: 'center',
-    marginBottom: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   walletIconContainer: {
     width: 22, height: 22, borderRadius: 11,
@@ -792,33 +1066,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.8,
   },
-  heroProgressTrack: {
-    height: 35,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 50,
-    overflow: 'hidden',
-    marginBottom: 10,
-  },
-  heroProgressBar: {
-    height: '100%',
-    backgroundColor: COLORS.cyan,
-    borderRadius: 5,
-  },
   heroAmountRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   heroRemainingAmount: {
     color: '#FFFFFF',
     fontSize: 32,
     fontWeight: '700',
     letterSpacing: -1,
-  },
-  heroTotalAmount: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 18,
-    fontWeight: '600',
   },
   bodyContent: {
     flex: 1,
@@ -1059,6 +1316,37 @@ const styles = StyleSheet.create({
     textAlign: 'center', marginTop: 4, marginBottom: 16,
     lineHeight: 16, paddingHorizontal: 10,
   },
+  txCardItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.bg,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+  },
+  txIconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  txDescText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.darkOlive,
+  },
+  txDateText: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  txAmountText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1114,7 +1402,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DCFCE7',
   },
-    bannerText: {
+  bannerText: {
     fontSize: 12,
     fontWeight: '600',
     flex: 1,
