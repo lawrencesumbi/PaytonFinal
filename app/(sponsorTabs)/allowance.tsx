@@ -269,7 +269,7 @@ export default function AllowanceScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // 1. Kuhaon ang kasamtangang balanse sa sponsor wallet
+      // 1. Fetch the current balance of the sponsor wallet
       const { data: walletData, error: walletError } = await supabase
         .from('sponsor_wallets')
         .select('balance')
@@ -282,16 +282,16 @@ export default function AllowanceScreen() {
 
       const currentBalance = walletData ? Number(walletData.balance) : 0;
 
-      // 2. I-check kung ang allowance amount ba kay mas dako kaysa sa wallet balance
+      // 2. Check if the allowance amount is greater than the wallet balance
       if (parsedAmount > currentBalance) {
-        showNotice('error', `Dili madawat! Ang kantidad sa allowance (₱${parsedAmount.toLocaleString()}) kay labaw sa imong wallet balance (₱${currentBalance.toLocaleString()}).`);
+        showNotice('error', `Not accepted! The allowance amount (₱${parsedAmount.toLocaleString()}) exceeds your wallet balance (₱${currentBalance.toLocaleString()}).`);
         setLoading(false);
         return;
       }
 
       const newBalance = currentBalance - parsedAmount;
 
-      // 3. I-update ang wallet balance (ibawas ang amount)
+      // 3. Update the wallet balance (deduct the amount)
       const { error: updateWalletError } = await supabase
         .from('sponsor_wallets')
         .update({
@@ -302,19 +302,19 @@ export default function AllowanceScreen() {
 
       if (updateWalletError) throw updateWalletError;
 
-      // 4. I-record ang deduct transaction sa sponsor_wallet_transactions
+      // 4. Record the deduction transaction in sponsor_wallet_transactions
       const { error: txError } = await supabase
         .from('sponsor_wallet_transactions')
         .insert({
           sponsor_id: user.id,
           amount: parsedAmount,
           type: 'deduct',
-          description: `Giallocate para sa allowance: "${allowanceName.trim()}"`,
+          description: `Allocated for allowance: "${allowanceName.trim()}"`,
         });
 
       if (txError) throw txError;
 
-      // 5. I-save ang allowance sa allowances table
+      // 5. Save the allowance in the allowances table
       const payload = {
         sponsor_id: user.id,
         spender_id: selectedSpender.id,
@@ -330,7 +330,7 @@ export default function AllowanceScreen() {
 
       if (error) throw error;
       
-      // Log ang malampusong pag-allocate
+      // Log the successful allocation
       await supabase.from('logs').insert({
         user_id: user.id,
         details: `allocated allowance "${allowanceName.trim()}" (${parsedAmount}) for spender "${selectedSpender.name || selectedSpender.id}".`,

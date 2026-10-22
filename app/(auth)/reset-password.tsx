@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     fontSize: 28, 
     fontWeight: '700', 
     color: '#013237', 
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   subtitle: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     fontSize: 14, 
     color: '#4CA771', 
     textAlign: 'center',
@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
     marginRight: 12, 
   },
   input: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     flex: 1, 
     fontSize: 15, 
     color: '#013237', 
@@ -256,14 +256,14 @@ const styles = StyleSheet.create({
     padding: 4, 
   },
   errorText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#E53E3E',
     fontSize: 12,
     marginTop: 4,
     marginLeft: 20,
   },
   generalErrorText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#E53E3E',
     fontSize: 14,
     textAlign: 'center',
@@ -277,7 +277,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   successText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#013237',
     fontSize: 15,
     textAlign: 'center',
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   backLinkText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   buttonText: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#FFFFFF', 
     fontSize: 16, 
     fontWeight: '600', 

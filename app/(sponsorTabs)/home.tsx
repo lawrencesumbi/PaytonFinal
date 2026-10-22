@@ -259,7 +259,7 @@ export default function HomeScreen() {
     setWalletModalMessage(null);
     const amountNum = parseFloat(walletAmountInput);
     if (isNaN(amountNum) || amountNum <= 0) {
-      setWalletModalMessage({ type: 'error', text: 'Palihug pagbutang og sakto nga kantidad.' });
+      setWalletModalMessage({ type: 'error', text: 'Please enter a valid amount.' });
       return;
     }
 
@@ -295,10 +295,10 @@ export default function HomeScreen() {
 
       await supabase.from('logs').insert({
         user_id: user.id,
-        details: `gipadako ang wallet balance sa kantidad nga ₱${amountNum.toLocaleString()}.`,
+        details: `increased the wallet balance by ₱${amountNum.toLocaleString()}.`,
       });
 
-      setWalletModalMessage({ type: 'success', text: 'Naka-add na sa wallet balance!' });
+      setWalletModalMessage({ type: 'success', text: 'Successfully added to wallet balance!' });
       setTimeout(() => {
         setWalletAmountInput('');
         setWalletModalMessage(null);
@@ -307,7 +307,7 @@ export default function HomeScreen() {
       }, 1200);
 
     } catch (e: any) {
-      setWalletModalMessage({ type: 'error', text: e.message || 'Napakyas sa pag-update sa wallet.' });
+      setWalletModalMessage({ type: 'error', text: e.message || 'Failed to update wallet.' });
     } finally {
       setSubmittingWallet(false);
     }
@@ -701,12 +701,12 @@ export default function HomeScreen() {
             </View>
 
             <Text style={styles.modalSubtitle}>
-              Kasaysayan sa mga na-add ug na-deduct sa imong wallet.
+              History of additions and deductions from your wallet.
             </Text>
 
             {walletTransactions.length === 0 ? (
               <View style={{ paddingVertical: 30, alignItems: 'center' }}>
-                <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>Wala pay rekord sa transaksyon.</Text>
+                <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>No transaction records yet.</Text>
               </View>
             ) : (
               <FlatList
@@ -780,7 +780,7 @@ export default function HomeScreen() {
             </View>
 
             <Text style={styles.modalSubtitle}>
-              Ibutang ang kantidad nga gusto nimong i-add sa imong wallet balance.
+              Enter the amount you wish to add to your wallet balance.
             </Text>
 
             {walletModalMessage && (

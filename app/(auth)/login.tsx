@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     fontSize: 32, 
     fontWeight: '700', 
     color: '#013237', 
@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     color: '#4CA771', 
   },
   subtitle: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     fontSize: 14, 
     color: '#4CA771',
     lineHeight: 20,
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
     borderColor: '#E53E3E',
   },
   errorText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#E53E3E',
     fontSize: 12,
     marginLeft: 20,
@@ -388,7 +388,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   input: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     flex: 1,
     fontSize: 15,
     color: '#013237',
@@ -407,7 +407,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   buttonText: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#FFFFFF', 
     fontSize: 16, 
     fontWeight: '600',
@@ -423,7 +423,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#C0E6BA',
   },
   dividerText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#4CA771',
     fontSize: 14,
     marginHorizontal: 12,
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   socialButtonText: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#013237',
     fontSize: 15,
     fontWeight: '500',
@@ -455,18 +455,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   footerText: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#013237', 
     fontSize: 14,
   },
   linkText: { 
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#4CA771',
     fontWeight: '700', 
     fontSize: 14,
   },
   forgot: {
-    fontFamily: 'Poppins',
+    fontFamily: 'Inter',
     color: '#4CA771',
     textAlign: 'right',
     marginBottom: 16,

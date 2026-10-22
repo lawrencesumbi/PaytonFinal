@@ -46,8 +46,8 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   iconText: { fontSize: 40 },
-  title: { fontFamily: 'Poppins', fontSize: 28, fontWeight: '700', color: '#013237', marginBottom: 12 },
-  subtitle: { fontFamily: 'Poppins', fontSize: 14, color: '#4CA771', textAlign: 'center', marginBottom: 32, lineHeight: 22 },
+  title: { fontFamily: 'Inter', fontSize: 28, fontWeight: '700', color: '#013237', marginBottom: 12 },
+  subtitle: { fontFamily: 'Inter', fontSize: 14, color: '#4CA771', textAlign: 'center', marginBottom: 32, lineHeight: 22 },
   primaryButton: {
     backgroundColor: '#013237',
     borderRadius: 30,
@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
-  buttonText: { fontFamily: 'Poppins', color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  buttonText: { fontFamily: 'Inter', color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   secondaryButton: { padding: 12 },
-  secondaryButtonText: { fontFamily: 'Poppins', color: '#4CA771', fontWeight: '600', fontSize: 15 },
+  secondaryButtonText: { fontFamily: 'Inter', color: '#4CA771', fontWeight: '600', fontSize: 15 },
 });
