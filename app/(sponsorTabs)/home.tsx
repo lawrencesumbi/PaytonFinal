@@ -3,26 +3,31 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
+  Animated,
+  DimensionValue,
   Image,
   KeyboardAvoidingView,
   Modal,
   StatusBar as NativeStatusBar,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 
+/* ---------- Types ---------- */
 interface ConnectedSpender {
   id: string;
   full_name: string;
@@ -53,32 +58,65 @@ interface SelectedSpender {
   avatarUrl?: string | null;
 }
 
+type Msg = { type: 'error' | 'success'; text: string } | null;
+type PeriodKey = 'today' | 'week' | 'nextWeek' | 'month' | 'nextMonth';
+type TxFilter = 'all' | 'add' | 'deduct';
+type IconName = keyof typeof Ionicons.glyphMap;
+
+type AllowanceErrors = {
+  spender?: string;
+  name?: string;
+  amount?: string;
+  period?: string;
+};
+
 /* ---------- Design Tokens ---------- */
 const COLORS = {
   bg: '#F5F7FA',
   card: '#FFFFFF',
   white: '#FFFFFF',
-  cardGradientStart: '#75C093', // Lighter soft sage green at top
-  cardGradientEnd: '#013237',
-  cardGreenTop: '#1E6244',
-  cardGreenBottom: '#103826',
+  primary: '#0F3D2E',
+  primarySoft: '#E6F3EB',
+  primaryMid: '#2F7D5B',
   accentGreen: '#C1F038',
   textPrimary: '#111827',
   textMuted: '#8E9BAE',
   textSubtle: '#6B7280',
   danger: '#E53E3E',
-  borderLight: '#F0F2F5',
+  dangerSoft: '#FEF2F2',
+  dangerBorder: '#FECACA',
   success: '#2E7D32',
+  successSoft: '#F0FDF4',
+  successBorder: '#BBF7D0',
+  border: '#E8ECF1',
+  borderLight: '#F0F2F5',
   pendingSoft: '#FEF9C3',
   pendingText: '#A16207',
-  pillBg: '#F1F5F9',
 };
 
-const CARD_THEMES = [
-  { bg: '#F8FAFC', text: '#1E293B' },
-  { bg: '#F1F5F9', text: '#334155' },
-  { bg: '#F3F4F6', text: '#111827' },
+const PERIODS: { key: PeriodKey; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This Week' },
+  { key: 'nextWeek', label: 'Next Week' },
+  { key: 'month', label: 'This Month' },
+  { key: 'nextMonth', label: 'Next Month' },
 ];
+
+const TX_FILTERS: { key: TxFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'add', label: 'Added' },
+  { key: 'deduct', label: 'Deducted' },
+];
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const AMOUNT_REGEX = /^\d+(\.\d{1,2})?$/;
+
+/* ---------- Helpers ---------- */
+const formatPeso = (n: number, fixed = false) =>
+  `₱${n.toLocaleString('en-US', {
+    minimumFractionDigits: fixed ? 2 : 0,
+    maximumFractionDigits: 2,
+  })}`;
 
 const getLocalDateString = (year: number, monthIndex: number, day: number) => {
   const d = new Date(year, monthIndex, day);
@@ -93,11 +131,7 @@ const formatDisplayDate = (dateStr: string) => {
   const [year, month, day] = dateStr.split('-').map(Number);
   const d = new Date(year, month - 1, day);
   if (isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString('en-US', {
-    month: 'long',
-    day: '2-digit',
-    year: 'numeric',
-  });
+  return d.toLocaleDateString('en-US', { month: 'long', day: '2-digit', year: 'numeric' });
 };
 
 const formatDisplayDateRange = (startStr: string, endStr: string) => {
@@ -116,58 +150,345 @@ const formatDisplayDateRange = (startStr: string, endStr: string) => {
 
   if (startYear === endYear && startMonth === endMonth) {
     const monthName = startDate.toLocaleDateString('en-US', { month: 'long' });
-    const formattedStartDay = String(startDay).padStart(2, '0');
-    const formattedEndDay = String(endDay).padStart(2, '0');
-    return `${monthName} ${formattedStartDay} - ${formattedEndDay}, ${startYear}`;
+    return `${monthName} ${String(startDay).padStart(2, '0')} - ${String(endDay).padStart(2, '0')}, ${startYear}`;
   }
 
   return `${formatDisplayDate(startStr)} - ${formatDisplayDate(endStr)}`;
 };
 
-const getPeriodDates = (period: 'today' | 'week' | 'nextWeek' | 'month' | 'nextMonth') => {
+const getPeriodDates = (period: PeriodKey) => {
   const d = new Date();
   const year = d.getFullYear();
   const month = d.getMonth();
   const day = d.getDate();
+  const dow = d.getDay();
 
   if (period === 'today') {
     const todayStr = getLocalDateString(year, month, day);
     return { start: todayStr, end: todayStr };
-  } 
-  
-  if (period === 'week') {
-    const currentDayOfWeek = d.getDay();
-    const startOfWeek = new Date(year, month, day - currentDayOfWeek);
-    const endOfWeek = new Date(year, month, day + (6 - currentDayOfWeek));
+  }
 
+  if (period === 'week') {
     return {
-      start: getLocalDateString(startOfWeek.getFullYear(), startOfWeek.getMonth(), startOfWeek.getDate()),
-      end: getLocalDateString(endOfWeek.getFullYear(), endOfWeek.getMonth(), endOfWeek.getDate())
+      start: getLocalDateString(year, month, day - dow),
+      end: getLocalDateString(year, month, day + (6 - dow)),
     };
   }
 
   if (period === 'nextWeek') {
-    const currentDayOfWeek = d.getDay();
-    const startOfNextWeek = new Date(year, month, day + (7 - currentDayOfWeek));
-    const endOfNextWeek = new Date(year, month, day + (13 - currentDayOfWeek));
-
     return {
-      start: getLocalDateString(startOfNextWeek.getFullYear(), startOfNextWeek.getMonth(), startOfNextWeek.getDate()),
-      end: getLocalDateString(endOfNextWeek.getFullYear(), endOfNextWeek.getMonth(), endOfNextWeek.getDate())
+      start: getLocalDateString(year, month, day + (7 - dow)),
+      end: getLocalDateString(year, month, day + (13 - dow)),
     };
   }
-  
+
   if (period === 'month') {
-    const startOfMonth = getLocalDateString(year, month, 1);
-    const endOfMonth = getLocalDateString(year, month + 1, 0);
-    return { start: startOfMonth, end: endOfMonth };
+    return {
+      start: getLocalDateString(year, month, 1),
+      end: getLocalDateString(year, month + 1, 0),
+    };
   }
 
-  const startOfNextMonth = getLocalDateString(year, month + 1, 1);
-  const endOfNextMonth = getLocalDateString(year, month + 2, 0);
-  return { start: startOfNextMonth, end: endOfNextMonth };
+  return {
+    start: getLocalDateString(year, month + 1, 1),
+    end: getLocalDateString(year, month + 2, 0),
+  };
 };
 
+const getFirstName = (fullName: string) => fullName.trim().split(' ')[0] || fullName;
+
+/* ---------- Reusable UI ---------- */
+
+/** Avatar with a built-in default silhouette when there is no photo (or it fails to load). */
+function Avatar({ uri, size = 42 }: { uri?: string | null; size?: number }) {
+  const [failed, setFailed] = useState(false);
+
+  if (uri && !failed) {
+    return (
+      <Image
+        source={{ uri }}
+        onError={() => setFailed(true)}
+        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#E2E8F0' }}
+      />
+    );
+  }
+
+  const head = size * 0.32;
+  const body = size * 0.74;
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: '#DDF0E5',
+        overflow: 'hidden',
+      }}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          width: head,
+          height: head,
+          borderRadius: head / 2,
+          backgroundColor: '#86C4A2',
+          top: size * 0.2,
+          left: (size - head) / 2,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          width: body,
+          height: body,
+          borderRadius: body / 2,
+          backgroundColor: '#86C4A2',
+          top: size * 0.6,
+          left: (size - body) / 2,
+        }}
+      />
+    </View>
+  );
+}
+
+/** Pulsing placeholder block used while data is loading. */
+function Skeleton({
+  width,
+  height,
+  radius = 10,
+  style,
+}: {
+  width: DimensionValue;
+  height: number;
+  radius?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const opacity = useRef(new Animated.Value(0.45)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 750, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.45, duration: 750, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[{ width, height, borderRadius: radius, backgroundColor: '#DFE5EC', opacity }, style]}
+    />
+  );
+}
+
+/** Skeleton version of the whole dashboard body. */
+function HomeSkeleton() {
+  return (
+    <View style={styles.listScrollContent}>
+      {/* Wallet card */}
+      <Skeleton width="100%" height={214} radius={26} />
+
+      {/* Quick actions */}
+      <Skeleton width={110} height={16} radius={8} style={{ marginTop: 24, marginBottom: 12 }} />
+      <View style={styles.quickActionsRow}>
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} width="31.5%" height={88} radius={18} />
+        ))}
+      </View>
+
+      {/* Spenders */}
+      <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+        <Skeleton width={80} height={16} radius={8} />
+        <Skeleton width={28} height={20} radius={10} />
+      </View>
+      <View style={{ flexDirection: 'row', gap: 18 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <View key={i} style={{ alignItems: 'center' }}>
+            <Skeleton width={52} height={52} radius={26} />
+            <Skeleton width={36} height={9} radius={5} style={{ marginTop: 8 }} />
+          </View>
+        ))}
+      </View>
+
+      {/* Transactions */}
+      <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+        <Skeleton width={150} height={16} radius={8} />
+        <Skeleton width={60} height={12} radius={6} />
+      </View>
+      <Skeleton width="100%" height={44} radius={14} style={{ marginBottom: 14 }} />
+      <View style={styles.transactionsListContainer}>
+        {[0, 1, 2, 3].map((i) => (
+          <View key={i} style={styles.txCardItem}>
+            <Skeleton width={40} height={40} radius={14} />
+            <View style={{ marginLeft: 12, flex: 1, gap: 8 }}>
+              <Skeleton width="60%" height={12} radius={6} />
+              <Skeleton width="40%" height={10} radius={5} />
+            </View>
+            <Skeleton width={64} height={14} radius={7} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function Banner({ message }: { message: Msg }) {
+  if (!message) return null;
+  const ok = message.type === 'success';
+  return (
+    <View style={[styles.banner, ok ? styles.bannerSuccess : styles.bannerError]}>
+      <Ionicons
+        name={ok ? 'checkmark-circle' : 'alert-circle'}
+        size={16}
+        color={ok ? COLORS.success : COLORS.danger}
+      />
+      <Text style={[styles.bannerText, { color: ok ? COLORS.success : COLORS.danger }]}>
+        {message.text}
+      </Text>
+    </View>
+  );
+}
+
+function Field({
+  label,
+  error,
+  hint,
+  children,
+}: {
+  label: string;
+  error?: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      {children}
+      {error ? (
+        <View style={styles.fieldErrorRow}>
+          <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+          <Text style={styles.fieldErrorText}>{error}</Text>
+        </View>
+      ) : hint ? (
+        <Text style={styles.fieldHint}>{hint}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** One bottom sheet used by every modal so they all look and behave the same. */
+function Sheet({
+  visible,
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  return (
+    <Modal
+      animationType="slide"
+      transparent
+      visible={visible}
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.overlay}
+      >
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={styles.sheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sheetTitle}>{title}</Text>
+              {subtitle ? <Text style={styles.sheetSubtitle}>{subtitle}</Text> : null}
+            </View>
+            <TouchableOpacity
+              onPress={onClose}
+              style={styles.sheetClose}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={18} color={COLORS.textSubtle} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.sheetBody}
+            contentContainerStyle={{ paddingBottom: 6 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {children}
+          </ScrollView>
+
+          {footer ? <View style={styles.sheetFooter}>{footer}</View> : null}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function SheetActions({
+  onCancel,
+  onSubmit,
+  submitLabel,
+  cancelLabel = 'Cancel',
+  loading = false,
+  disabled = false,
+  danger = false,
+}: {
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitLabel: string;
+  cancelLabel?: string;
+  loading?: boolean;
+  disabled?: boolean;
+  danger?: boolean;
+}) {
+  const submitDisabled = loading || disabled;
+  return (
+    <View style={styles.actionsRow}>
+      <TouchableOpacity
+        style={styles.btnSecondary}
+        onPress={onCancel}
+        disabled={loading}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.btnSecondaryText}>{cancelLabel}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.btnPrimary,
+          danger && { backgroundColor: COLORS.danger },
+          submitDisabled && { opacity: 0.5 },
+        ]}
+        onPress={onSubmit}
+        disabled={submitDisabled}
+        activeOpacity={0.85}
+      >
+        {loading ? (
+          <ActivityIndicator size="small" color={COLORS.white} />
+        ) : (
+          <Text style={styles.btnPrimaryText}>{submitLabel}</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/* ---------- Screen ---------- */
 export default function HomeScreen() {
   const router = useRouter();
   const [connectedSpenders, setConnectedSpenders] = useState<ConnectedSpender[]>([]);
@@ -175,51 +496,63 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sponsorWalletBalance, setSponsorWalletBalance] = useState(0);
-  const [sponsorProfile, setSponsorProfile] = useState<{ full_name: string; avatar_url: string | null; role: string | null } | null>(null);
+  const [balanceHidden, setBalanceHidden] = useState(false);
+  const [sponsorProfile, setSponsorProfile] = useState<{
+    full_name: string;
+    avatar_url: string | null;
+    role: string | null;
+  } | null>(null);
 
-  // Modal States for Adding Spender
+  // Transaction filter
+  const [txFilter, setTxFilter] = useState<TxFilter>('all');
+
+  // Add Spender modal
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [spenderEmail, setSpenderEmail] = useState('');
+  const [spenderEmailError, setSpenderEmailError] = useState<string | undefined>();
   const [submittingSpender, setSubmittingSpender] = useState(false);
-  const [addModalMessage, setAddModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [addBanner, setAddBanner] = useState<Msg>(null);
 
-  // Modal States for Adding Wallet Balance
+  // Add Wallet Balance modal
   const [isWalletModalVisible, setIsWalletModalVisible] = useState(false);
   const [walletAmountInput, setWalletAmountInput] = useState('');
+  const [walletAmountError, setWalletAmountError] = useState<string | undefined>();
   const [submittingWallet, setSubmittingWallet] = useState(false);
-  const [walletModalMessage, setWalletModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [walletBanner, setWalletBanner] = useState<Msg>(null);
 
-  // Modal States for Deleting Spender Connection
+  // Delete Spender modal
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [spenderToDelete, setSpenderToDelete] = useState<ConnectedSpender | null>(null);
   const [deletingSpender, setDeletingSpender] = useState(false);
-  const [deleteModalMessage, setDeleteModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [deleteBanner, setDeleteBanner] = useState<Msg>(null);
 
-  // Modal States for Sending Allowance
+  // Send Allowance modal
   const [isAllowanceModalVisible, setIsAllowanceModalVisible] = useState(false);
   const [selectedAllowanceSpender, setSelectedAllowanceSpender] = useState<SelectedSpender | null>(null);
   const [allowanceName, setAllowanceName] = useState('');
   const [allowanceAmount, setAllowanceAmount] = useState('');
+  const [allowanceErrors, setAllowanceErrors] = useState<AllowanceErrors>({});
   const [submittingAllowance, setSubmittingAllowance] = useState(false);
-  const [allowanceModalMessage, setAllowanceModalMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [allowanceBanner, setAllowanceBanner] = useState<Msg>(null);
 
-  // Member Picker Sub-Modal State
+  // Member picker
   const [memberPickerVisible, setMemberPickerVisible] = useState(false);
   const [connectedMembersList, setConnectedMembersList] = useState<SpenderMember[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  // Coverage Period States
-  const [selectedPeriod, setSelectedPeriod] = useState<'today' | 'week' | 'nextWeek' | 'month' | 'nextMonth' | 'custom'>('today');
+  // Coverage period
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey | 'custom'>('today');
   const defaultPeriodDates = getPeriodDates('today');
   const [startDate, setStartDate] = useState(defaultPeriodDates.start);
   const [endDate, setEndDate] = useState(defaultPeriodDates.end);
 
-  // Custom Calendar Picker States
+  // Custom calendar
   const [customCalendarVisible, setCustomCalendarVisible] = useState(false);
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
   const [tempStartDate, setTempStartDate] = useState<string | null>(null);
   const [tempEndDate, setTempEndDate] = useState<string | null>(null);
 
+  /* ---------- Data ---------- */
   const fetchDashboardData = async (isRefreshing = false) => {
     try {
       if (!isRefreshing) setLoading(true);
@@ -233,7 +566,6 @@ export default function HomeScreen() {
         .single();
       setSponsorProfile(profile);
 
-      // Fetch Sponsor Wallet Balance
       const { data: walletData, error: walletError } = await supabase
         .from('sponsor_wallets')
         .select('balance')
@@ -245,7 +577,6 @@ export default function HomeScreen() {
       }
       setSponsorWalletBalance(walletData ? Number(walletData.balance) : 0);
 
-      // Fetch Wallet Transactions History
       const { data: txData, error: txError } = await supabase
         .from('sponsor_wallet_transactions')
         .select('*')
@@ -258,7 +589,6 @@ export default function HomeScreen() {
         setWalletTransactions(txData || []);
       }
 
-      // Fetch connected spenders from sponsor_spenders table
       const { data: connectedData, error: connectedError } = await supabase
         .from('sponsor_spenders')
         .select(`
@@ -298,17 +628,72 @@ export default function HomeScreen() {
     await fetchDashboardData(true);
   }, []);
 
-  const handleCloseAddModal = () => {
-    setSpenderEmail('');
-    setAddModalMessage(null);
-    setIsAddModalVisible(false);
+  /* ---------- Derived ---------- */
+  const monthStats = useMemo(() => {
+    const now = new Date();
+    let added = 0;
+    let sent = 0;
+    walletTransactions.forEach((t) => {
+      const d = new Date(t.created_at);
+      if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+        if (t.type === 'add') added += Number(t.amount);
+        else sent += Number(t.amount);
+      }
+    });
+    return { added, sent };
+  }, [walletTransactions]);
+
+  const filteredTransactions = useMemo(
+    () => (txFilter === 'all' ? walletTransactions : walletTransactions.filter((t) => t.type === txFilter)),
+    [walletTransactions, txFilter],
+  );
+
+  /* ---------- Close / reset handlers ---------- */
+  const closeWalletModal = () => {
+    if (submittingWallet) return;
+    setIsWalletModalVisible(false);
+    setWalletAmountInput('');
+    setWalletAmountError(undefined);
+    setWalletBanner(null);
   };
 
+  const closeAddModal = () => {
+    if (submittingSpender) return;
+    setIsAddModalVisible(false);
+    setSpenderEmail('');
+    setSpenderEmailError(undefined);
+    setAddBanner(null);
+  };
+
+  const closeDeleteModal = () => {
+    if (deletingSpender) return;
+    setIsDeleteModalVisible(false);
+    setSpenderToDelete(null);
+    setDeleteBanner(null);
+  };
+
+  const closeAllowanceModal = () => {
+    if (submittingAllowance) return;
+    setIsAllowanceModalVisible(false);
+  };
+
+  /* ---------- Add money ---------- */
   const handleWalletSubmit = async () => {
-    setWalletModalMessage(null);
-    const amountNum = parseFloat(walletAmountInput);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setWalletModalMessage({ type: 'error', text: 'Please enter a valid amount.' });
+    setWalletBanner(null);
+    setWalletAmountError(undefined);
+
+    const trimmed = walletAmountInput.trim();
+    if (!trimmed) {
+      setWalletAmountError('Enter the amount you want to add.');
+      return;
+    }
+    if (!AMOUNT_REGEX.test(trimmed)) {
+      setWalletAmountError('Enter a valid amount, up to 2 decimal places.');
+      return;
+    }
+    const amountNum = parseFloat(trimmed);
+    if (amountNum <= 0) {
+      setWalletAmountError('Amount must be greater than zero.');
       return;
     }
 
@@ -321,12 +706,10 @@ export default function HomeScreen() {
 
       const { error: upsertError } = await supabase
         .from('sponsor_wallets')
-        .upsert({
-          sponsor_id: user.id,
-          balance: newBalance,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'sponsor_id' });
-
+        .upsert(
+          { sponsor_id: user.id, balance: newBalance, updated_at: new Date().toISOString() },
+          { onConflict: 'sponsor_id' },
+        );
       if (upsertError) throw upsertError;
 
       const { error: txError } = await supabase
@@ -337,7 +720,6 @@ export default function HomeScreen() {
           type: 'add',
           description: 'Added money to wallet',
         });
-
       if (txError) throw txError;
 
       await supabase.from('logs').insert({
@@ -345,26 +727,32 @@ export default function HomeScreen() {
         details: `increased the wallet balance by ₱${amountNum.toLocaleString()}.`,
       });
 
-      setWalletModalMessage({ type: 'success', text: 'Successfully added to wallet balance!' });
+      setWalletBanner({ type: 'success', text: 'Money added to your wallet.' });
       setTimeout(() => {
         setWalletAmountInput('');
-        setWalletModalMessage(null);
+        setWalletBanner(null);
         setIsWalletModalVisible(false);
         fetchDashboardData(true);
       }, 1200);
-
     } catch (e: any) {
-      setWalletModalMessage({ type: 'error', text: e.message || 'Failed to update wallet.' });
+      setWalletBanner({ type: 'error', text: e.message || 'Failed to update wallet.' });
     } finally {
       setSubmittingWallet(false);
     }
   };
 
+  /* ---------- Link spender ---------- */
   const handleAddSpenderSubmit = async () => {
-    setAddModalMessage(null);
+    setAddBanner(null);
+    setSpenderEmailError(undefined);
 
-    if (!spenderEmail.trim()) {
-      setAddModalMessage({ type: 'error', text: 'Please enter a valid email address.' });
+    const email = spenderEmail.trim().toLowerCase();
+    if (!email) {
+      setSpenderEmailError('Enter the spender’s email address.');
+      return;
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      setSpenderEmailError('Enter a valid email address.');
       return;
     }
 
@@ -376,21 +764,19 @@ export default function HomeScreen() {
       const { data: targetProfile, error: profileError } = await supabase
         .from('profiles')
         .select('id, full_name, role')
-        .eq('email', spenderEmail.trim().toLowerCase())
+        .eq('email', email)
         .single();
 
       if (profileError || !targetProfile) {
-        setAddModalMessage({ type: 'error', text: 'No user account found with this email address.' });
+        setSpenderEmailError('No user account found with this email address.');
         return;
       }
-
       if (targetProfile.id === user.id) {
-        setAddModalMessage({ type: 'error', text: 'You cannot connect your own account as a spender.' });
+        setSpenderEmailError('You cannot connect your own account as a spender.');
         return;
       }
-
       if (targetProfile.role !== 'Spender') {
-        setAddModalMessage({ type: 'error', text: 'This account is not registered as a spender.' });
+        setSpenderEmailError('This account is not registered as a spender.');
         return;
       }
 
@@ -399,51 +785,45 @@ export default function HomeScreen() {
         .select('sponsor_id, status')
         .eq('spender_id', targetProfile.id)
         .maybeSingle();
-
       if (checkError) throw checkError;
 
       if (existingConnection) {
-        if (existingConnection.sponsor_id === user.id) {
-          setAddModalMessage({ type: 'error', text: 'This spender is already connected to your account.' });
-        } else {
-          setAddModalMessage({ type: 'error', text: 'This spender is already connected to another sponsor.' });
-        }
+        setSpenderEmailError(
+          existingConnection.sponsor_id === user.id
+            ? 'This spender is already connected to your account.'
+            : 'This spender is already connected to another sponsor.',
+        );
         return;
       }
 
       const { error: insertError } = await supabase
         .from('sponsor_spenders')
-        .insert({
-          sponsor_id: user.id,
-          spender_id: targetProfile.id,
-          status: 'accepted',
-        });
-
+        .insert({ sponsor_id: user.id, spender_id: targetProfile.id, status: 'accepted' });
       if (insertError) throw insertError;
 
       await supabase.from('logs').insert({
         user_id: user.id,
-        details: `connected spender "${targetProfile.full_name || spenderEmail}".`,
+        details: `connected spender "${targetProfile.full_name || email}".`,
       });
 
-      setAddModalMessage({ type: 'success', text: 'Spender connected successfully!' });
+      setAddBanner({ type: 'success', text: 'Spender connected successfully.' });
       setTimeout(() => {
         setSpenderEmail('');
-        setAddModalMessage(null);
+        setAddBanner(null);
         setIsAddModalVisible(false);
         fetchDashboardData(true);
       }, 1200);
-
     } catch (e: any) {
-      setAddModalMessage({ type: 'error', text: e.message || 'Failed to connect spender.' });
+      setAddBanner({ type: 'error', text: e.message || 'Failed to connect spender.' });
     } finally {
       setSubmittingSpender(false);
     }
   };
 
+  /* ---------- Disconnect spender ---------- */
   const handleDeleteSpenderConfirm = async () => {
     if (!spenderToDelete) return;
-    setDeleteModalMessage(null);
+    setDeleteBanner(null);
 
     try {
       setDeletingSpender(true);
@@ -455,7 +835,6 @@ export default function HomeScreen() {
         .delete()
         .eq('sponsor_id', user.id)
         .eq('spender_id', spenderToDelete.id);
-
       if (error) throw error;
 
       await supabase.from('logs').insert({
@@ -463,21 +842,21 @@ export default function HomeScreen() {
         details: `disconnected spender "${spenderToDelete.full_name}".`,
       });
 
-      setDeleteModalMessage({ type: 'success', text: `${spenderToDelete.full_name} has been disconnected.` });
+      setDeleteBanner({ type: 'success', text: `${spenderToDelete.full_name} has been disconnected.` });
       setTimeout(() => {
         setIsDeleteModalVisible(false);
         setSpenderToDelete(null);
-        setDeleteModalMessage(null);
+        setDeleteBanner(null);
         fetchDashboardData(true);
       }, 1200);
-
     } catch (e: any) {
-      setDeleteModalMessage({ type: 'error', text: e.message || 'Failed to remove spender.' });
+      setDeleteBanner({ type: 'error', text: e.message || 'Failed to remove spender.' });
     } finally {
       setDeletingSpender(false);
     }
   };
 
+  /* ---------- Allowance ---------- */
   const fetchConnectedMembersForAllowance = async () => {
     try {
       setLoadingMembers(true);
@@ -491,21 +870,20 @@ export default function HomeScreen() {
           profiles!spender_id ( full_name, email, avatar_url )
         `)
         .eq('sponsor_id', user.id);
-
       if (error) throw error;
 
-      const formattedMembers = (data || []).map((item: any) => ({
-        id: item.id,
-        spender_id: item.spender_id,
-        name: item.profiles?.full_name || 'No Name',
-        email: item.profiles?.email || 'No Email',
-        avatarUrl: item.profiles?.avatar_url || null,
-        status: item.status
-      }));
-
-      setConnectedMembersList(formattedMembers);
+      setConnectedMembersList(
+        (data || []).map((item: any) => ({
+          id: item.id,
+          spender_id: item.spender_id,
+          name: item.profiles?.full_name || 'No Name',
+          email: item.profiles?.email || 'No Email',
+          avatarUrl: item.profiles?.avatar_url || null,
+          status: item.status,
+        })),
+      );
     } catch (error: any) {
-      setAllowanceModalMessage({ type: 'error', text: error.message || 'Failed to fetch members.' });
+      setAllowanceBanner({ type: 'error', text: error.message || 'Failed to fetch members.' });
     } finally {
       setLoadingMembers(false);
     }
@@ -515,69 +893,63 @@ export default function HomeScreen() {
     setSelectedAllowanceSpender(null);
     setAllowanceName('');
     setAllowanceAmount('');
+    setAllowanceErrors({});
     setSelectedPeriod('today');
     const defaultDates = getPeriodDates('today');
     setStartDate(defaultDates.start);
     setEndDate(defaultDates.end);
-    setAllowanceModalMessage(null);
+    setAllowanceBanner(null);
     setIsAllowanceModalVisible(true);
   };
 
   const handleSaveAllowanceSubmit = async () => {
-    setAllowanceModalMessage(null);
+    setAllowanceBanner(null);
+    const errors: AllowanceErrors = {};
 
-    if (!selectedAllowanceSpender) {
-      setAllowanceModalMessage({ type: 'error', text: 'Please select a member to allocate allowance.' });
-      return;
+    if (!selectedAllowanceSpender) errors.spender = 'Select a member to receive this allowance.';
+
+    if (!allowanceName.trim()) errors.name = 'Enter a name for this allowance.';
+
+    const amountTrimmed = allowanceAmount.trim();
+    const parsedAmount = parseFloat(amountTrimmed);
+    if (!amountTrimmed) {
+      errors.amount = 'Enter the allowance amount.';
+    } else if (!AMOUNT_REGEX.test(amountTrimmed)) {
+      errors.amount = 'Enter a valid amount, up to 2 decimal places.';
+    } else if (parsedAmount <= 0) {
+      errors.amount = 'Amount must be greater than zero.';
+    } else if (parsedAmount > sponsorWalletBalance) {
+      errors.amount = `Exceeds your wallet balance (${formatPeso(sponsorWalletBalance)}).`;
     }
 
-    const parsedAmount = parseFloat(allowanceAmount);
-    if (!allowanceName.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
-      setAllowanceModalMessage({ type: 'error', text: 'Please provide a valid name and a positive amount.' });
-      return;
-    }
+    if (!startDate.trim() || !endDate.trim()) errors.period = 'Choose a coverage period.';
 
-    if (!startDate.trim() || !endDate.trim()) {
-      setAllowanceModalMessage({ type: 'error', text: 'Please specify both coverage start and end dates.' });
-      return;
-    }
+    setAllowanceErrors(errors);
+    if (Object.keys(errors).length > 0 || !selectedAllowanceSpender) return;
 
     try {
       setSubmittingAllowance(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // Re-check the live balance before deducting
       const { data: walletData, error: walletError } = await supabase
         .from('sponsor_wallets')
         .select('balance')
         .eq('sponsor_id', user.id)
         .maybeSingle();
-
-      if (walletError && walletError.code !== 'PGRST116') {
-        throw walletError;
-      }
+      if (walletError && walletError.code !== 'PGRST116') throw walletError;
 
       const currentBalance = walletData ? Number(walletData.balance) : 0;
-
       if (parsedAmount > currentBalance) {
-        setAllowanceModalMessage({
-          type: 'error',
-          text: `Exceeds wallet balance (₱${currentBalance.toLocaleString()}).`
-        });
-        setSubmittingAllowance(false);
+        setAllowanceErrors({ amount: `Exceeds your wallet balance (${formatPeso(currentBalance)}).` });
         return;
       }
 
-      const newBalance = currentBalance - parsedAmount;
-
       const { error: updateWalletError } = await supabase
         .from('sponsor_wallets')
-        .update({
-          balance: newBalance,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ balance: currentBalance - parsedAmount, updated_at: new Date().toISOString() })
         .eq('sponsor_id', user.id);
-
       if (updateWalletError) throw updateWalletError;
 
       const { error: txError } = await supabase
@@ -586,24 +958,20 @@ export default function HomeScreen() {
           sponsor_id: user.id,
           amount: parsedAmount,
           type: 'deduct',
-          description: `Deducted for allowance`,
+          description: `Allowance: ${allowanceName.trim()}`,
         });
-
       if (txError) throw txError;
 
-      const payload = {
-        sponsor_id: user.id,
-        spender_id: selectedAllowanceSpender.id,
-        allowance_name: allowanceName.trim(),
-        amount: parsedAmount,
-        start_date: startDate,
-        end_date: endDate
-      };
-
-      const { error: allowanceError } = await supabase
-        .from('allowances')
-        .insert([payload]);
-
+      const { error: allowanceError } = await supabase.from('allowances').insert([
+        {
+          sponsor_id: user.id,
+          spender_id: selectedAllowanceSpender.id,
+          allowance_name: allowanceName.trim(),
+          amount: parsedAmount,
+          start_date: startDate,
+          end_date: endDate,
+        },
+      ]);
       if (allowanceError) throw allowanceError;
 
       await supabase.from('logs').insert({
@@ -611,133 +979,238 @@ export default function HomeScreen() {
         details: `allocated allowance "${allowanceName.trim()}" (${parsedAmount}) for spender "${selectedAllowanceSpender.name}".`,
       });
 
-      setAllowanceModalMessage({ type: 'success', text: 'Allowance allocated successfully!' });
+      setAllowanceBanner({ type: 'success', text: 'Allowance sent successfully.' });
       setTimeout(() => {
         setIsAllowanceModalVisible(false);
+        setAllowanceBanner(null);
         fetchDashboardData(true);
       }, 1200);
-
     } catch (e: any) {
-      setAllowanceModalMessage({ type: 'error', text: e.message || 'Something went wrong.' });
+      setAllowanceBanner({ type: 'error', text: e.message || 'Something went wrong.' });
     } finally {
       setSubmittingAllowance(false);
     }
   };
 
-  const initials = (sponsorProfile?.full_name || 'S')
-    .split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  /* ---------- Render ---------- */
+  const renderCalendarCells = () => {
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const now = new Date();
+    const todayStr = getLocalDateString(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const getFirstName = (fullName: string) => {
-    return fullName.trim().split(' ')[0] || fullName;
+    const cells: ReactNode[] = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+      cells.push(<View key={`empty-${i}`} style={styles.dayCellEmpty} />);
+    }
+
+    for (let day = 1; day <= totalDays; day++) {
+      const dateStr = getLocalDateString(year, month, day);
+      const isToday = dateStr === todayStr;
+      const isStart = tempStartDate === dateStr;
+      const isEnd = tempEndDate === dateStr;
+      const isInRange = !!(tempStartDate && tempEndDate && dateStr > tempStartDate && dateStr < tempEndDate);
+
+      cells.push(
+        <TouchableOpacity
+          key={dateStr}
+          activeOpacity={0.7}
+          style={[
+            styles.dayCell,
+            isToday && styles.dayCellToday,
+            isInRange && styles.dayCellInRange,
+            (isStart || isEnd) && styles.dayCellSelected,
+          ]}
+          onPress={() => {
+            if (!tempStartDate || (tempStartDate && tempEndDate)) {
+              setTempStartDate(dateStr);
+              setTempEndDate(null);
+            } else if (dateStr < tempStartDate) {
+              setTempStartDate(dateStr);
+            } else {
+              setTempEndDate(dateStr);
+            }
+          }}
+        >
+          <Text
+            style={[
+              styles.dayCellText,
+              isToday && styles.dayCellTextToday,
+              (isStart || isEnd) && styles.dayCellTextSelected,
+            ]}
+          >
+            {day}
+          </Text>
+        </TouchableOpacity>,
+      );
+    }
+    return cells;
+  };
+
+  const showSkeleton = loading && !refreshing;
+
+  const quickActions: { key: string; label: string; icon: IconName; onPress: () => void }[] = [
+    { key: 'add', label: 'Add Money', icon: 'add-circle-outline', onPress: () => setIsWalletModalVisible(true) },
+    { key: 'link', label: 'Link Spender', icon: 'person-add-outline', onPress: () => setIsAddModalVisible(true) },
+    { key: 'send', label: 'Send Allowance', icon: 'paper-plane-outline', onPress: handleOpenAllowanceModal },
+  ];
+
+  const emptyTxCopy: Record<TxFilter, string> = {
+    all: 'No transaction records yet.',
+    add: 'No added funds yet.',
+    deduct: 'No deductions yet.',
   };
 
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
 
-      {/* HEADER SECTION */}
+      {/* HEADER */}
       <View style={styles.topBar}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/profile')}>
-            {sponsorProfile?.avatar_url ? (
-              <Image source={{ uri: sponsorProfile.avatar_url }} style={styles.avatar} />
-            ) : (
-              <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarInitials}>{initials}</Text>
+          {showSkeleton ? (
+            <>
+              <Skeleton width={44} height={44} radius={22} />
+              <View style={styles.headerTextGroup}>
+                <Skeleton width={80} height={10} radius={5} />
+                <Skeleton width={140} height={16} radius={8} style={{ marginTop: 8 }} />
               </View>
-            )}
-          </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/profile')}>
+                <Avatar uri={sponsorProfile?.avatar_url} size={44} />
+              </TouchableOpacity>
+              <View style={styles.headerTextGroup}>
+                <Text style={styles.welcomeText}>Welcome back,</Text>
+                <Text style={styles.userName} numberOfLines={1}>
+                  {sponsorProfile?.full_name || 'User'}
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
 
-          <View style={styles.headerTextGroup}>
-            <Text style={styles.welcomeText}>Hello,</Text>
-            <Text style={styles.userName} numberOfLines={1}>
-              {sponsorProfile?.full_name || 'User'}
-            </Text>
+        {showSkeleton ? (
+          <Skeleton width={78} height={28} radius={14} />
+        ) : (
+          <View style={styles.roleBadge}>
+            <Ionicons name="shield-checkmark" size={12} color={COLORS.primary} />
+            <Text style={styles.roleBadgeText}>{sponsorProfile?.role || 'Sponsor'}</Text>
           </View>
-        </View>
-
-        {/* SPONSOR BADGE */}
-        <View style={styles.roleBadge}>
-          <Text style={styles.roleBadgeText}>
-            {sponsorProfile?.role || 'Sponsor'}
-          </Text>
-        </View>
+        )}
       </View>
 
-      {/* BODY CONTENT */}
+      {/* BODY */}
       <View style={styles.bodyContent}>
-        {loading && !refreshing ? (
-          <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginTop: 40 }} />
+        {showSkeleton ? (
+          <HomeSkeleton />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listScrollContent}
             refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.textPrimary]} tintColor={COLORS.textPrimary} />
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[COLORS.primary]}
+                tintColor={COLORS.primary}
+              />
             }
           >
-            {/* SPONSOR WALLET CARD */}
-            <View style={styles.cardWrapper}>
-              <LinearGradient
-                colors={[COLORS.cardGradientStart, COLORS.cardGradientEnd]}
-                start={{ x: 0.5, y: 0 }}
-                end={{ x: 0.5, y: 1 }}
-                style={styles.cardContainer}
-              >
-                <View style={styles.cardContent}>
-                  <View>
-                    <Text style={styles.heroLabel}>Your Wallet Balance</Text>
-                    <Text style={styles.heroRemainingAmount}>
-                      ₱{sponsorWalletBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                    </Text>
+            {/* WALLET CARD */}
+            <LinearGradient
+              colors={['#4FA87A', '#1E6244', '#013237']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.walletCard}
+            >
+              <View style={styles.cardCircleLarge} />
+              <View style={styles.cardCircleSmall} />
+
+              <View style={styles.walletTopRow}>
+                <View style={styles.walletLabelRow}>
+                  <View style={styles.walletIconChip}>
+                    <Ionicons name="wallet-outline" size={14} color={COLORS.white} />
                   </View>
+                  <Text style={styles.heroLabel}>Wallet Balance</Text>
                 </View>
-              </LinearGradient>
-            </View>
+                <TouchableOpacity
+                  onPress={() => setBalanceHidden((v) => !v)}
+                  activeOpacity={0.7}
+                  style={styles.eyeBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons
+                    name={balanceHidden ? 'eye-off-outline' : 'eye-outline'}
+                    size={18}
+                    color="rgba(255,255,255,0.9)"
+                  />
+                </TouchableOpacity>
+              </View>
 
-            {/* QUICK ACTIONS SECTION */}
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <Text style={styles.heroAmount}>
+                {balanceHidden ? '₱ ••••••' : formatPeso(sponsorWalletBalance)}
+              </Text>
+
+              <View style={styles.walletStatsRow}>
+                <View style={styles.walletStat}>
+                  <View style={styles.statLabelRow}>
+                    <Ionicons name="arrow-down-circle" size={13} color={COLORS.accentGreen} />
+                    <Text style={styles.statLabel}>Added</Text>
+                  </View>
+                  <Text style={styles.statValue}>
+                    {balanceHidden ? '••••' : formatPeso(monthStats.added)}
+                  </Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.walletStat}>
+                  <View style={styles.statLabelRow}>
+                    <Ionicons name="arrow-up-circle" size={13} color="#FCA5A5" />
+                    <Text style={styles.statLabel}>Sent</Text>
+                  </View>
+                  <Text style={styles.statValue}>
+                    {balanceHidden ? '••••' : formatPeso(monthStats.sent)}
+                  </Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.walletStat}>
+                  <View style={styles.statLabelRow}>
+                    <Ionicons name="people" size={13} color="rgba(255,255,255,0.85)" />
+                    <Text style={styles.statLabel}>Spenders</Text>
+                  </View>
+                  <Text style={styles.statValue}>{connectedSpenders.length}</Text>
+                </View>
+              </View>
+              <Text style={styles.statCaption}>Added and sent figures are for this month</Text>
+            </LinearGradient>
+
+            {/* QUICK ACTIONS */}
+            <Text style={[styles.sectionTitle, { marginTop: 24, marginBottom: 12 }]}>Quick Actions</Text>
             <View style={styles.quickActionsRow}>
-              <TouchableOpacity
-                style={styles.quickActionTile}
-                activeOpacity={0.8}
-                onPress={() => setIsWalletModalVisible(true)}
-              >
-                <View style={styles.quickActionIconCircle}>
-                  <Ionicons name="add-outline" size={20} color={COLORS.textPrimary} />
-                </View>
-                <Text style={styles.quickActionLabel}>Add Money</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.quickActionTile}
-                activeOpacity={0.8}
-                onPress={() => setIsAddModalVisible(true)}
-              >
-                <View style={styles.quickActionIconCircle}>
-                  <Ionicons name="person-add-outline" size={18} color={COLORS.textPrimary} />
-                </View>
-                <Text style={styles.quickActionLabel}>Link Spender</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[styles.quickActionTile]}
-                activeOpacity={0.8}
-                onPress={handleOpenAllowanceModal}
-              >
-                <View style={styles.quickActionIconCircle}>
-                  <Ionicons name="arrow-up-outline" size={18} color={COLORS.textPrimary} />
-                </View>
-                <Text style={styles.quickActionLabel}>Send Allowance</Text>
-              </TouchableOpacity>
-
-              
+              {quickActions.map((a) => (
+                <TouchableOpacity
+                  key={a.key}
+                  style={styles.quickActionTile}
+                  activeOpacity={0.8}
+                  onPress={a.onPress}
+                >
+                  <View style={styles.quickActionIconCircle}>
+                    <Ionicons name={a.icon} size={20} color={COLORS.primary} />
+                  </View>
+                  <Text style={styles.quickActionLabel}>{a.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
-            {/* CONNECTED SPENDERS SECTION */}
+            {/* SPENDERS */}
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Spenders</Text>
-              <Text style={styles.seeAllText}>{connectedSpenders.length} members</Text>
+              <View style={styles.countPill}>
+                <Text style={styles.countPillText}>{connectedSpenders.length}</Text>
+              </View>
             </View>
 
             <ScrollView
@@ -745,63 +1218,75 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalSpendersContainer}
             >
-              {connectedSpenders.map((spender) => {
-                const firstName = getFirstName(spender.full_name);
-                const spenderInitials = spender.full_name
-                  .split(' ')
-                  .map((w) => w[0])
-                  .slice(0, 2)
-                  .join('')
-                  .toUpperCase();
+              {connectedSpenders.map((spender) => (
+                <TouchableOpacity
+                  key={spender.id}
+                  style={styles.spenderItem}
+                  activeOpacity={0.7}
+                  onLongPress={() => {
+                    setSpenderToDelete(spender);
+                    setDeleteBanner(null);
+                    setIsDeleteModalVisible(true);
+                  }}
+                >
+                  <Avatar uri={spender.avatar_url} size={52} />
+                  <Text style={styles.spenderName} numberOfLines={1}>
+                    {getFirstName(spender.full_name)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
 
+              <TouchableOpacity
+                style={styles.spenderItem}
+                activeOpacity={0.7}
+                onPress={() => setIsAddModalVisible(true)}
+              >
+                <View style={styles.addSpenderCircle}>
+                  <Ionicons name="add" size={22} color={COLORS.primaryMid} />
+                </View>
+                <Text style={styles.spenderName}>Add</Text>
+              </TouchableOpacity>
+            </ScrollView>
+            {connectedSpenders.length > 0 && (
+              <Text style={styles.listHint}>Press and hold a spender to disconnect them.</Text>
+            )}
+
+            {/* TRANSACTIONS */}
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
+              <Text style={styles.sectionTitle}>Wallet Transactions</Text>
+              <Text style={styles.seeAllText}>
+                {filteredTransactions.length} {filteredTransactions.length === 1 ? 'record' : 'records'}
+              </Text>
+            </View>
+
+            <View style={styles.filterRow}>
+              {TX_FILTERS.map((f) => {
+                const active = txFilter === f.key;
                 return (
                   <TouchableOpacity
-                    key={spender.id}
-                    style={styles.spenderHorizontalItem}
-                    activeOpacity={0.7}
-                    onLongPress={() => {
-                      setSpenderToDelete(spender);
-                      setIsDeleteModalVisible(true);
-                    }}
+                    key={f.key}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    activeOpacity={0.8}
+                    onPress={() => setTxFilter(f.key)}
                   >
-                    <View style={styles.avatarWrapper}>
-                      {spender.avatar_url ? (
-                        <Image source={{ uri: spender.avatar_url }} style={styles.spenderGridAvatar} />
-                      ) : (
-                        <View style={styles.spenderGridAvatarPlaceholder}>
-                          <Text style={styles.spenderGridInitials}>{spenderInitials}</Text>
-                        </View>
-                      )}
-                      
-                    </View>
-                    <Text style={styles.spenderGridFirstName} numberOfLines={1}>
-                      {firstName}
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      {f.label}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
-
-              
-            </ScrollView>
-
-            {/* WALLET TRANSACTIONS SECTION */}
-            <View style={[styles.sectionHeader, { marginTop: 22 }]}>
-              <Text style={styles.sectionTitle}>Wallet Transactions</Text>
-              <TouchableOpacity activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={styles.seeAllText}>Today</Text>
-                <Ionicons name="chevron-down" size={14} color={COLORS.textMuted} style={{ marginLeft: 2 }} />
-              </TouchableOpacity>
             </View>
 
             <View style={styles.transactionsListContainer}>
-              {walletTransactions.length === 0 ? (
-                <View style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>
-                    No transaction records yet.
-                  </Text>
+              {filteredTransactions.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.emptyIcon}>
+                    <Ionicons name="receipt-outline" size={22} color={COLORS.textMuted} />
+                  </View>
+                  <Text style={styles.emptyTitle}>{emptyTxCopy[txFilter]}</Text>
                 </View>
               ) : (
-                walletTransactions.map((item) => {
+                filteredTransactions.map((item) => {
                   const isAdd = item.type === 'add';
                   const formattedDate = new Date(item.created_at).toLocaleString('en-US', {
                     month: 'short',
@@ -813,23 +1298,21 @@ export default function HomeScreen() {
 
                   return (
                     <View key={item.id} style={styles.txCardItem}>
-                      <View style={styles.txLeftGroup}>
-                        <View style={styles.txIconBox}>
-                          <Ionicons
-                            name={isAdd ? 'wallet-outline' : 'remove-circle-outline'}
-                            size={18}
-                            color={COLORS.textPrimary}
-                          />
-                        </View>
-                        <View style={{ marginLeft: 12, flex: 1 }}>
-                          <Text style={styles.txDescText} numberOfLines={1}>
-                            {item.description || (isAdd ? 'Added Balance' : 'Deducted')}
-                          </Text>
-                          <Text style={styles.txDateText}>{formattedDate}</Text>
-                        </View>
+                      <View style={[styles.txIconBox, { backgroundColor: isAdd ? COLORS.primarySoft : COLORS.dangerSoft }]}>
+                        <Ionicons
+                          name={isAdd ? 'arrow-down' : 'arrow-up'}
+                          size={18}
+                          color={isAdd ? COLORS.success : COLORS.danger}
+                        />
+                      </View>
+                      <View style={{ marginLeft: 12, flex: 1 }}>
+                        <Text style={styles.txDescText} numberOfLines={1}>
+                          {item.description || (isAdd ? 'Added Balance' : 'Deducted')}
+                        </Text>
+                        <Text style={styles.txDateText}>{formattedDate}</Text>
                       </View>
                       <Text style={[styles.txAmountText, { color: isAdd ? COLORS.success : COLORS.danger }]}>
-                        {isAdd ? '+' : '-'}₱{Number(item.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {isAdd ? '+' : '-'}{formatPeso(Number(item.amount), true)}
                       </Text>
                     </View>
                   );
@@ -840,641 +1323,373 @@ export default function HomeScreen() {
         )}
       </View>
 
-      {/* ADD WALLET BALANCE MODAL */}
-      <Modal
-        animationType="fade"
-        transparent={true}
+      {/* ADD WALLET BALANCE */}
+      <Sheet
         visible={isWalletModalVisible}
-        onRequestClose={() => setIsWalletModalVisible(false)}
+        title="Add Wallet Balance"
+        subtitle="Top up your wallet to fund allowances."
+        onClose={closeWalletModal}
+        footer={
+          <SheetActions
+            onCancel={closeWalletModal}
+            onSubmit={handleWalletSubmit}
+            submitLabel="Add Balance"
+            loading={submittingWallet}
+          />
+        }
       >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.modalOverlay}
-        >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Wallet Balance</Text>
-              <TouchableOpacity onPress={() => setIsWalletModalVisible(false)}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSubtitle}>
-              Enter the amount you wish to add to your wallet balance.
-            </Text>
-
-            {walletModalMessage && (
-              <View style={[
-                styles.inlineBanner, 
-                walletModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
-              ]}>
-                <Ionicons 
-                  name={walletModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
-                  size={16} 
-                  color={walletModalMessage.type === 'success' ? COLORS.success : COLORS.danger} 
-                />
-                <Text style={[
-                  styles.bannerText, 
-                  { color: walletModalMessage.type === 'success' ? COLORS.success : COLORS.danger }
-                ]}>
-                  {walletModalMessage.text}
-                </Text>
-              </View>
-            )}
-
+        <Banner message={walletBanner} />
+        <Field label="Amount (PHP)" error={walletAmountError}>
+          <View style={styles.amountWrapper}>
+            <Text style={styles.currencyPrefix}>₱</Text>
             <TextInput
-              style={styles.modalInput}
+              style={[styles.input, styles.amountInput, !!walletAmountError && styles.inputError]}
               placeholder="0.00"
               placeholderTextColor={COLORS.textMuted}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               value={walletAmountInput}
-              onChangeText={setWalletAmountInput}
+              onChangeText={(t) => {
+                setWalletAmountInput(t);
+                if (walletAmountError) setWalletAmountError(undefined);
+              }}
             />
-
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setIsWalletModalVisible(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalSubmitBtn}
-                onPress={handleWalletSubmit}
-                disabled={submittingWallet}
-              >
-                {submittingWallet ? (
-                  <ActivityIndicator size="small" color={COLORS.white} />
-                ) : (
-                  <Text style={styles.modalSubmitText}>Add Balance</Text>
-                )}
-              </TouchableOpacity>
-            </View>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        </Field>
+      </Sheet>
 
-      {/* ADD SPENDER MODAL */}
-      <Modal
-        animationType="fade"
-        transparent={true}
+      {/* LINK SPENDER */}
+      <Sheet
         visible={isAddModalVisible}
-        onRequestClose={handleCloseAddModal}
+        title="Connect New Spender"
+        subtitle="Enter your spender’s registered email address."
+        onClose={closeAddModal}
+        footer={
+          <SheetActions
+            onCancel={closeAddModal}
+            onSubmit={handleAddSpenderSubmit}
+            submitLabel="Connect"
+            loading={submittingSpender}
+          />
+        }
       >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.modalOverlay}
-        >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Connect New Spender</Text>
-              <TouchableOpacity onPress={handleCloseAddModal}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            </View>
+        <Banner message={addBanner} />
+        <Field label="Email Address" error={spenderEmailError}>
+          <TextInput
+            style={[styles.input, !!spenderEmailError && styles.inputError]}
+            placeholder="spender@email.com"
+            placeholderTextColor={COLORS.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            value={spenderEmail}
+            onChangeText={(t) => {
+              setSpenderEmail(t);
+              if (spenderEmailError) setSpenderEmailError(undefined);
+            }}
+          />
+        </Field>
+      </Sheet>
 
-            <Text style={styles.modalSubtitle}>
-              Enter your spender's registered account email address to connect them.
-            </Text>
-
-            {addModalMessage && (
-              <View style={[
-                styles.inlineBanner, 
-                addModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
-              ]}>
-                <Ionicons 
-                  name={addModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
-                  size={16} 
-                  color={addModalMessage.type === 'success' ? COLORS.success : COLORS.danger} 
-                />
-                <Text style={[
-                  styles.bannerText, 
-                  { color: addModalMessage.type === 'success' ? COLORS.success : COLORS.danger }
-                ]}>
-                  {addModalMessage.text}
-                </Text>
-              </View>
-            )}
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="spender@email.com"
-              placeholderTextColor={COLORS.textMuted}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={spenderEmail}
-              onChangeText={setSpenderEmail}
-            />
-
-            <View style={styles.modalButtonsRow}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={handleCloseAddModal}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalSubmitBtn}
-                onPress={handleAddSpenderSubmit}
-                disabled={submittingSpender}
-              >
-                {submittingSpender ? (
-                  <ActivityIndicator size="small" color={COLORS.white} />
-                ) : (
-                  <Text style={styles.modalSubmitText}>Connect</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* DELETE SPENDER CONFIRMATION MODAL */}
-      <Modal
-        animationType="fade"
-        transparent={true}
+      {/* DISCONNECT SPENDER */}
+      <Sheet
         visible={isDeleteModalVisible}
-        onRequestClose={() => setIsDeleteModalVisible(false)}
+        title="Disconnect Spender"
+        onClose={closeDeleteModal}
+        footer={
+          <SheetActions
+            onCancel={closeDeleteModal}
+            onSubmit={handleDeleteSpenderConfirm}
+            submitLabel="Disconnect"
+            loading={deletingSpender}
+            disabled={deleteBanner?.type === 'success'}
+            danger
+          />
+        }
       >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-          style={styles.modalOverlay}
-        >
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Disconnect Spender</Text>
-              <TouchableOpacity onPress={() => setIsDeleteModalVisible(false)}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
+        <Banner message={deleteBanner} />
+        {spenderToDelete && (
+          <View style={styles.selectedCard}>
+            <Avatar uri={spenderToDelete.avatar_url} size={40} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.selectedName}>{spenderToDelete.full_name}</Text>
+              <Text style={styles.selectedSub}>Connected spender</Text>
             </View>
+          </View>
+        )}
+        <Text style={styles.bodyText}>
+          Are you sure you want to disconnect this spender? They will no longer be linked to your account.
+        </Text>
+      </Sheet>
 
-            <Text style={styles.modalSubtitle}>
-              Are you sure you want to remove <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>{spenderToDelete?.full_name}</Text>? This will disconnect them from your account.
-            </Text>
+      {/* SEND ALLOWANCE */}
+      <Sheet
+        visible={isAllowanceModalVisible}
+        title="Send Allowance"
+        subtitle="Choose a member and set the allowance details."
+        onClose={closeAllowanceModal}
+        footer={
+          <SheetActions
+            onCancel={closeAllowanceModal}
+            onSubmit={handleSaveAllowanceSubmit}
+            submitLabel="Confirm Allowance"
+            loading={submittingAllowance}
+          />
+        }
+      >
+        <Banner message={allowanceBanner} />
 
-            {deleteModalMessage && (
-              <View style={[
-                styles.inlineBanner, 
-                deleteModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
-              ]}>
-                <Ionicons 
-                  name={deleteModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
-                  size={16} 
-                  color={deleteModalMessage.type === 'success' ? COLORS.success : COLORS.danger} 
-                />
-                <Text style={[
-                  styles.bannerText, 
-                  { color: deleteModalMessage.type === 'success' ? COLORS.success : COLORS.danger }
-                ]}>
-                  {deleteModalMessage.text}
+        <Field label="Member" error={allowanceErrors.spender}>
+          {selectedAllowanceSpender ? (
+            <View style={styles.selectedCard}>
+              <Avatar uri={selectedAllowanceSpender.avatarUrl} size={40} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.selectedName}>{selectedAllowanceSpender.name}</Text>
+                <Text style={styles.selectedSub} numberOfLines={1}>
+                  {selectedAllowanceSpender.email || 'Beneficiary'}
                 </Text>
               </View>
-            )}
-
-            <View style={styles.modalButtonsRow}>
               <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => setIsDeleteModalVisible(false)}
+                onPress={() => setSelectedAllowanceSpender(null)}
+                style={styles.removeButton}
+                activeOpacity={0.7}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Ionicons name="close" size={16} color={COLORS.danger} />
               </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.selectMemberButton, !!allowanceErrors.spender && styles.inputError]}
+              activeOpacity={0.7}
+              onPress={() => {
+                setAllowanceErrors((p) => ({ ...p, spender: undefined }));
+                fetchConnectedMembersForAllowance();
+                setMemberPickerVisible(true);
+              }}
+            >
+              <Ionicons name="person-add-outline" size={18} color={COLORS.primaryMid} />
+              <Text style={styles.selectMemberText}>Select a member</Text>
+              <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
+        </Field>
 
+        <Field label="Allowance Name" error={allowanceErrors.name}>
+          <TextInput
+            style={[styles.input, !!allowanceErrors.name && styles.inputError]}
+            value={allowanceName}
+            onChangeText={(t) => {
+              setAllowanceName(t);
+              if (allowanceErrors.name) setAllowanceErrors((p) => ({ ...p, name: undefined }));
+            }}
+            placeholder="e.g. Weekly Allowance"
+            placeholderTextColor={COLORS.textMuted}
+          />
+        </Field>
+
+        <Field
+          label="Amount (PHP)"
+          error={allowanceErrors.amount}
+          hint={`Available balance: ${formatPeso(sponsorWalletBalance, true)}`}
+        >
+          <View style={styles.amountWrapper}>
+            <Text style={styles.currencyPrefix}>₱</Text>
+            <TextInput
+              style={[styles.input, styles.amountInput, !!allowanceErrors.amount && styles.inputError]}
+              keyboardType="decimal-pad"
+              value={allowanceAmount}
+              onChangeText={(t) => {
+                setAllowanceAmount(t);
+                if (allowanceErrors.amount) setAllowanceErrors((p) => ({ ...p, amount: undefined }));
+              }}
+              placeholder="0.00"
+              placeholderTextColor={COLORS.textMuted}
+            />
+          </View>
+        </Field>
+
+        <Field label="Coverage Period" error={allowanceErrors.period}>
+          <View style={styles.periodSelectorContainer}>
+            {PERIODS.map((item) => {
+              const isActive = selectedPeriod === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.periodPill, isActive && styles.periodPillActive]}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setSelectedPeriod(item.key);
+                    const dates = getPeriodDates(item.key);
+                    setStartDate(dates.start);
+                    setEndDate(dates.end);
+                    setAllowanceErrors((p) => ({ ...p, period: undefined }));
+                  }}
+                >
+                  <Text style={[styles.periodPillText, isActive && styles.periodPillTextActive]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity
+              style={[styles.periodPill, selectedPeriod === 'custom' && styles.periodPillActive]}
+              activeOpacity={0.8}
+              onPress={() => {
+                setTempStartDate(null);
+                setTempEndDate(null);
+                setCurrentCalendarDate(new Date());
+                setCustomCalendarVisible(true);
+              }}
+            >
+              <Text style={[styles.periodPillText, selectedPeriod === 'custom' && styles.periodPillTextActive]}>
+                Custom
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.dateRangeIndicator}>
+            <Ionicons name="calendar-outline" size={14} color={COLORS.textSubtle} />
+            <Text style={styles.dateRangeIndicatorText}>{formatDisplayDateRange(startDate, endDate)}</Text>
+          </View>
+        </Field>
+      </Sheet>
+
+      {/* MEMBER PICKER */}
+      <Sheet
+        visible={memberPickerVisible}
+        title="Select Member"
+        subtitle="Pick who will receive this allowance."
+        onClose={() => setMemberPickerVisible(false)}
+      >
+        {loadingMembers ? (
+          <ActivityIndicator size="large" color={COLORS.primary} style={{ marginVertical: 40 }} />
+        ) : connectedMembersList.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="people-outline" size={22} color={COLORS.textMuted} />
+            </View>
+            <Text style={styles.emptyTitle}>No connected members</Text>
+            <Text style={styles.emptySubtitle}>Link a spender first using the Link Spender action.</Text>
+          </View>
+        ) : (
+          connectedMembersList.map((item) => {
+            const isPending = item.status === 'pending';
+            return (
               <TouchableOpacity
-                style={[styles.modalSubmitBtn, { backgroundColor: COLORS.danger }]}
-                onPress={handleDeleteSpenderConfirm}
-                disabled={deletingSpender}
+                key={item.id}
+                style={[styles.memberRow, isPending && { opacity: 0.6 }]}
+                activeOpacity={0.8}
+                disabled={isPending}
+                onPress={() => {
+                  setSelectedAllowanceSpender({
+                    id: item.spender_id,
+                    name: item.name,
+                    email: item.email,
+                    avatarUrl: item.avatarUrl,
+                  });
+                  setAllowanceErrors((p) => ({ ...p, spender: undefined }));
+                  setMemberPickerVisible(false);
+                }}
               >
-                {deletingSpender ? (
-                  <ActivityIndicator size="small" color={COLORS.white} />
+                <Avatar uri={item.avatarUrl} size={40} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.selectedName} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.selectedSub} numberOfLines={1}>{item.email}</Text>
+                </View>
+                {isPending ? (
+                  <View style={styles.statusBadge}>
+                    <Text style={styles.statusText}>Pending</Text>
+                  </View>
                 ) : (
-                  <Text style={styles.modalSubmitText}>Delete</Text>
+                  <Ionicons name="chevron-forward" size={16} color={COLORS.textMuted} />
                 )}
               </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+            );
+          })
+        )}
+      </Sheet>
 
-      {/* SEND ALLOWANCE MODAL */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={isAllowanceModalVisible}
-        onRequestClose={() => setIsAllowanceModalVisible(false)}
-      >
-        <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalOverlay}
-        >
-          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Set Allowance</Text>
-              <TouchableOpacity onPress={() => setIsAllowanceModalVisible(false)}>
-                <Ionicons name="close" size={22} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={styles.modalSubtitle}>
-                Select a member and specify the allowance parameters.
-              </Text>
-
-              {allowanceModalMessage && (
-                <View style={[
-                  styles.inlineBanner, 
-                  allowanceModalMessage.type === 'success' ? styles.bannerSuccess : styles.bannerError
-                ]}>
-                  <Ionicons 
-                    name={allowanceModalMessage.type === 'success' ? 'checkmark-circle-outline' : 'alert-circle-outline'} 
-                    size={16} 
-                    color={allowanceModalMessage.type === 'success' ? COLORS.success : COLORS.danger} 
-                  />
-                  <Text style={[
-                    styles.bannerText, 
-                    { color: allowanceModalMessage.type === 'success' ? COLORS.success : COLORS.danger }
-                  ]}>
-                    {allowanceModalMessage.text}
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.allowanceSectionLabel}>Target Member</Text>
-              {selectedAllowanceSpender ? (
-                <View style={styles.selectedSpenderCard}>
-                  <View style={styles.avatarContainer}>
-                    {selectedAllowanceSpender.avatarUrl ? (
-                      <Image source={{ uri: selectedAllowanceSpender.avatarUrl }} style={styles.avatarImage} />
-                    ) : (
-                      <Ionicons name="person" size={16} color={COLORS.textPrimary} />
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.spenderName}>{selectedAllowanceSpender.name}</Text>
-                    <Text style={styles.spenderEmail}>{selectedAllowanceSpender.email || 'Beneficiary'}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => setSelectedAllowanceSpender(null)} style={styles.removeButton}>
-                    <Ionicons name="close" size={16} color={COLORS.danger} />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <TouchableOpacity 
-                  style={styles.selectMemberButton} 
-                  activeOpacity={0.7} 
-                  onPress={() => {
-                    fetchConnectedMembersForAllowance();
-                    setMemberPickerVisible(true);
-                  }}
-                >
-                  <View style={styles.addCircleOutline}>
-                    <Ionicons name="add" size={18} color={COLORS.textPrimary} />
-                  </View>
-                  <Text style={styles.selectMemberText}>Select a Member to Allocate</Text>
-                </TouchableOpacity>
-              )}
-
-              <Text style={[styles.allowanceSectionLabel, { marginTop: 16 }]}>Allowance Details</Text>
-
-              <View style={styles.allowanceInputGroup}>
-                <Text style={styles.allowanceLabel}>Allowance Name</Text>
-                <TextInput 
-                  style={styles.modalInput} 
-                  value={allowanceName} 
-                  onChangeText={setAllowanceName} 
-                  placeholder="e.g. Weekly Allowance" 
-                  placeholderTextColor={COLORS.textMuted} 
-                />
-              </View>
-
-              <View style={styles.allowanceInputGroup}>
-                <Text style={styles.allowanceLabel}>Amount (PHP)</Text>
-                <View style={styles.amountWrapper}>
-                  <Text style={styles.currencyPrefix}>₱</Text>
-                  <TextInput 
-                    style={[styles.modalInput, styles.amountInput]} 
-                    keyboardType="decimal-pad"
-                    value={allowanceAmount} 
-                    onChangeText={setAllowanceAmount} 
-                    placeholder="0.00" 
-                    placeholderTextColor={COLORS.textMuted} 
-                  />
-                </View>
-              </View>
-
-              <View style={styles.allowanceInputGroup}>
-                <Text style={styles.allowanceLabel}>Coverage Period</Text>
-                <View style={styles.periodSelectorContainer}>
-                  {[
-                    { key: 'today', label: 'Today' },
-                    { key: 'week', label: 'This Week' },
-                    { key: 'nextWeek', label: 'Next Week' },
-                    { key: 'month', label: 'This Month' },
-                    { key: 'nextMonth', label: 'Next Month' },
-                  ].map((item) => {
-                    const isActive = selectedPeriod === item.key;
-                    return (
-                      <TouchableOpacity
-                        key={item.key}
-                        style={[styles.periodPill, isActive && styles.periodPillActive]}
-                        activeOpacity={0.8}
-                        onPress={() => {
-                          setSelectedPeriod(item.key as any);
-                          const dates = getPeriodDates(item.key as any);
-                          setStartDate(dates.start);
-                          setEndDate(dates.end);
-                        }}
-                      >
-                        <Text style={[styles.periodPillText, isActive && styles.periodPillTextActive]}>
-                          {item.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-
-                  <TouchableOpacity
-                    style={[styles.periodPill, selectedPeriod === 'custom' && styles.periodPillActive]}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      setTempStartDate(null);
-                      setTempEndDate(null);
-                      setCurrentCalendarDate(new Date());
-                      setCustomCalendarVisible(true);
-                    }}
-                  >
-                    <Text style={[styles.periodPillText, selectedPeriod === 'custom' && styles.periodPillTextActive]}>
-                      Custom
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.dateRangeIndicator}>
-                  <Ionicons name="calendar-outline" size={14} color={COLORS.textMuted} />
-                  <Text style={styles.dateRangeIndicatorText}>
-                    {formatDisplayDateRange(startDate, endDate)}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={[styles.modalButtonsRow, { marginTop: 24 }]}>
-                <TouchableOpacity
-                  style={styles.modalCancelBtn}
-                  onPress={() => setIsAllowanceModalVisible(false)}
-                >
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.modalSubmitBtn}
-                  onPress={handleSaveAllowanceSubmit}
-                  disabled={submittingAllowance}
-                >
-                  {submittingAllowance ? (
-                    <ActivityIndicator size="small" color={COLORS.white} />
-                  ) : (
-                    <Text style={styles.modalSubmitText}>Confirm Allocation</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* MEMBER SELECTION SUB-MODAL */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={memberPickerVisible}
-        onRequestClose={() => setMemberPickerVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: '75%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Member</Text>
-              <TouchableOpacity onPress={() => setMemberPickerVisible(false)}>
-                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            {loadingMembers ? (
-              <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginVertical: 40 }} />
-            ) : (
-              <FlatList
-                data={connectedMembersList}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: 20 }}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyTitle}>No connected members</Text>
-                    <Text style={styles.emptySubtitle}>Connect a spender first using the Connect action.</Text>
-                  </View>
-                }
-                renderItem={({ item, index }) => {
-                  const theme = CARD_THEMES[index % CARD_THEMES.length];
-                  const isPending = item.status === 'pending';
-
-                  return (
-                    <TouchableOpacity
-                      style={[styles.modalCard, { backgroundColor: theme.bg, opacity: isPending ? 0.6 : 1 }]}
-                      activeOpacity={0.8}
-                      disabled={isPending}
-                      onPress={() => {
-                        if (isPending) {
-                          setAllowanceModalMessage({ type: 'error', text: "Spender hasn't accepted your link request yet." });
-                          setMemberPickerVisible(false);
-                          return;
-                        }
-                        setSelectedAllowanceSpender({
-                          id: item.spender_id,
-                          name: item.name,
-                          email: item.email,
-                          avatarUrl: item.avatarUrl
-                        });
-                        setMemberPickerVisible(false);
-                      }}
-                    >
-                      <View style={styles.gridAvatarCircle}>
-                        {item.avatarUrl ? (
-                          <Image source={{ uri: item.avatarUrl }} style={styles.avatarImage} />
-                        ) : (
-                          <Text style={[styles.avatarText, { color: theme.text }]}>
-                            {item.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.gridMemberName, { color: theme.text }]} numberOfLines={1}>{item.name}</Text>
-                        <Text style={styles.gridMemberEmail} numberOfLines={1}>{item.email}</Text>
-                      </View>
-                      {isPending && (
-                        <View style={[styles.gridStatusBadge, styles.badgePending]}>
-                          <Text style={[styles.statusText, { color: COLORS.pendingText }]}>Pending</Text>
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* CUSTOM RANGE CALENDAR PICKER MODAL */}
-      <Modal
-        animationType="slide"
-        transparent={true}
+      {/* CUSTOM DATE RANGE */}
+      <Sheet
         visible={customCalendarVisible}
-        onRequestClose={() => setCustomCalendarVisible(false)}
+        title="Select Date Range"
+        subtitle="Tap a start date, then an end date."
+        onClose={() => setCustomCalendarVisible(false)}
+        footer={
+          <View style={styles.actionsRow}>
+            <TouchableOpacity
+              style={[styles.btnSecondary, !tempStartDate && { opacity: 0.5 }]}
+              disabled={!tempStartDate}
+              activeOpacity={0.8}
+              onPress={() => {
+                setTempStartDate(null);
+                setTempEndDate(null);
+              }}
+            >
+              <Text style={styles.btnSecondaryText}>Reset</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btnPrimary, (!tempStartDate || !tempEndDate) && { opacity: 0.5 }]}
+              disabled={!tempStartDate || !tempEndDate}
+              activeOpacity={0.85}
+              onPress={() => {
+                if (tempStartDate && tempEndDate) {
+                  setStartDate(tempStartDate);
+                  setEndDate(tempEndDate);
+                  setSelectedPeriod('custom');
+                  setAllowanceErrors((p) => ({ ...p, period: undefined }));
+                  setCustomCalendarVisible(false);
+                }
+              }}
+            >
+              <Text style={styles.btnPrimaryText}>Apply Range</Text>
+            </TouchableOpacity>
+          </View>
+        }
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Date Range</Text>
-              <TouchableOpacity onPress={() => setCustomCalendarVisible(false)}>
-                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.modalDivider} />
-
-            <View style={styles.calendarNavRow}>
-              <Text style={styles.calendarMonthTitle}>
-                {currentCalendarDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
-              </Text>
-              <View style={styles.calendarArrowsContainer}>
-                <TouchableOpacity 
-                  style={styles.calendarArrowBtn}
-                  onPress={() => {
-                    const prev = new Date(currentCalendarDate);
-                    prev.setMonth(prev.getMonth() - 1);
-                    setCurrentCalendarDate(prev);
-                  }}
-                >
-                  <Ionicons name="chevron-back" size={18} color={COLORS.textPrimary} />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.calendarArrowBtn}
-                  onPress={() => {
-                    const next = new Date(currentCalendarDate);
-                    next.setMonth(next.getMonth() + 1);
-                    setCurrentCalendarDate(next);
-                  }}
-                >
-                  <Ionicons name="chevron-forward" size={18} color={COLORS.textPrimary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.weekDaysRow}>
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => (
-                <Text key={i} style={styles.weekDayText}>{d}</Text>
-              ))}
-            </View>
-
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View style={styles.daysGrid}>
-                {(() => {
-                  const year = currentCalendarDate.getFullYear();
-                  const month = currentCalendarDate.getMonth();
-                  const firstDayIndex = new Date(year, month, 1).getDay();
-                  const totalDays = new Date(year, month + 1, 0).getDate();
-                  const todayStr = getLocalDateString(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-
-                  const cells = [];
-                  for (let i = 0; i < firstDayIndex; i++) {
-                    cells.push(<View key={`empty-${i}`} style={styles.dayCellEmpty} />);
-                  }
-
-                  for (let day = 1; day <= totalDays; day++) {
-                    const dateStr = getLocalDateString(year, month, day);
-                    const isPast = dateStr < todayStr;
-
-                    const isStart = tempStartDate === dateStr;
-                    const isEnd = tempEndDate === dateStr;
-                    const isInRange = tempStartDate && tempEndDate && dateStr > tempStartDate && dateStr < tempEndDate;
-
-                    cells.push(
-                      <TouchableOpacity
-                        key={dateStr}
-                        disabled={isPast}
-                        style={[
-                          styles.dayCell,
-                          isPast && styles.dayCellDisabled,
-                          (isStart || isEnd) && styles.dayCellSelected,
-                          isInRange && styles.dayCellInRange,
-                        ]}
-                        onPress={() => {
-                          if (!tempStartDate || (tempStartDate && tempEndDate)) {
-                            setTempStartDate(dateStr);
-                            setTempEndDate(null);
-                          } else if (tempStartDate && !tempEndDate) {
-                            if (dateStr < tempStartDate) {
-                              setTempStartDate(dateStr);
-                            } else {
-                              setTempEndDate(dateStr);
-                            }
-                          }
-                        }}
-                      >
-                        <Text style={[
-                          styles.dayCellText,
-                          isPast && styles.dayCellTextDisabled,
-                          (isStart || isEnd) && styles.dayCellTextSelected,
-                        ]}>
-                          {day}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  }
-                  return cells;
-                })()}
-              </View>
-            </ScrollView>
-
-            <View style={[styles.modalButtonsRow, { marginTop: 16 }]}>
-              <TouchableOpacity 
-                style={[styles.modalCancelBtn, !tempStartDate && { opacity: 0.5 }]} 
-                disabled={!tempStartDate}
-                onPress={() => {
-                  if (tempStartDate) {
-                    setTempStartDate(null);
-                    setTempEndDate(null);
-                  }
-                }}
-              >
-                <Text style={styles.modalCancelText}>Reset</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.modalSubmitBtn, (!tempStartDate || !tempEndDate) && { opacity: 0.5 }]} 
-                disabled={!tempStartDate || !tempEndDate}
-                onPress={() => {
-                  if (tempStartDate && tempEndDate) {
-                    setStartDate(tempStartDate);
-                    setEndDate(tempEndDate);
-                    setSelectedPeriod('custom');
-                    setCustomCalendarVisible(false);
-                  }
-                }}
-              >
-                <Text style={styles.modalSubmitText}>Apply Range</Text>
-              </TouchableOpacity>
-            </View>
+        <View style={styles.calendarNavRow}>
+          <Text style={styles.calendarMonthTitle}>
+            {currentCalendarDate.toLocaleString('en-US', { month: 'long', year: 'numeric' })}
+          </Text>
+          <View style={styles.calendarArrowsContainer}>
+            <TouchableOpacity
+              style={styles.calendarArrowBtn}
+              onPress={() => {
+                const prev = new Date(currentCalendarDate);
+                prev.setMonth(prev.getMonth() - 1);
+                setCurrentCalendarDate(prev);
+              }}
+            >
+              <Ionicons name="chevron-back" size={18} color={COLORS.textPrimary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.calendarArrowBtn}
+              onPress={() => {
+                const next = new Date(currentCalendarDate);
+                next.setMonth(next.getMonth() + 1);
+                setCurrentCalendarDate(next);
+              }}
+            >
+              <Ionicons name="chevron-forward" size={18} color={COLORS.textPrimary} />
+            </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+
+        <View style={styles.weekDaysRow}>
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+            <Text key={d} style={styles.weekDayText}>{d}</Text>
+          ))}
+        </View>
+        <View style={styles.daysGrid}>{renderCalendarCells()}</View>
+      </Sheet>
     </View>
   );
 }
 
+/* ---------- Styles ---------- */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.bg,
-  },
+  container: { flex: 1, backgroundColor: COLORS.bg },
+
+  /* Header */
   topBar: {
     paddingTop: (Platform.OS === 'android' ? NativeStatusBar.currentHeight || 24 : 44) + 12,
     paddingHorizontal: 20,
@@ -1484,567 +1699,392 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.bg,
   },
-  headerLeft: {
+  headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
+  headerTextGroup: { marginLeft: 12, justifyContent: 'center', flex: 1 },
+  welcomeText: { fontSize: 12, color: COLORS.textSubtle, fontWeight: '400' },
+  userName: { fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.3 },
+  roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
+    backgroundColor: COLORS.primarySoft,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
-  userName: { 
-    fontSize: 18, 
-    fontWeight: '800', 
-    color: COLORS.textPrimary,
-    letterSpacing: -0.3,
-  },
-  welcomeText: { 
-    fontSize: 12, 
-    color: COLORS.textSubtle, 
-    fontWeight: '400',
-    marginTop: 1,
-  },
-  avatar: { 
-    width: 42, 
-    height: 42, 
-    borderRadius: 21, 
-  },
-  avatarPlaceholder: {
-    width: 42, 
-    height: 42, 
-    borderRadius: 21,
-    backgroundColor: '#E2E8F0',
-    justifyContent: 'center', 
-    alignItems: 'center',
-  },
-  avatarInitials: { 
-    color: COLORS.textPrimary, 
-    fontWeight: '700', 
-    fontSize: 13,
-  },
+  roleBadgeText: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
 
-  /* WALLET CARD */
-  cardWrapper: {
-    marginBottom: 20,
-  },
-  cardContainer: {
-    borderRadius: 24,
+  /* Body */
+  bodyContent: { flex: 1 },
+  listScrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
+
+  /* Wallet card */
+  walletCard: {
+    borderRadius: 26,
     padding: 22,
-    height: 180,
-    justifyContent: 'space-between',
-    position: 'relative',
     overflow: 'hidden',
-    shadowColor: '#3d5c4d',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowColor: '#0F3D2E',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  cardContent: {
-    flex: 1,
-    justifyContent: 'space-between',
-    zIndex: 2,
+  cardCircleLarge: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    top: -80,
+    right: -60,
   },
-  heroRemainingAmount: {
+  cardCircleSmall: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(193,240,56,0.08)',
+    bottom: -50,
+    left: -30,
+  },
+  walletTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  walletLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  walletIconChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroLabel: { color: 'rgba(255,255,255,0.88)', fontSize: 14, fontWeight: '600', letterSpacing: 0.2 },
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroAmount: {
     color: COLORS.white,
     fontSize: 40,
     fontWeight: '800',
-    letterSpacing: -0.5,
+    letterSpacing: -0.8,
+    marginTop: 14,
+    marginBottom: 18,
   },
-  heroLabel: {
-    color: 'rgba(255, 255, 255, 0.85)',
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-    marginBottom: 4,
-  },
-
-  /* BODY */
-  bodyContent: {
-    flex: 1,
-  },
-  listScrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-
-  /* QUICK ACTIONS */
-  quickActionsRow: {
+  walletStatsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-    marginTop: 12,
-  },
-  quickActionTile: {
-    width: '31%',
-    backgroundColor: COLORS.white,
-    borderRadius: 18,
-    paddingVertical: 14,
     alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#EAECEF',
-  },
-  quickActionTileActive: {
-    backgroundColor: COLORS.accentGreen,
-    borderColor: COLORS.accentGreen,
-  },
-  quickActionIconCircle: {
-    width: 32,
-    height: 32,
+    backgroundColor: 'rgba(0,0,0,0.18)',
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
+    paddingVertical: 12,
   },
-  quickActionIconCircleActive: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  quickActionLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: COLORS.textSubtle,
-  },
-  quickActionLabelActive: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+  walletStat: { flex: 1, alignItems: 'center', gap: 4 },
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statLabel: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
+  statValue: { fontSize: 14, fontWeight: '700', color: COLORS.white },
+  statDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.18)' },
+  statCaption: {
+    marginTop: 10,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    textAlign: 'center',
   },
 
-  /* SECTION HEADERS */
+  /* Section headers */
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    letterSpacing: -0.2,
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textPrimary, letterSpacing: -0.2 },
+  seeAllText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
+  countPill: {
+    backgroundColor: COLORS.primarySoft,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
-  seeAllText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    fontWeight: '500',
-  },
+  countPillText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
 
-  /* SPENDERS HORIZONTAL LIST */
-  horizontalSpendersContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 20,
-    paddingVertical: 4,
-  },
-  spenderHorizontalItem: {
-    alignItems: 'center',
-    width: 54,
-  },
-  avatarWrapper: {
-    position: 'relative',
-  },
-  spenderGridAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  spenderGridAvatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E2E8F0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  spenderGridInitials: {
-    color: COLORS.textPrimary,
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  activeDot: {
-    position: 'absolute',
-    bottom: 1,
-    right: 1,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#10B981',
-    borderWidth: 2,
-    borderColor: COLORS.bg,
-  },
-  spenderGridFirstName: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: COLORS.textSubtle,
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  moreSpendersBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  /* Quick actions */
+  quickActionsRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  quickActionTile: {
+    width: '31.5%',
     backgroundColor: COLORS.white,
-    justifyContent: 'center',
+    borderRadius: 18,
+    paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#EAECEF',
+    borderColor: COLORS.border,
   },
+  quickActionIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  quickActionLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textPrimary },
 
-  /* TRANSACTIONS */
-  transactionsListContainer: {
-    gap: 10,
+  /* Spenders */
+  horizontalSpendersContainer: { gap: 18, paddingVertical: 4, paddingRight: 8 },
+  spenderItem: { alignItems: 'center', width: 58 },
+  spenderName: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: COLORS.textSubtle,
+    marginTop: 6,
+    textAlign: 'center',
   },
+  addSpenderCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: COLORS.primaryMid,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listHint: { fontSize: 11, color: COLORS.textMuted, marginTop: 8 },
+
+  /* Transactions */
+  filterRow: {
+    flexDirection: 'row',
+    backgroundColor: '#EBEFF4',
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 14,
+  },
+  filterChip: { flex: 1, paddingVertical: 8, borderRadius: 11, alignItems: 'center' },
+  filterChipActive: {
+    backgroundColor: COLORS.white,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  filterChipText: { fontSize: 12, fontWeight: '600', color: COLORS.textSubtle },
+  filterChipTextActive: { color: COLORS.primary, fontWeight: '700' },
+  transactionsListContainer: { gap: 10 },
   txCardItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: COLORS.card,
     padding: 14,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#EAECEF',
+    borderColor: COLORS.border,
   },
-  txLeftGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  txIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: '#F5F7FA',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  txDescText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  txDateText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  txAmountText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  txIconBox: { width: 40, height: 40, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  txDescText: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary },
+  txDateText: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+  txAmountText: { fontSize: 14, fontWeight: '700', marginLeft: 8 },
 
-  /* MODAL STYLES */
-  modalOverlay: {
+  /* Empty state */
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 28 },
+  emptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#EBEFF4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  emptyTitle: { fontSize: 13, fontWeight: '600', color: COLORS.textSubtle },
+  emptySubtitle: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', marginTop: 4 },
+
+  /* Sheet (shared modal) */
+  overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
     justifyContent: 'flex-end',
-    alignItems: 'center',
   },
-  modalContent: {
+  sheet: {
     width: '100%',
+    maxHeight: '88%',
     backgroundColor: COLORS.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 22,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D9DEE5',
+    marginBottom: 14,
+  },
+  sheetHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, gap: 12 },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.3 },
+  sheetSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 3, lineHeight: 17 },
+  sheetClose: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.bg,
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'center',
   },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+  sheetBody: { flexGrow: 0 },
+  sheetFooter: { marginTop: 16 },
+  actionsRow: { flexDirection: 'row', gap: 10 },
+  btnSecondary: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalSubtitle: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginBottom: 16,
-    lineHeight: 16,
+  btnSecondaryText: { fontSize: 14, fontWeight: '600', color: COLORS.textSubtle },
+  btnPrimary: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: COLORS.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  inlineBanner: {
+  btnPrimaryText: { fontSize: 14, fontWeight: '700', color: COLORS.white },
+  bodyText: { fontSize: 13, color: COLORS.textSubtle, lineHeight: 19 },
+
+  /* Banner */
+  banner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: 10,
-    marginBottom: 14,
-  },
-  bannerError: {
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-  },
-  bannerSuccess: {
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#DCFCE7',
-  },
-  bannerText: {
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
     borderRadius: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+  },
+  bannerError: { backgroundColor: COLORS.dangerSoft, borderColor: COLORS.dangerBorder },
+  bannerSuccess: { backgroundColor: COLORS.successSoft, borderColor: COLORS.successBorder },
+  bannerText: { fontSize: 12, fontWeight: '600', flex: 1 },
+
+  /* Form fields */
+  field: { marginBottom: 16 },
+  fieldLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 6 },
+  fieldErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 },
+  fieldErrorText: { fontSize: 12, color: COLORS.danger, fontWeight: '500', flex: 1 },
+  fieldHint: { fontSize: 11, color: COLORS.textMuted, marginTop: 6 },
+  input: {
+    height: 48,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 10,
     fontSize: 14,
     color: COLORS.textPrimary,
     backgroundColor: COLORS.bg,
-    marginBottom: 16,
   },
-  modalButtonsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    alignItems: 'center',
-    backgroundColor: COLORS.bg,
-  },
-  modalCancelText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-  },
-  modalSubmitBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    backgroundColor: COLORS.textPrimary,
-  },
-  modalSubmitText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  allowanceSectionLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 8,
-  },
-  selectMemberButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 15,
-    backgroundColor: COLORS.bg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    gap: 8,
-  },
-  addCircleOutline: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: COLORS.textPrimary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  selectMemberText: {
-    color: COLORS.textPrimary,
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  selectedSpenderCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: COLORS.bg,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    gap: 10,
-  },
-  avatarContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E2E8F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 18,
-  },
-  spenderName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  spenderEmail: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-  },
-  removeButton: {
-    padding: 6,
-    backgroundColor: '#FEF2F2',
-    borderRadius: 8,
-  },
-  allowanceInputGroup: {
-    marginBottom: 4,
-  },
-  allowanceLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: 4,
-  },
-  amountWrapper: {
-    position: 'relative',
-    justifyContent: 'center',
-  },
+  inputError: { borderColor: COLORS.danger, backgroundColor: COLORS.dangerSoft },
+  amountWrapper: { justifyContent: 'center' },
   currencyPrefix: {
     position: 'absolute',
     left: 14,
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
     zIndex: 1,
-    top: 12,
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
   },
-  amountInput: {
-    paddingLeft: 30,
-  },
-  periodSelectorContainer: {
+  amountInput: { paddingLeft: 30 },
+
+  /* Member selection */
+  selectMemberButton: {
+    height: 52,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 6,
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    backgroundColor: COLORS.bg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
+  selectMemberText: { flex: 1, color: COLORS.textSubtle, fontWeight: '600', fontSize: 14 },
+  selectedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    backgroundColor: COLORS.bg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 14,
+  },
+  selectedName: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary },
+  selectedSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+  removeButton: { padding: 7, backgroundColor: COLORS.dangerSoft, borderRadius: 10 },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    backgroundColor: COLORS.bg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 10,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: COLORS.pendingSoft,
+  },
+  statusText: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', color: COLORS.pendingText },
+
+  /* Period selector */
+  periodSelectorContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   periodPill: {
     flexBasis: '31%',
-    height: 36,
-    borderRadius: 18,
+    flexGrow: 1,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: COLORS.bg,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    marginBottom: 4,
+    borderColor: COLORS.border,
   },
-  periodPillActive: {
-    backgroundColor: COLORS.textPrimary,
-    borderColor: COLORS.textPrimary,
-  },
-  periodPillText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-    textAlign: 'center',
-  },
-  periodPillTextActive: {
-    color: COLORS.white,
-  },
+  periodPillActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  periodPillText: { fontSize: 12, fontWeight: '600', color: COLORS.textSubtle },
+  periodPillTextActive: { color: COLORS.white },
   dateRangeIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 10,
+    marginTop: 12,
     paddingHorizontal: 2,
   },
-  dateRangeIndicatorText: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontWeight: '500',
-  },
-  modalCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 10,
-    gap: 10,
-  },
-  gridAvatarCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.white,
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  avatarText: {
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  gridMemberName: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  gridMemberEmail: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  gridStatusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  badgePending: {
-    backgroundColor: COLORS.pendingSoft,
-  },
-  statusText: {
-    fontSize: 9,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 30,
-  },
-  emptyTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  emptySubtitle: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    marginTop: 4,
-  },
+  dateRangeIndicatorText: { fontSize: 12, color: COLORS.textSubtle, fontWeight: '500' },
+
+  /* Calendar */
   calendarNavRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  calendarMonthTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
+  calendarMonthTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
   calendarArrowsContainer: {
     flexDirection: 'row',
     backgroundColor: COLORS.bg,
@@ -2052,86 +2092,31 @@ const styles = StyleSheet.create({
     padding: 2,
     gap: 4,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    borderColor: COLORS.border,
   },
   calendarArrowBtn: {
-    width: 28,
-    height: 28,
+    width: 30,
+    height: 30,
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.white,
   },
-  weekDaysRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 6,
-  },
+  weekDaysRow: { flexDirection: 'row', marginBottom: 6 },
   weekDayText: {
+    width: '14.28%',
     fontSize: 11,
     fontWeight: '600',
     color: COLORS.textMuted,
-    width: '14%',
     textAlign: 'center',
   },
-  daysGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  dayCellEmpty: {
-    width: '14.28%',
-    height: 36,
-  },
-  dayCell: {
-    width: '14.28%',
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 2,
-  },
-  dayCellDisabled: {
-    opacity: 0.3,
-  },
-  dayCellSelected: {
-    backgroundColor: COLORS.textPrimary,
-    borderRadius: 18,
-  },
-  dayCellInRange: {
-    backgroundColor: '#E2E8F0',
-  },
-  dayCellText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  dayCellTextDisabled: {
-    color: COLORS.textMuted,
-  },
-  dayCellTextSelected: {
-    color: COLORS.white,
-  },
-  modalDivider: {
-    height: 1,
-    borderColor: COLORS.borderLight,
-    borderWidth: 1,
-    width: '100%',
-    marginBottom: 10,
-  },
-  headerTextGroup: {
-    marginLeft: 12,
-    justifyContent: 'center',
-  },
-  roleBadge: {
-    backgroundColor: '#C8E6C9',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#103826',
-  },
+  daysGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCellEmpty: { width: '14.28%', height: 40 },
+  dayCell: { width: '14.28%', height: 40, alignItems: 'center', justifyContent: 'center' },
+  dayCellSelected: { backgroundColor: COLORS.primary, borderRadius: 20 },
+  dayCellInRange: { backgroundColor: COLORS.primarySoft },
+  dayCellText: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary },
+  dayCellToday: { borderWidth: 1.5, borderColor: COLORS.primaryMid, borderRadius: 20 },
+  dayCellTextToday: { color: COLORS.primaryMid, fontWeight: '800' },
+  dayCellTextSelected: { color: COLORS.white },
 });
