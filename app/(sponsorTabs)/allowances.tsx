@@ -37,17 +37,17 @@ interface SpenderAllowanceCardData {
 
 /* ---------- Design Tokens ---------- */
 const COLORS = {
-  bgLight: '#EAF9E7',
+  bgLight: '#F3F4F6',
   lightGreen: '#C0E6BA',
   mediumGreen: '#4CA771',
   darkTeal: '#013237',
-  bg: '#F5FAF4',
+  bg: '#F9FAFB',
   card: '#FFFFFF',
   white: '#FFFFFF',
-  textPrimary: '#013237',
-  textMuted: '#5C7571',
+  textPrimary: '#111827',
+  textMuted: '#6B7280',
   danger: '#DC2626',
-  borderLight: '#D8ECD3',
+  borderLight: '#E5E7EB',
   success: '#2E7D32',
 };
 
@@ -174,7 +174,7 @@ export default function AllowancesScreen() {
       {/* BODY CONTENT */}
       <View style={styles.bodyContent}>
         {loading && !refreshing ? (
-          <ActivityIndicator size="large" color={COLORS.mediumGreen} style={{ marginTop: 40 }} />
+          <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginTop: 40 }} />
         ) : (
           <FlatList
             data={spenderCards}
@@ -182,7 +182,7 @@ export default function AllowancesScreen() {
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listScrollContent}
             refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.mediumGreen]} tintColor={COLORS.mediumGreen} />
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.textPrimary]} tintColor={COLORS.textPrimary} />
             }
             ListHeaderComponent={
               <View style={styles.sectionHeader}>
@@ -193,7 +193,7 @@ export default function AllowancesScreen() {
             ListEmptyComponent={
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconCircle}>
-                  <Ionicons name="wallet-outline" size={22} color={COLORS.mediumGreen} />
+                  <Ionicons name="wallet-outline" size={22} color={COLORS.textPrimary} />
                 </View>
                 <Text style={styles.emptyTitle}>No allowances found</Text>
                 <Text style={styles.emptySubtitle}>
@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
     padding: 18,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.06,
     shadowRadius: 10,
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   summaryAmount: {
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     fontSize: 32,
     fontWeight: '700',
     letterSpacing: -1,
@@ -353,7 +353,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     letterSpacing: 0.5,
   },
   seeAllText: {
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     padding: 16,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -398,19 +398,21 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: COLORS.lightGreen,
+    backgroundColor: COLORS.bgLight,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   cardAvatarInitials: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   cardTitleText: {
     fontSize: 16,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   cardSpenderRow: {
     flexDirection: 'row',
@@ -450,12 +452,12 @@ const styles = StyleSheet.create({
   allocatedAmountText: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   remainingAmountText: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.mediumGreen,
+    color: COLORS.textPrimary,
   },
   progressTrack: {
     height: 8,
@@ -466,7 +468,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: '100%',
-    backgroundColor: COLORS.mediumGreen,
+    backgroundColor: COLORS.textPrimary,
     borderRadius: 4,
   },
   cardFooterRow: {
@@ -482,7 +484,7 @@ const styles = StyleSheet.create({
   percentBadge: {
     backgroundColor: COLORS.bgLight,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 12,
@@ -490,7 +492,7 @@ const styles = StyleSheet.create({
   percentBadgeText: {
     fontSize: 11,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -511,12 +513,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   emptyTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   emptySubtitle: {
     fontSize: 12,

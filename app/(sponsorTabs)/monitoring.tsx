@@ -48,19 +48,19 @@ interface CustomAlertConfig {
   onConfirm: () => void;
 }
 
-/* ---------- Design Tokens (Consistent with Sponsor Theme) ---------- */
+/* ---------- Design Tokens ---------- */
 const COLORS = {
-  bgLight: '#EAF9E7',
+  bgLight: '#F3F4F6',
   lightGreen: '#C0E6BA',
   mediumGreen: '#4CA771',
   darkTeal: '#013237',
-  bg: '#F5FAF4',
+  bg: '#F9FAFB',
   card: '#FFFFFF',
   white: '#FFFFFF',
-  textPrimary: '#013237',
-  textMuted: '#5C7571',
+  textPrimary: '#111827',
+  textMuted: '#6B7280',
   danger: '#DC2626',
-  borderLight: '#D8ECD3',
+  borderLight: '#E5E7EB',
   success: '#2E7D32',
 };
 
@@ -293,7 +293,7 @@ export default function MonitoringScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.darkTeal} />
+          <Ionicons name="arrow-back" size={20} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{spenderName}</Text>
         <View style={{ width: 36 }} />
@@ -308,7 +308,7 @@ export default function MonitoringScreen() {
       ) : null}
 
       {loading ? (
-        <ActivityIndicator size="large" color={COLORS.mediumGreen} style={{ marginTop: 40 }} />
+        <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginTop: 40 }} />
       ) : (
         <View style={styles.contentContainer}>
           
@@ -318,7 +318,7 @@ export default function MonitoringScreen() {
             <View style={styles.receiptCard}>
               <View style={styles.receiptHeaderRow}>
                 <View style={styles.receiptIconWrapper}>
-                  <Ionicons name="wallet-outline" size={16} color={COLORS.darkTeal} />
+                  <Ionicons name="wallet-outline" size={16} color={COLORS.textPrimary} />
                 </View>
                 <Text style={styles.receiptTitle}>Allocated Allowances</Text>
               </View>
@@ -347,7 +347,7 @@ export default function MonitoringScreen() {
                         </Text>
                         
                         <TouchableOpacity onPress={() => handleArchiveAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
-                          <Ionicons name="archive-outline" size={15} color={COLORS.darkTeal} />
+                          <Ionicons name="archive-outline" size={15} color={COLORS.textPrimary} />
                         </TouchableOpacity>
 
                         <TouchableOpacity onPress={() => handleDeleteAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
@@ -412,7 +412,7 @@ export default function MonitoringScreen() {
                       <Ionicons 
                         name={(exp.categories?.icon as any) || 'pricetag-outline'} 
                         size={18} 
-                        color={COLORS.darkTeal} 
+                        color={COLORS.textPrimary} 
                       />
                     </View>
                     
@@ -426,7 +426,7 @@ export default function MonitoringScreen() {
                             onPress={() => setSelectedImageUri(exp.photo_url!)}
                             activeOpacity={0.7}
                           >
-                            <Ionicons name="image" size={11} color={COLORS.darkTeal} />
+                            <Ionicons name="image" size={11} color={COLORS.textPrimary} />
                           </TouchableOpacity>
                         ) : null}
                       </View>
@@ -489,7 +489,7 @@ export default function MonitoringScreen() {
                       alertConfig.type === 'delete' ? 'trash-outline' : 'alert-circle-outline'
                     } 
                     size={22} 
-                    color={alertConfig.type === 'archive' ? COLORS.darkTeal : COLORS.danger} 
+                    color={alertConfig.type === 'archive' ? COLORS.textPrimary : COLORS.danger} 
                   />
                 </View>
 
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
     paddingTop: 45,
     borderBottomWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -563,12 +563,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   headerTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     flex: 1,
     textAlign: 'center',
   },
@@ -603,7 +603,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     padding: 16,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -624,12 +624,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   receiptTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   receiptDividerDashed: {
     height: 1,
@@ -658,7 +658,7 @@ const styles = StyleSheet.create({
   receiptItemName: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   receiptItemDate: {
     fontSize: 11,
@@ -681,7 +681,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: COLORS.bgLight,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
 
   sectionHeaderRow: {
@@ -694,7 +694,7 @@ const styles = StyleSheet.create({
   sectionHeading: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   badgeContainer: {
     backgroundColor: COLORS.bgLight,
@@ -702,12 +702,12 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   expenseCountText: {
     fontSize: 11,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -719,7 +719,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginBottom: 14,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.02,
     shadowRadius: 3,
@@ -731,7 +731,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 13,
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     paddingVertical: 0,
   },
   clearSearchBtn: {
@@ -752,7 +752,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
@@ -766,12 +766,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   expenseName: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     flexShrink: 1,
   },
   expenseTime: {
@@ -793,7 +793,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     gap: 3,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
 
   emptyExpensesBox: {
@@ -814,7 +814,7 @@ const styles = StyleSheet.create({
   },
   imageModalOverlay: { 
     flex: 1, 
-    backgroundColor: 'rgba(1, 50, 55, 0.9)', 
+    backgroundColor: 'rgba(0, 0, 0, 0.9)', 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
@@ -835,7 +835,7 @@ const styles = StyleSheet.create({
 
   alertOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(1, 50, 55, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -849,7 +849,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
@@ -864,7 +864,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   alertIconBadgeDanger: {
     backgroundColor: '#FEF2F2',
@@ -873,7 +873,7 @@ const styles = StyleSheet.create({
   alertTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -902,11 +902,11 @@ const styles = StyleSheet.create({
   alertCancelButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   alertConfirmButton: {
     flex: 1,
-    backgroundColor: COLORS.darkTeal,
+    backgroundColor: COLORS.textPrimary,
     paddingVertical: 12,
     borderRadius: 14,
     alignItems: 'center',

@@ -55,28 +55,29 @@ interface SelectedSpender {
 
 /* ---------- Design Tokens ---------- */
 const COLORS = {
-  bgLight: '#EAF9E7',
-  lightGreen: '#C0E6BA',
-  mediumGreen: '#4CA771',
-  darkTeal: '#013237',
-  bg: '#F5FAF4',
+  bg: '#F5F7FA',
   card: '#FFFFFF',
   white: '#FFFFFF',
-  textPrimary: '#013237',
-  textMuted: '#5C7571',
-  danger: '#DC2626',
-  borderLight: '#D8ECD3',
+  cardGradientStart: '#75C093', // Lighter soft sage green at top
+  cardGradientEnd: '#013237',
+  cardGreenTop: '#1E6244',
+  cardGreenBottom: '#103826',
+  accentGreen: '#C1F038',
+  textPrimary: '#111827',
+  textMuted: '#8E9BAE',
+  textSubtle: '#6B7280',
+  danger: '#E53E3E',
+  borderLight: '#F0F2F5',
   success: '#2E7D32',
-  muted: '#94A3B8',
   pendingSoft: '#FEF9C3',
   pendingText: '#A16207',
   pillBg: '#F1F5F9',
 };
 
 const CARD_THEMES = [
-  { bg: '#EAF6F7', text: '#1F4F59' },
-  { bg: '#F4F8E8', text: '#213502' },
-  { bg: '#FAFAD8', text: '#213502' },
+  { bg: '#F8FAFC', text: '#1E293B' },
+  { bg: '#F1F5F9', text: '#334155' },
+  { bg: '#F3F4F6', text: '#111827' },
 ];
 
 const getLocalDateString = (year: number, monthIndex: number, day: number) => {
@@ -334,7 +335,7 @@ export default function HomeScreen() {
           sponsor_id: user.id,
           amount: amountNum,
           type: 'add',
-          description: 'Added balance to wallet',
+          description: 'Added money to wallet',
         });
 
       if (txError) throw txError;
@@ -585,7 +586,7 @@ export default function HomeScreen() {
           sponsor_id: user.id,
           amount: parsedAmount,
           type: 'deduct',
-          description: `Allocated for allowance: "${allowanceName.trim()}"`,
+          description: `Deducted for allowance`,
         });
 
       if (txError) throw txError;
@@ -630,115 +631,111 @@ export default function HomeScreen() {
     return fullName.trim().split(' ')[0] || fullName;
   };
 
-  const roleText = (sponsorProfile?.role || 'Sponsor').toUpperCase();
-
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
 
-      {/* HEADER */}
-      <LinearGradient
-        colors={[COLORS.lightGreen, COLORS.bgLight]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.heroContainer}
-      >
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/profile')}>
-              {sponsorProfile?.avatar_url ? (
-                <Image source={{ uri: sponsorProfile.avatar_url }} style={styles.avatar} />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarInitials}>{initials}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-            <View style={{ marginLeft: 10 }}>
-              <Text style={styles.welcomeText}>Hello,</Text>
-              <Text style={styles.userName} numberOfLines={1}>
-                {sponsorProfile?.full_name || 'Sponsor'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.dateBadge}>
-            <Text style={styles.dateBadgeText}>{roleText}</Text>
-          </View>
-        </View>
-
-        <View style={styles.balanceCard}>
-          <View style={styles.walletHeaderRow}>
-            <View style={styles.walletTitleGroup}>
-              <View style={styles.walletIconContainer}>
-                <Ionicons name="wallet-outline" size={14} color={COLORS.white} />
+      {/* HEADER SECTION */}
+      <View style={styles.topBar}>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/profile')}>
+            {sponsorProfile?.avatar_url ? (
+              <Image source={{ uri: sponsorProfile.avatar_url }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <Text style={styles.avatarInitials}>{initials}</Text>
               </View>
-              <Text style={styles.heroLabel}>SPONSOR WALLET BALANCE</Text>
-            </View>
-          </View>
+            )}
+          </TouchableOpacity>
 
-          <View style={styles.heroAmountRow}>
-            <Text style={styles.heroRemainingAmount}>
-              ₱{sponsorWalletBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+          <View style={styles.headerTextGroup}>
+            <Text style={styles.welcomeText}>Hello,</Text>
+            <Text style={styles.userName} numberOfLines={1}>
+              {sponsorProfile?.full_name || 'User'}
             </Text>
           </View>
         </View>
-      </LinearGradient>
+
+        {/* SPONSOR BADGE */}
+        <View style={styles.roleBadge}>
+          <Text style={styles.roleBadgeText}>
+            {sponsorProfile?.role || 'Sponsor'}
+          </Text>
+        </View>
+      </View>
 
       {/* BODY CONTENT */}
       <View style={styles.bodyContent}>
         {loading && !refreshing ? (
-          <ActivityIndicator size="large" color={COLORS.mediumGreen} style={{ marginTop: 40 }} />
+          <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginTop: 40 }} />
         ) : (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.listScrollContent}
             refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.mediumGreen]} tintColor={COLORS.mediumGreen} />
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.textPrimary]} tintColor={COLORS.textPrimary} />
             }
           >
-            {/* QUICK ACTIONS SECTION */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Quick Actions</Text>
+            {/* SPONSOR WALLET CARD */}
+            <View style={styles.cardWrapper}>
+              <LinearGradient
+                colors={[COLORS.cardGradientStart, COLORS.cardGradientEnd]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.cardContainer}
+              >
+                <View style={styles.cardContent}>
+                  <View>
+                    <Text style={styles.heroLabel}>Your Wallet Balance</Text>
+                    <Text style={styles.heroRemainingAmount}>
+                      ₱{sponsorWalletBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+                </View>
+              </LinearGradient>
             </View>
 
-            <View style={styles.quickActionsContainer}>
+            {/* QUICK ACTIONS SECTION */}
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickActionsRow}>
               <TouchableOpacity
-                style={styles.quickActionButton}
-                activeOpacity={0.7}
+                style={styles.quickActionTile}
+                activeOpacity={0.8}
                 onPress={() => setIsWalletModalVisible(true)}
               >
                 <View style={styles.quickActionIconCircle}>
-                  <Ionicons name="add-circle-outline" size={22} color={COLORS.darkTeal} />
+                  <Ionicons name="add-outline" size={20} color={COLORS.textPrimary} />
                 </View>
-                <Text style={styles.quickActionLabel}>Add</Text>
+                <Text style={styles.quickActionLabel}>Add Money</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickActionButton}
-                activeOpacity={0.7}
+                style={styles.quickActionTile}
+                activeOpacity={0.8}
                 onPress={() => setIsAddModalVisible(true)}
               >
                 <View style={styles.quickActionIconCircle}>
-                  <Ionicons name="person-add-outline" size={20} color={COLORS.darkTeal} />
+                  <Ionicons name="person-add-outline" size={18} color={COLORS.textPrimary} />
                 </View>
-                <Text style={styles.quickActionLabel}>Connect</Text>
+                <Text style={styles.quickActionLabel}>Link Spender</Text>
               </TouchableOpacity>
-
+              
               <TouchableOpacity
-                style={styles.quickActionButton}
-                activeOpacity={0.7}
+                style={[styles.quickActionTile]}
+                activeOpacity={0.8}
                 onPress={handleOpenAllowanceModal}
               >
                 <View style={styles.quickActionIconCircle}>
-                  <Ionicons name="paper-plane-outline" size={20} color={COLORS.darkTeal} />
+                  <Ionicons name="arrow-up-outline" size={18} color={COLORS.textPrimary} />
                 </View>
-                <Text style={styles.quickActionLabel}>Send</Text>
+                <Text style={styles.quickActionLabel}>Send Allowance</Text>
               </TouchableOpacity>
+
+              
             </View>
 
-            {/* Connected Spenders Section */}
-            <View style={[styles.sectionHeader, { marginTop: 15 }]}>
+            {/* CONNECTED SPENDERS SECTION */}
+            <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Spenders</Text>
               <Text style={styles.seeAllText}>{connectedSpenders.length} members</Text>
             </View>
@@ -767,7 +764,7 @@ export default function HomeScreen() {
                       setIsDeleteModalVisible(true);
                     }}
                   >
-                    <View style={styles.avatarBorderRing}>
+                    <View style={styles.avatarWrapper}>
                       {spender.avatar_url ? (
                         <Image source={{ uri: spender.avatar_url }} style={styles.spenderGridAvatar} />
                       ) : (
@@ -775,6 +772,7 @@ export default function HomeScreen() {
                           <Text style={styles.spenderGridInitials}>{spenderInitials}</Text>
                         </View>
                       )}
+                      
                     </View>
                     <Text style={styles.spenderGridFirstName} numberOfLines={1}>
                       {firstName}
@@ -782,12 +780,17 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 );
               })}
+
+              
             </ScrollView>
 
             {/* WALLET TRANSACTIONS SECTION */}
-            <View style={[styles.sectionHeader, { marginTop: 20 }]}>
+            <View style={[styles.sectionHeader, { marginTop: 22 }]}>
               <Text style={styles.sectionTitle}>Wallet Transactions</Text>
-              <Text style={styles.seeAllText}>{walletTransactions.length} records</Text>
+              <TouchableOpacity activeOpacity={0.7} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.seeAllText}>Today</Text>
+                <Ionicons name="chevron-down" size={14} color={COLORS.textMuted} style={{ marginLeft: 2 }} />
+              </TouchableOpacity>
             </View>
 
             <View style={styles.transactionsListContainer}>
@@ -810,15 +813,15 @@ export default function HomeScreen() {
 
                   return (
                     <View key={item.id} style={styles.txCardItem}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                        <View style={[styles.txIconBox, { backgroundColor: isAdd ? '#F0FDF4' : '#FEF2F2' }]}>
+                      <View style={styles.txLeftGroup}>
+                        <View style={styles.txIconBox}>
                           <Ionicons
-                            name={isAdd ? 'arrow-down-outline' : 'arrow-up-outline'}
-                            size={16}
-                            color={isAdd ? COLORS.success : COLORS.danger}
+                            name={isAdd ? 'wallet-outline' : 'remove-circle-outline'}
+                            size={18}
+                            color={COLORS.textPrimary}
                           />
                         </View>
-                        <View style={{ marginLeft: 10, flex: 1 }}>
+                        <View style={{ marginLeft: 12, flex: 1 }}>
                           <Text style={styles.txDescText} numberOfLines={1}>
                             {item.description || (isAdd ? 'Added Balance' : 'Deducted')}
                           </Text>
@@ -1008,7 +1011,7 @@ export default function HomeScreen() {
             </View>
 
             <Text style={styles.modalSubtitle}>
-              Are you sure you want to remove <Text style={{ fontWeight: '700', color: COLORS.darkTeal }}>{spenderToDelete?.full_name}</Text>? This will disconnect them from your account.
+              Are you sure you want to remove <Text style={{ fontWeight: '700', color: COLORS.textPrimary }}>{spenderToDelete?.full_name}</Text>? This will disconnect them from your account.
             </Text>
 
             {deleteModalMessage && (
@@ -1104,7 +1107,7 @@ export default function HomeScreen() {
                     {selectedAllowanceSpender.avatarUrl ? (
                       <Image source={{ uri: selectedAllowanceSpender.avatarUrl }} style={styles.avatarImage} />
                     ) : (
-                      <Ionicons name="person" size={16} color={COLORS.darkTeal} />
+                      <Ionicons name="person" size={16} color={COLORS.textPrimary} />
                     )}
                   </View>
                   <View style={{ flex: 1 }}>
@@ -1125,7 +1128,7 @@ export default function HomeScreen() {
                   }}
                 >
                   <View style={styles.addCircleOutline}>
-                    <Ionicons name="add" size={18} color={COLORS.darkTeal} />
+                    <Ionicons name="add" size={18} color={COLORS.textPrimary} />
                   </View>
                   <Text style={styles.selectMemberText}>Select a Member to Allocate</Text>
                 </TouchableOpacity>
@@ -1250,12 +1253,12 @@ export default function HomeScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Member</Text>
               <TouchableOpacity onPress={() => setMemberPickerVisible(false)}>
-                <Ionicons name="close" size={20} color={COLORS.darkTeal} />
+                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
 
             {loadingMembers ? (
-              <ActivityIndicator size="large" color={COLORS.mediumGreen} style={{ marginVertical: 40 }} />
+              <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginVertical: 40 }} />
             ) : (
               <FlatList
                 data={connectedMembersList}
@@ -1331,7 +1334,7 @@ export default function HomeScreen() {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Date Range</Text>
               <TouchableOpacity onPress={() => setCustomCalendarVisible(false)}>
-                <Ionicons name="close" size={20} color={COLORS.darkTeal} />
+                <Ionicons name="close" size={20} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -1350,7 +1353,7 @@ export default function HomeScreen() {
                     setCurrentCalendarDate(prev);
                   }}
                 >
-                  <Ionicons name="chevron-back" size={18} color={COLORS.darkTeal} />
+                  <Ionicons name="chevron-back" size={18} color={COLORS.textPrimary} />
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.calendarArrowBtn}
@@ -1360,7 +1363,7 @@ export default function HomeScreen() {
                     setCurrentCalendarDate(next);
                   }}
                 >
-                  <Ionicons name="chevron-forward" size={18} color={COLORS.darkTeal} />
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.textPrimary} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1472,248 +1475,254 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bg,
   },
-  heroContainer: {
-    paddingTop: (Platform.OS === 'android' ? NativeStatusBar.currentHeight || 24 : 44) + 10,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
-  },
-  header: {
+  topBar: {
+    paddingTop: (Platform.OS === 'android' ? NativeStatusBar.currentHeight || 24 : 44) + 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    backgroundColor: COLORS.bg,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  welcomeText: { 
-    fontSize: 13, 
-    color: COLORS.textMuted, 
-    fontWeight: '400',
-  },
   userName: { 
     fontSize: 18, 
-    fontWeight: '700', 
-    color: COLORS.darkTeal, 
+    fontWeight: '800', 
+    color: COLORS.textPrimary,
     letterSpacing: -0.3,
   },
+  welcomeText: { 
+    fontSize: 12, 
+    color: COLORS.textSubtle, 
+    fontWeight: '400',
+    marginTop: 1,
+  },
   avatar: { 
-    width: 44, 
-    height: 44, 
-    borderRadius: 22, 
-    borderWidth: 1.5, 
-    borderColor: COLORS.mediumGreen 
+    width: 42, 
+    height: 42, 
+    borderRadius: 21, 
   },
   avatarPlaceholder: {
-    width: 44, 
-    height: 44, 
-    borderRadius: 22,
-    backgroundColor: COLORS.lightGreen,
+    width: 42, 
+    height: 42, 
+    borderRadius: 21,
+    backgroundColor: '#E2E8F0',
     justifyContent: 'center', 
     alignItems: 'center',
-    borderWidth: 1.5, 
-    borderColor: COLORS.mediumGreen,
   },
   avatarInitials: { 
-    color: COLORS.darkTeal, 
+    color: COLORS.textPrimary, 
     fontWeight: '700', 
     fontSize: 13,
   },
-  dateBadge: {
-    backgroundColor: COLORS.mediumGreen,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    alignItems: 'center',
+
+  /* WALLET CARD */
+  cardWrapper: {
+    marginBottom: 20,
   },
-  dateBadgeText: { 
-    color: COLORS.white, 
-    fontSize: 11, 
-    fontWeight: '700', 
-    letterSpacing: 0.5,
-  },
-  balanceCard: {
-    marginTop: 4,
-    backgroundColor: COLORS.white,
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  walletHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  cardContainer: {
+    borderRadius: 24,
+    padding: 22,
+    height: 180,
     justifyContent: 'space-between',
-    marginBottom: 8,
+    position: 'relative',
+    overflow: 'hidden',
+    shadowColor: '#3d5c4d',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 6,
   },
-  walletTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  walletIconContainer: {
-    width: 24, 
-    height: 24, 
-    borderRadius: 12,
-    backgroundColor: COLORS.mediumGreen,
-    justifyContent: 'center', 
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  heroLabel: {
-    color: COLORS.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  heroAmountRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'flex-start',
+  cardContent: {
+    flex: 1,
+    justifyContent: 'space-between',
+    zIndex: 2,
   },
   heroRemainingAmount: {
-    color: COLORS.darkTeal,
-    fontSize: 32,
-    fontWeight: '700',
-    letterSpacing: -1,
+    color: COLORS.white,
+    fontSize: 40,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
+  heroLabel: {
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontSize: 16,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+    marginBottom: 4,
+  },
+
+  /* BODY */
   bodyContent: {
     flex: 1,
-    backgroundColor: COLORS.bg,
-    paddingTop: 16,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 10,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.darkTeal,
-    letterSpacing: 0.5,
-  },
-  seeAllText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    fontWeight: '600',
-  },
-  quickActionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: 18,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-    marginTop: 10,
-    marginBottom: 5,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  quickActionButton: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  quickActionIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.bgLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: COLORS.lightGreen,
-  },
-  quickActionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.darkTeal,
-  },
-  horizontalSpendersContainer: {
-    paddingHorizontal: 5,
-    paddingTop: 15,
-    gap: 14,
-  },
-  spenderHorizontalItem: {
-    alignItems: 'center',
-    width: 60,
-  },
-  avatarBorderRing: {
-    padding: 2,
-    borderRadius: 29,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  spenderGridAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-  },
-  spenderGridAvatarPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: COLORS.lightGreen,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  spenderGridInitials: {
-    color: COLORS.darkTeal,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  spenderGridFirstName: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: COLORS.textMuted,
-    marginTop: 3,
-    textAlign: 'center',
   },
   listScrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,
-    gap: 14,
   },
+
+  /* QUICK ACTIONS */
+  quickActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    marginTop: 12,
+  },
+  quickActionTile: {
+    width: '31%',
+    backgroundColor: COLORS.white,
+    borderRadius: 18,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#EAECEF',
+  },
+  quickActionTileActive: {
+    backgroundColor: COLORS.accentGreen,
+    borderColor: COLORS.accentGreen,
+  },
+  quickActionIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  quickActionIconCircleActive: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  quickActionLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: COLORS.textSubtle,
+  },
+  quickActionLabelActive: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+
+  /* SECTION HEADERS */
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    letterSpacing: -0.2,
+  },
+  seeAllText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+
+  /* SPENDERS HORIZONTAL LIST */
+  horizontalSpendersContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+    paddingVertical: 4,
+  },
+  spenderHorizontalItem: {
+    alignItems: 'center',
+    width: 54,
+  },
+  avatarWrapper: {
+    position: 'relative',
+  },
+  spenderGridAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  spenderGridAvatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  spenderGridInitials: {
+    color: COLORS.textPrimary,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  activeDot: {
+    position: 'absolute',
+    bottom: 1,
+    right: 1,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#10B981',
+    borderWidth: 2,
+    borderColor: COLORS.bg,
+  },
+  spenderGridFirstName: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: COLORS.textSubtle,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  moreSpendersBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#EAECEF',
+  },
+
+  /* TRANSACTIONS */
   transactionsListContainer: {
     gap: 10,
-    marginTop: 10,
   },
   txCardItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: COLORS.card,
-    padding: 12,
-    borderRadius: 12,
+    padding: 14,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    borderColor: '#EAECEF',
+  },
+  txLeftGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   txIconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: '#F5F7FA',
     justifyContent: 'center',
     alignItems: 'center',
   },
   txDescText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.darkTeal,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
   },
   txDateText: {
     fontSize: 11,
@@ -1724,9 +1733,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+
+  /* MODAL STYLES */
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(1, 50, 55, 0.4)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
@@ -1737,7 +1748,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     padding: 24,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
     shadowRadius: 10,
@@ -1752,7 +1763,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   modalSubtitle: {
     fontSize: 12,
@@ -1791,7 +1802,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontSize: 14,
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     backgroundColor: COLORS.bg,
     marginBottom: 16,
   },
@@ -1818,7 +1829,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: COLORS.mediumGreen,
+    backgroundColor: COLORS.textPrimary,
   },
   modalSubmitText: {
     fontSize: 13,
@@ -1848,12 +1859,12 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     borderWidth: 1.5,
-    borderColor: COLORS.darkTeal,
+    borderColor: COLORS.textPrimary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   selectMemberText: {
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     fontWeight: '600',
     fontSize: 12,
   },
@@ -1871,10 +1882,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.lightGreen,
+    backgroundColor: '#E2E8F0',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   avatarImage: {
     width: '100%',
@@ -1884,7 +1897,7 @@ const styles = StyleSheet.create({
   spenderName: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   spenderEmail: {
     fontSize: 11,
@@ -1901,7 +1914,7 @@ const styles = StyleSheet.create({
   allowanceLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     marginBottom: 4,
   },
   amountWrapper: {
@@ -1913,7 +1926,7 @@ const styles = StyleSheet.create({
     left: 14,
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     zIndex: 1,
     top: 12,
   },
@@ -1938,8 +1951,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   periodPillActive: {
-    backgroundColor: COLORS.darkTeal,
-    borderColor: COLORS.darkTeal,
+    backgroundColor: COLORS.textPrimary,
+    borderColor: COLORS.textPrimary,
   },
   periodPillText: {
     fontSize: 11,
@@ -2013,7 +2026,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   emptySubtitle: {
     fontSize: 12,
@@ -2030,7 +2043,7 @@ const styles = StyleSheet.create({
   calendarMonthTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   calendarArrowsContainer: {
     flexDirection: 'row',
@@ -2080,16 +2093,16 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   dayCellSelected: {
-    backgroundColor: COLORS.darkTeal,
+    backgroundColor: COLORS.textPrimary,
     borderRadius: 18,
   },
   dayCellInRange: {
-    backgroundColor: COLORS.lightGreen,
+    backgroundColor: '#E2E8F0',
   },
   dayCellText: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   dayCellTextDisabled: {
     color: COLORS.textMuted,
@@ -2103,5 +2116,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     width: '100%',
     marginBottom: 10,
+  },
+  headerTextGroup: {
+    marginLeft: 12,
+    justifyContent: 'center',
+  },
+  roleBadge: {
+    backgroundColor: '#C8E6C9',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#103826',
   },
 });

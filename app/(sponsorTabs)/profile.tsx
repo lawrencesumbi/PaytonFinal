@@ -22,17 +22,17 @@ import { supabase } from '../../lib/supabase';
 
 /* ---------- Design Tokens ---------- */
 const COLORS = {
-  bgLight: '#EAF9E7',
+  bgLight: '#F3F4F6',
   lightGreen: '#C0E6BA',
   mediumGreen: '#4CA771',
   darkTeal: '#013237',
-  bg: '#F5FAF4',
+  bg: '#F9FAFB',
   card: '#FFFFFF',
   white: '#FFFFFF',
-  textPrimary: '#013237',
-  textMuted: '#5C7571',
+  textPrimary: '#111827',
+  textMuted: '#6B7280',
   danger: '#DC2626',
-  borderLight: '#D8ECD3',
+  borderLight: '#E5E7EB',
   success: '#2E7D32',
 };
 
@@ -115,7 +115,7 @@ export default function SponsorProfileScreen() {
     return (
       <View style={[styles.container, styles.centerLoading]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="small" color={COLORS.mediumGreen} />
+        <ActivityIndicator size="small" color={COLORS.textPrimary} />
       </View>
     );
   }
@@ -170,8 +170,8 @@ export default function SponsorProfileScreen() {
           <RefreshControl 
             refreshing={isRefreshing} 
             onRefresh={onRefresh} 
-            tintColor={COLORS.mediumGreen} 
-            colors={[COLORS.mediumGreen]} 
+            tintColor={COLORS.textPrimary} 
+            colors={[COLORS.textPrimary]} 
           />
         }
       >
@@ -191,7 +191,7 @@ export default function SponsorProfileScreen() {
               >
                 <View style={styles.modernRowLeft}>
                   <View style={styles.iconWrapperSquare}>
-                    <Ionicons name={item.icon as any} size={18} color={COLORS.darkTeal} />
+                    <Ionicons name={item.icon as any} size={18} color={COLORS.textPrimary} />
                   </View>
                   <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
                 </View>
@@ -216,7 +216,7 @@ export default function SponsorProfileScreen() {
               >
                 <View style={styles.modernRowLeft}>
                   <View style={styles.iconWrapperSquare}>
-                    <Ionicons name={item.icon as any} size={18} color={COLORS.darkTeal} />
+                    <Ionicons name={item.icon as any} size={18} color={COLORS.textPrimary} />
                   </View>
                   <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
                 </View>
@@ -243,7 +243,7 @@ export default function SponsorProfileScreen() {
               >
                 <View style={styles.modernRowLeft}>
                   <View style={styles.iconWrapperSquare}>
-                    <Ionicons name={item.icon as any} size={18} color={COLORS.darkTeal} />
+                    <Ionicons name={item.icon as any} size={18} color={COLORS.textPrimary} />
                   </View>
                   <Text style={styles.rowPrimaryLabel}>{item.label}</Text>
                 </View>
@@ -373,7 +373,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   avatarInitials: { 
     fontSize: 22, 
@@ -387,7 +387,7 @@ const styles = StyleSheet.create({
     marginTop: 10, 
   },
   badgeContainer: { 
-    backgroundColor: COLORS.mediumGreen, 
+    backgroundColor: COLORS.darkTeal, 
     paddingHorizontal: 10, 
     paddingVertical: 4, 
     borderRadius: 12, 
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderColor: COLORS.borderLight,
     borderWidth: 1,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
@@ -450,12 +450,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', 
     marginRight: 12,
     borderWidth: 1,
-    borderColor: COLORS.lightGreen,
+    borderColor: COLORS.borderLight,
   },
   rowPrimaryLabel: { 
     fontSize: 14, 
     fontWeight: '600', 
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   modernLogoutBtn: {
     backgroundColor: '#FEF2F2', 
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(1, 50, 55, 0.4)',
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
@@ -495,7 +495,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: COLORS.darkTeal,
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
@@ -515,7 +515,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
     marginBottom: 8,
     textAlign: 'center',
   },
@@ -546,7 +546,7 @@ const styles = StyleSheet.create({
   modalCancelButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.darkTeal,
+    color: COLORS.textPrimary,
   },
   modalConfirmButton: {
     backgroundColor: COLORS.danger,
