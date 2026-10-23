@@ -48,20 +48,20 @@ interface CustomAlertConfig {
   onConfirm: () => void;
 }
 
+/* ---------- Design Tokens (Consistent with Sponsor Theme) ---------- */
 const COLORS = {
-  deepTeal: '#1F4F59',
-  headerBg: '#133D44',
-  cyan: '#54C9CC',
-  cyanLight: '#7EDDE0',
-  darkOlive: '#213502',
-  bg: '#F8FAF8',
+  bgLight: '#EAF9E7',
+  lightGreen: '#C0E6BA',
+  mediumGreen: '#4CA771',
+  darkTeal: '#013237',
+  bg: '#F5FAF4',
   card: '#FFFFFF',
   white: '#FFFFFF',
-  textMuted: '#7E8F82',
+  textPrimary: '#013237',
+  textMuted: '#5C7571',
   danger: '#DC2626',
-  borderLight: '#E5EFEA',
-  successGreen: '#16A34A',
-  tintSubtle: '#F0F5F2',
+  borderLight: '#D8ECD3',
+  success: '#2E7D32',
 };
 
 export default function MonitoringScreen() {
@@ -288,12 +288,12 @@ export default function MonitoringScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.white} />
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
+          <Ionicons name="arrow-back" size={20} color={COLORS.darkTeal} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{spenderName}</Text>
         <View style={{ width: 36 }} />
@@ -302,13 +302,13 @@ export default function MonitoringScreen() {
       {/* Modern Inline Success Banner */}
       {successMessage ? (
         <View style={styles.successBanner}>
-          <Ionicons name="checkmark-circle" size={18} color={COLORS.successGreen} />
+          <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
           <Text style={styles.successBannerText}>{successMessage}</Text>
         </View>
       ) : null}
 
       {loading ? (
-        <ActivityIndicator size="large" color={COLORS.deepTeal} style={{ marginTop: 40 }} />
+        <ActivityIndicator size="large" color={COLORS.mediumGreen} style={{ marginTop: 40 }} />
       ) : (
         <View style={styles.contentContainer}>
           
@@ -318,7 +318,7 @@ export default function MonitoringScreen() {
             <View style={styles.receiptCard}>
               <View style={styles.receiptHeaderRow}>
                 <View style={styles.receiptIconWrapper}>
-                  <Ionicons name="wallet" size={16} color={COLORS.deepTeal} />
+                  <Ionicons name="wallet-outline" size={16} color={COLORS.darkTeal} />
                 </View>
                 <Text style={styles.receiptTitle}>Allocated Allowances</Text>
               </View>
@@ -347,7 +347,7 @@ export default function MonitoringScreen() {
                         </Text>
                         
                         <TouchableOpacity onPress={() => handleArchiveAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
-                          <Ionicons name="archive-outline" size={15} color={COLORS.deepTeal} />
+                          <Ionicons name="archive-outline" size={15} color={COLORS.darkTeal} />
                         </TouchableOpacity>
 
                         <TouchableOpacity onPress={() => handleDeleteAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
@@ -412,7 +412,7 @@ export default function MonitoringScreen() {
                       <Ionicons 
                         name={(exp.categories?.icon as any) || 'pricetag-outline'} 
                         size={18} 
-                        color={COLORS.deepTeal} 
+                        color={COLORS.darkTeal} 
                       />
                     </View>
                     
@@ -426,7 +426,7 @@ export default function MonitoringScreen() {
                             onPress={() => setSelectedImageUri(exp.photo_url!)}
                             activeOpacity={0.7}
                           >
-                            <Ionicons name="image" size={11} color={COLORS.deepTeal} />
+                            <Ionicons name="image" size={11} color={COLORS.darkTeal} />
                           </TouchableOpacity>
                         ) : null}
                       </View>
@@ -489,7 +489,7 @@ export default function MonitoringScreen() {
                       alertConfig.type === 'delete' ? 'trash-outline' : 'alert-circle-outline'
                     } 
                     size={22} 
-                    color={alertConfig.type === 'archive' ? COLORS.deepTeal : COLORS.danger} 
+                    color={alertConfig.type === 'archive' ? COLORS.darkTeal : COLORS.danger} 
                   />
                 </View>
 
@@ -538,7 +538,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
   },
   header: {
-    backgroundColor: COLORS.headerBg,
+    backgroundColor: COLORS.white,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -547,34 +547,37 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     paddingTop: 45,
-    shadowColor: '#000',
+    borderBottomWidth: 1,
+    borderColor: COLORS.borderLight,
+    shadowColor: COLORS.darkTeal,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.04,
     shadowRadius: 8,
-    elevation: 1,
+    elevation: 2,
   },
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.bgLight,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
   headerTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.darkTeal,
     flex: 1,
     textAlign: 'center',
-    letterSpacing: 0.3,
   },
   successBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F0FDF4',
     borderWidth: 1,
-    borderColor: '#BBF7D0',
+    borderColor: '#DCFCE7',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
@@ -582,16 +585,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 4,
     gap: 8,
-    shadowColor: '#16A34A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
   successBannerText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#166534',
+    color: COLORS.success,
     flex: 1,
   },
   contentContainer: {
@@ -599,18 +597,17 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   
-  // Upgraded Receipt/Allowance Card
   receiptCard: {
     backgroundColor: COLORS.card,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
     padding: 16,
-    shadowColor: '#1F4F59',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 1,
+    shadowColor: COLORS.darkTeal,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
     marginBottom: 16,
   },
   receiptHeaderRow: {
@@ -623,14 +620,16 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bgLight,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
   receiptTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
   },
   receiptDividerDashed: {
     height: 1,
@@ -654,12 +653,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2F7F4',
+    borderBottomColor: COLORS.borderLight,
   },
   receiptItemName: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
   },
   receiptItemDate: {
     fontSize: 11,
@@ -674,16 +673,17 @@ const styles = StyleSheet.create({
   receiptItemAmount: {
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.successGreen,
+    color: COLORS.success,
     marginRight: 4,
   },
   actionBtn: {
     padding: 6,
     borderRadius: 8,
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bgLight,
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
 
-  // Section Headers & Search
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -692,20 +692,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   sectionHeading: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
   },
   badgeContainer: {
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bgLight,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
   expenseCountText: {
     fontSize: 11,
     fontWeight: '600',
-    color: COLORS.deepTeal,
+    color: COLORS.darkTeal,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -717,7 +719,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginBottom: 14,
-    shadowColor: '#000',
+    shadowColor: COLORS.darkTeal,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.02,
     shadowRadius: 3,
@@ -729,14 +731,13 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 13,
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
     paddingVertical: 0,
   },
   clearSearchBtn: {
     padding: 2,
   },
 
-  // Upgraded Expense Cards
   expensesScrollContent: {
     paddingBottom: 40,
   },
@@ -751,7 +752,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: '#1F4F59',
+    shadowColor: COLORS.darkTeal,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.03,
     shadowRadius: 6,
@@ -761,14 +762,16 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bgLight,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
   expenseName: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
     flexShrink: 1,
   },
   expenseTime: {
@@ -784,14 +787,15 @@ const styles = StyleSheet.create({
   photoIndicatorBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bgLight,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
     gap: 3,
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
 
-  // Empty state & modals
   emptyExpensesBox: {
     backgroundColor: COLORS.card,
     borderRadius: 20,
@@ -810,7 +814,7 @@ const styles = StyleSheet.create({
   },
   imageModalOverlay: { 
     flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.92)', 
+    backgroundColor: 'rgba(1, 50, 55, 0.9)', 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
@@ -829,10 +833,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
 
-  // Custom Modern Alert Styles
   alertOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(19, 61, 68, 0.55)',
+    backgroundColor: 'rgba(1, 50, 55, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -846,7 +849,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.borderLight,
-    shadowColor: '#000',
+    shadowColor: COLORS.darkTeal,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
     shadowRadius: 16,
@@ -856,18 +859,21 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bgLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: COLORS.lightGreen,
   },
   alertIconBadgeDanger: {
     backgroundColor: '#FEF2F2',
+    borderColor: '#FEE2E2',
   },
   alertTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -885,20 +891,22 @@ const styles = StyleSheet.create({
   },
   alertCancelButton: {
     flex: 1,
-    backgroundColor: COLORS.tintSubtle,
+    backgroundColor: COLORS.bg,
     paddingVertical: 12,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   alertCancelButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.darkOlive,
+    color: COLORS.darkTeal,
   },
   alertConfirmButton: {
     flex: 1,
-    backgroundColor: COLORS.deepTeal,
+    backgroundColor: COLORS.darkTeal,
     paddingVertical: 12,
     borderRadius: 14,
     alignItems: 'center',

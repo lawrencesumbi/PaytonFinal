@@ -178,7 +178,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   title: { 
-    fontFamily: 'Inter',
     fontSize: 26, 
     fontWeight: '700', 
     color: '#013237', 
@@ -186,7 +185,6 @@ const styles = StyleSheet.create({
     textAlign: 'center', 
   },
   subtitle: { 
-    fontFamily: 'Inter',
     fontSize: 14, 
     color: '#4CA771', 
     lineHeight: 18, 
@@ -194,7 +192,7 @@ const styles = StyleSheet.create({
   },
   sectionsContainer: { gap: 16, marginBottom: 20 },
   sectionGroup: { gap: 6 },
-  sectionLabel: { fontFamily: 'Inter', fontSize: 11, fontWeight: '700', color: '#4CA771', textTransform: 'uppercase', letterSpacing: 1, marginLeft: 4 },
+  sectionLabel: { fontSize: 11, fontWeight: '700', color: '#4CA771', textTransform: 'uppercase', letterSpacing: 1, marginLeft: 4 },
   roleList: { gap: 10 },
   roleCard: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF',
@@ -208,11 +206,10 @@ const styles = StyleSheet.create({
   iconBox: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#EAF9E7', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   selectedIconBox: { backgroundColor: '#C0E6BA' },
   textContainer: { flex: 1 },
-  roleName: { fontFamily: 'Inter', fontSize: 16, fontWeight: '700', color: '#013237', marginBottom: 2 },
-  roleDesc: { fontFamily: 'Inter', fontSize: 12, color: '#013237', lineHeight: 16, paddingRight: 8 },
+  roleName: { fontSize: 16, fontWeight: '700', color: '#013237', marginBottom: 2 },
+  roleDesc: { fontSize: 12, color: '#013237', lineHeight: 16, paddingRight: 8 },
   footerContainer: { gap: 12 },
   noteText: { 
-    fontFamily: 'Inter',
     fontSize: 12, 
     color: '#4CA771', 
     textAlign: 'center', 
@@ -221,5 +218,5 @@ const styles = StyleSheet.create({
   primaryButton: { 
     backgroundColor: '#013237', height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center',
   },
-  buttonText: { fontFamily: 'Inter', color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
 });

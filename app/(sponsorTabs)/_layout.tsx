@@ -36,7 +36,7 @@ function TabIcon({
       <Ionicons
         name={focused ? activeIcon : inactiveIcon}
         size={21}
-        color={focused ? "#ffffff" : color}
+        color={focused ? "#013237" : color}
       />
     </View>
   );
@@ -107,8 +107,8 @@ export default function SponsorTabsLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: "#ffffff",
-          tabBarInactiveTintColor: "rgba(255, 255, 255, 0.6)",
+          tabBarActiveTintColor: "#013237",
+          tabBarInactiveTintColor: "#4CA771",
           tabBarItemStyle: styles.tabBarItem,
 
           tabBarButton: (props: any) => {
@@ -147,9 +147,9 @@ export default function SponsorTabsLayout() {
         />
 
         <Tabs.Screen
-          name="allowance"
+          name="allowances"
           options={{
-            title: "Add Allowance",
+            title: "Monitoring",
             tabBarLabelStyle: styles.monitoringLabel,
             tabBarIcon: ({ focused }: any) => (
               <View
@@ -159,9 +159,9 @@ export default function SponsorTabsLayout() {
                 ]}
               >
                 <Ionicons
-                  name={focused ? "add" : "add-outline"}
+                  name={focused ? "pulse" : "pulse-outline"}
                   size={30}
-                  color="#FFFFFF"
+                  color="#EAF9E7"
                 />
               </View>
             ),
@@ -192,22 +192,24 @@ export default function SponsorTabsLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    left: 12,
-    right: 12,
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: Platform.OS === "ios" ? 28 : 20,
     height: Platform.OS === "ios" ? 70 : 66,
     paddingTop: 7,
     paddingBottom: Platform.OS === "ios" ? 7 : 6,
-    paddingHorizontal: 3,
-    borderTopLeftRadius: 36,
-    borderTopRightRadius: 36,
-    backgroundColor: "#1F4F59",
+    paddingHorizontal: 8,
+    marginHorizontal: 60,
+    borderRadius: 35,
+    backgroundColor: "#EAF9E7", // Lightest pale green background
     borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    borderColor: "#C0E6BA", // Light soft green border
     overflow: "visible",
-    shadowColor: "#0F172A",
+    shadowColor: "#013237",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
-    shadowRadius: 18,
+    shadowRadius: 16,
     elevation: 8,
   },
 
@@ -228,24 +230,27 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: -1,
     marginBottom: Platform.OS === "ios" ? -2 : 0,
+    color: "#013237",
   },
 
   floatingButton: {
     width: 70,
     height: 70,
     borderRadius: 35,
-    backgroundColor: "#1F4F59",
+    backgroundColor: "#4CA771", // Vibrant mid-green floating button
     justifyContent: "center",
     alignItems: "center",
     top: -25,
     borderWidth: 5,
-    borderColor: "#F8FAFC",
-    shadowColor: "#1B494E",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
+    borderColor: "#EAF9E7", // Blends with floating tab bar
+    shadowColor: "#013237",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
     shadowRadius: 8,
+    elevation: 6,
   },
   floatingButtonActive: {
-    backgroundColor: "#1F4F59",
+    backgroundColor: "#013237", // Dark teal highlight when focused
+    borderColor: "#C0E6BA",
   },
 });
