@@ -18,6 +18,7 @@ import {
   ScrollView,
   StyleProp,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -68,7 +69,14 @@ type AllowanceErrors = {
   name?: string;
   amount?: string;
   period?: string;
+  budget?: string;
 };
+
+interface BudgetCategory {
+  id: string;
+  name: string;
+  icon: string | null;
+}
 
 /* ---------- Design Tokens ---------- */
 const COLORS = {
@@ -110,6 +118,12 @@ const TX_FILTERS: { key: TxFilter; label: string }[] = [
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AMOUNT_REGEX = /^\d+(\.\d{1,2})?$/;
+
+/** Converts an amount string to integer cents (0 when empty/invalid) to avoid float drift. */
+const toCents = (value: string) => {
+  const t = (value || '').trim();
+  return AMOUNT_REGEX.test(t) ? Math.round(parseFloat(t) * 100) : 0;
+};
 
 /* ---------- Helpers ---------- */
 const formatPeso = (n: number, fixed = false) =>
@@ -534,6 +548,41 @@ export default function HomeScreen() {
   const [allowanceErrors, setAllowanceErrors] = useState<AllowanceErrors>({});
   const [submittingAllowance, setSubmittingAllowance] = useState(false);
   const [allowanceBanner, setAllowanceBanner] = useState<Msg>(null);
+  const [allowanceCompleted, setAllowanceCompleted] = useState(false);
+
+  // Optional budget allocation
+  const [budgetEnabled, setBudgetEnabled] = useState(false);
+  const [budgetSheetVisible, setBudgetSheetVisible] = useState(false);
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({});
+  const [budgetSaved, setBudgetSaved] = useState<Record<string, string>>({});
+  const [budgetRowErrors, setBudgetRowErrors] = useState<Record<string, string | undefined>>({});
+  const [budgetListError, setBudgetListError] = useState<string | undefined>();
+  const [budgetBanner, setBudgetBanner] = useState<Msg>(null);
+
+  const allowanceAmountCents = toCents(allowanceAmount);
+  const budgetSavedCents = Object.values(budgetSaved).reduce((s, v) => s + toCents(v), 0);
+  const budgetDraftCents = Object.values(budgetDraft).reduce((s, v) => s + toCents(v), 0);
+  const budgetRemainingCents = allowanceAmountCents - budgetDraftCents;
+  const budgetMismatch =
+    budgetEnabled && budgetSavedCents > 0 && budgetSavedCents !== allowanceAmountCents;
+
+  const resetBudget = () => {
+    setBudgetEnabled(false);
+    setBudgetSheetVisible(false);
+    setBudgetCategories([]);
+    setBudgetDraft({});
+    setBudgetSaved({});
+    setBudgetRowErrors({});
+    setBudgetListError(undefined);
+    setBudgetBanner(null);
+  };
+
+  // A different member means a different set of categories, so start the budget over.
+  useEffect(() => {
+    resetBudget();
+  }, [selectedAllowanceSpender?.id]);
 
   // Member picker
   const [memberPickerVisible, setMemberPickerVisible] = useState(false);
@@ -889,11 +938,138 @@ export default function HomeScreen() {
     }
   };
 
+  /* ---------- Budget allocation ---------- */
+  const fetchBudgetCategories = async (spenderId: string) => {
+    try {
+      setLoadingCategories(true);
+      setBudgetBanner(null);
+
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) throw error;
+
+      // Keep shared categories and the ones that belong to this spender
+      const rows = (data || []).filter((c: any) => c.user_id == null || c.user_id === spenderId);
+      setBudgetCategories(
+        rows.map((c: any) => ({ id: c.id, name: c.name || 'Category', icon: c.icon || null })),
+      );
+    } catch (e: any) {
+      setBudgetBanner({ type: 'error', text: e.message || 'Failed to load categories.' });
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
+  const openBudgetSheet = (spenderId: string) => {
+    setBudgetDraft(budgetSaved);
+    setBudgetRowErrors({});
+    setBudgetListError(undefined);
+    setBudgetBanner(null);
+    setBudgetSheetVisible(true);
+    if (budgetCategories.length === 0) fetchBudgetCategories(spenderId);
+  };
+
+  const handleBudgetToggle = (value: boolean) => {
+    setAllowanceErrors((p) => ({ ...p, budget: undefined }));
+
+    if (!value) {
+      setBudgetEnabled(false);
+      setBudgetSaved({});
+      setBudgetDraft({});
+      return;
+    }
+
+    // The budget needs a member (for categories) and an amount (to split)
+    const errors: AllowanceErrors = {};
+    if (!selectedAllowanceSpender) errors.spender = 'Select a member before setting a budget.';
+    if (allowanceAmountCents <= 0) errors.amount = 'Enter a valid allowance amount before setting a budget.';
+    if (Object.keys(errors).length > 0 || !selectedAllowanceSpender) {
+      setAllowanceErrors((p) => ({ ...p, ...errors }));
+      return;
+    }
+
+    setBudgetEnabled(true);
+    openBudgetSheet(selectedAllowanceSpender.id);
+  };
+
+  const closeBudgetSheet = () => {
+    // Closing without a saved budget turns the toggle back off
+    if (budgetSavedCents === 0) setBudgetEnabled(false);
+    setBudgetSheetVisible(false);
+  };
+
+  const setDraftAmount = (categoryId: string, text: string) => {
+    setBudgetDraft((p) => ({ ...p, [categoryId]: text }));
+    setBudgetRowErrors((p) => ({ ...p, [categoryId]: undefined }));
+    setBudgetListError(undefined);
+  };
+
+  const splitBudgetEvenly = () => {
+    if (budgetCategories.length === 0 || allowanceAmountCents <= 0) return;
+    const n = budgetCategories.length;
+    const base = Math.floor(allowanceAmountCents / n);
+    let extra = allowanceAmountCents - base * n;
+
+    const next: Record<string, string> = {};
+    budgetCategories.forEach((c) => {
+      const cents = base + (extra > 0 ? 1 : 0);
+      if (extra > 0) extra -= 1;
+      next[c.id] = (cents / 100).toFixed(2);
+    });
+    setBudgetDraft(next);
+    setBudgetRowErrors({});
+    setBudgetListError(undefined);
+  };
+
+  const clearBudgetDraft = () => {
+    setBudgetDraft({});
+    setBudgetRowErrors({});
+    setBudgetListError(undefined);
+  };
+
+  const handleBudgetConfirm = () => {
+    const rowErrors: Record<string, string | undefined> = {};
+    budgetCategories.forEach((c) => {
+      const v = (budgetDraft[c.id] || '').trim();
+      if (v && !AMOUNT_REGEX.test(v)) rowErrors[c.id] = 'Enter a valid amount, up to 2 decimal places.';
+    });
+    setBudgetRowErrors(rowErrors);
+    if (Object.values(rowErrors).some(Boolean)) return;
+
+    if (budgetDraftCents === 0) {
+      setBudgetListError('Allocate the amount to at least one category.');
+      return;
+    }
+    if (budgetRemainingCents > 0) {
+      setBudgetListError(`${formatPeso(budgetRemainingCents / 100, true)} is still left to allocate.`);
+      return;
+    }
+    if (budgetRemainingCents < 0) {
+      setBudgetListError(
+        `Over-allocated by ${formatPeso(Math.abs(budgetRemainingCents) / 100, true)}. Reduce some amounts.`,
+      );
+      return;
+    }
+
+    const cleaned: Record<string, string> = {};
+    budgetCategories.forEach((c) => {
+      const cents = toCents(budgetDraft[c.id] || '');
+      if (cents > 0) cleaned[c.id] = (cents / 100).toFixed(2);
+    });
+    setBudgetSaved(cleaned);
+    setBudgetSheetVisible(false);
+    setAllowanceErrors((p) => ({ ...p, budget: undefined }));
+  };
+
   const handleOpenAllowanceModal = () => {
     setSelectedAllowanceSpender(null);
     setAllowanceName('');
     setAllowanceAmount('');
     setAllowanceErrors({});
+    setAllowanceCompleted(false);
+    resetBudget();
     setSelectedPeriod('today');
     const defaultDates = getPeriodDates('today');
     setStartDate(defaultDates.start);
@@ -923,6 +1099,14 @@ export default function HomeScreen() {
     }
 
     if (!startDate.trim() || !endDate.trim()) errors.period = 'Choose a coverage period.';
+
+    if (budgetEnabled) {
+      if (budgetSavedCents === 0) {
+        errors.budget = 'Set up the budget or turn this option off.';
+      } else if (budgetSavedCents !== allowanceAmountCents) {
+        errors.budget = 'The budget total must equal the allowance amount. Tap Edit to update it.';
+      }
+    }
 
     setAllowanceErrors(errors);
     if (Object.keys(errors).length > 0 || !selectedAllowanceSpender) return;
@@ -962,29 +1146,70 @@ export default function HomeScreen() {
         });
       if (txError) throw txError;
 
-      const { error: allowanceError } = await supabase.from('allowances').insert([
-        {
-          sponsor_id: user.id,
-          spender_id: selectedAllowanceSpender.id,
-          allowance_name: allowanceName.trim(),
-          amount: parsedAmount,
-          start_date: startDate,
-          end_date: endDate,
-        },
-      ]);
+      const { data: newAllowance, error: allowanceError } = await supabase
+        .from('allowances')
+        .insert([
+          {
+            sponsor_id: user.id,
+            spender_id: selectedAllowanceSpender.id,
+            allowance_name: allowanceName.trim(),
+            amount: parsedAmount,
+            start_date: startDate,
+            end_date: endDate,
+          },
+        ])
+        .select('id')
+        .single();
       if (allowanceError) throw allowanceError;
+
+      // The allowance exists now, so block a second submit
+      setAllowanceCompleted(true);
+
+      // Optional: save the category budget linked to this allowance
+      let budgetFailure: string | null = null;
+      if (budgetEnabled) {
+        const budgetRows = Object.entries(budgetSaved)
+          .map(([categoryId, value]) => ({ categoryId, cents: toCents(value) }))
+          .filter((r) => r.cents > 0)
+          .map((r) => ({
+            user_id: selectedAllowanceSpender.id,
+            category_id: r.categoryId,
+            allocated_amount: r.cents / 100,
+            allowance_id: newAllowance.id,
+          }));
+
+        const { error: budgetError } = await supabase.from('budgets').insert(budgetRows);
+        if (budgetError) budgetFailure = budgetError.message;
+      }
 
       await supabase.from('logs').insert({
         user_id: user.id,
-        details: `allocated allowance "${allowanceName.trim()}" (${parsedAmount}) for spender "${selectedAllowanceSpender.name}".`,
+        details: `allocated allowance "${allowanceName.trim()}" (${parsedAmount}) for spender "${selectedAllowanceSpender.name}"${
+          budgetEnabled && !budgetFailure ? ' with a category budget' : ''
+        }.`,
       });
 
-      setAllowanceBanner({ type: 'success', text: 'Allowance sent successfully.' });
-      setTimeout(() => {
-        setIsAllowanceModalVisible(false);
-        setAllowanceBanner(null);
-        fetchDashboardData(true);
-      }, 1200);
+      if (budgetFailure) {
+        setAllowanceBanner({
+          type: 'error',
+          text: `Allowance sent, but the budget could not be saved: ${budgetFailure}`,
+        });
+        setTimeout(() => {
+          setIsAllowanceModalVisible(false);
+          setAllowanceBanner(null);
+          fetchDashboardData(true);
+        }, 3200);
+      } else {
+        setAllowanceBanner({
+          type: 'success',
+          text: budgetEnabled ? 'Allowance and budget saved successfully.' : 'Allowance sent successfully.',
+        });
+        setTimeout(() => {
+          setIsAllowanceModalVisible(false);
+          setAllowanceBanner(null);
+          fetchDashboardData(true);
+        }, 1200);
+      }
     } catch (e: any) {
       setAllowanceBanner({ type: 'error', text: e.message || 'Something went wrong.' });
     } finally {
@@ -1206,7 +1431,7 @@ export default function HomeScreen() {
             </View>
 
             {/* SPENDERS */}
-            <View style={styles.sectionHeader}>
+            <View style={[styles.sectionHeader, { marginTop: 24 }]}>
               <Text style={styles.sectionTitle}>Spenders</Text>
               <View style={styles.countPill}>
                 <Text style={styles.countPillText}>{connectedSpenders.length}</Text>
@@ -1433,6 +1658,7 @@ export default function HomeScreen() {
             onSubmit={handleSaveAllowanceSubmit}
             submitLabel="Confirm Allowance"
             loading={submittingAllowance}
+            disabled={allowanceCompleted}
           />
         }
       >
@@ -1551,6 +1777,215 @@ export default function HomeScreen() {
             <Text style={styles.dateRangeIndicatorText}>{formatDisplayDateRange(startDate, endDate)}</Text>
           </View>
         </Field>
+
+        {/* Optional budget allocation */}
+        <View style={styles.field}>
+          <View style={[styles.budgetCard, !!allowanceErrors.budget && styles.budgetCardError]}>
+            <View style={styles.budgetRow}>
+              <View style={styles.budgetIcon}>
+                <Ionicons name="pie-chart-outline" size={18} color={COLORS.primaryMid} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.budgetTitleRow}>
+                  <Text style={styles.budgetTitle}>Budget allocation</Text>
+                  <View style={styles.optionalTag}>
+                    <Text style={styles.optionalTagText}>Optional</Text>
+                  </View>
+                </View>
+                <Text style={styles.budgetSubtitle}>
+                  Split this allowance across spending categories.
+                </Text>
+              </View>
+              <Switch
+                value={budgetEnabled}
+                onValueChange={handleBudgetToggle}
+                disabled={submittingAllowance || allowanceCompleted}
+                trackColor={{ false: '#D9DEE5', true: COLORS.primaryMid }}
+                thumbColor={COLORS.white}
+                ios_backgroundColor="#D9DEE5"
+              />
+            </View>
+
+            {budgetEnabled && budgetSavedCents > 0 && (
+              <View style={styles.budgetSummary}>
+                <Ionicons
+                  name={budgetMismatch ? 'alert-circle' : 'checkmark-circle'}
+                  size={16}
+                  color={budgetMismatch ? COLORS.danger : COLORS.success}
+                />
+                <Text
+                  style={[
+                    styles.budgetSummaryText,
+                    { color: budgetMismatch ? COLORS.danger : COLORS.success },
+                  ]}
+                >
+                  {budgetMismatch
+                    ? `Budget total ${formatPeso(budgetSavedCents / 100, true)} doesn’t match the amount.`
+                    : `${Object.keys(budgetSaved).length} ${
+                        Object.keys(budgetSaved).length === 1 ? 'category' : 'categories'
+                      } · ${formatPeso(budgetSavedCents / 100, true)} allocated`}
+                </Text>
+                <TouchableOpacity
+                  style={styles.budgetEditBtn}
+                  activeOpacity={0.7}
+                  onPress={() => selectedAllowanceSpender && openBudgetSheet(selectedAllowanceSpender.id)}
+                >
+                  <Text style={styles.budgetEditText}>Edit</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          {allowanceErrors.budget ? (
+            <View style={styles.fieldErrorRow}>
+              <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+              <Text style={styles.fieldErrorText}>{allowanceErrors.budget}</Text>
+            </View>
+          ) : null}
+        </View>
+      </Sheet>
+
+      {/* BUDGET ALLOCATION */}
+      <Sheet
+        visible={budgetSheetVisible}
+        title="Budget Allocation"
+        subtitle="Distribute the allowance across categories until nothing is left."
+        onClose={closeBudgetSheet}
+        footer={
+          <SheetActions
+            onCancel={closeBudgetSheet}
+            onSubmit={handleBudgetConfirm}
+            submitLabel="Save Budget"
+          />
+        }
+      >
+        <Banner message={budgetBanner} />
+
+        <View style={styles.budgetHero}>
+          <View style={styles.budgetHeroTop}>
+            <View>
+              <Text style={styles.budgetHeroLabel}>Left to allocate</Text>
+              <Text
+                style={[
+                  styles.budgetHeroAmount,
+                  budgetRemainingCents === 0 && { color: COLORS.success },
+                  budgetRemainingCents < 0 && { color: COLORS.danger },
+                ]}
+              >
+                {budgetRemainingCents < 0 ? '-' : ''}
+                {formatPeso(Math.abs(budgetRemainingCents) / 100, true)}
+              </Text>
+            </View>
+            <View style={styles.budgetHeroBadge}>
+              <Text
+                style={[
+                  styles.budgetHeroBadgeText,
+                  {
+                    color:
+                      budgetRemainingCents === 0
+                        ? COLORS.success
+                        : budgetRemainingCents < 0
+                          ? COLORS.danger
+                          : COLORS.primary,
+                  },
+                ]}
+              >
+                {budgetRemainingCents === 0
+                  ? 'Fully allocated'
+                  : budgetRemainingCents < 0
+                    ? 'Over budget'
+                    : `of ${formatPeso(allowanceAmountCents / 100, true)}`}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.budgetTrack}>
+            <View
+              style={[
+                styles.budgetFill,
+                {
+                  width: `${
+                    allowanceAmountCents > 0
+                      ? Math.min(100, (budgetDraftCents / allowanceAmountCents) * 100)
+                      : 0
+                  }%`,
+                  backgroundColor: budgetRemainingCents < 0 ? COLORS.danger : COLORS.primaryMid,
+                },
+              ]}
+            />
+          </View>
+        </View>
+
+        <View style={styles.budgetToolsRow}>
+          <Text style={styles.budgetToolsLabel}>Categories</Text>
+          <View style={styles.budgetToolsActions}>
+            <TouchableOpacity style={styles.toolBtn} activeOpacity={0.7} onPress={splitBudgetEvenly}>
+              <Text style={styles.toolBtnText}>Split evenly</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.toolBtn} activeOpacity={0.7} onPress={clearBudgetDraft}>
+              <Text style={styles.toolBtnText}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {loadingCategories ? (
+          <View style={{ gap: 10 }}>
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} width="100%" height={58} radius={14} />
+            ))}
+          </View>
+        ) : budgetCategories.length === 0 ? (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="pricetags-outline" size={22} color={COLORS.textMuted} />
+            </View>
+            <Text style={styles.emptyTitle}>No categories available</Text>
+            <Text style={styles.emptySubtitle}>
+              This spender has no budget categories yet.
+            </Text>
+          </View>
+        ) : (
+          budgetCategories.map((c) => {
+            const rowError = budgetRowErrors[c.id];
+            return (
+              <View key={c.id} style={{ marginBottom: 10 }}>
+                <View style={styles.budgetItem}>
+                  <View style={styles.budgetItemIcon}>
+                    <Ionicons
+                      name={(c.icon as any) || 'pricetag-outline'}
+                      size={18}
+                      color={COLORS.primaryMid}
+                    />
+                  </View>
+                  <Text style={styles.budgetItemName} numberOfLines={1}>{c.name}</Text>
+                  <View style={styles.budgetInputWrap}>
+                    <Text style={styles.budgetPrefix}>₱</Text>
+                    <TextInput
+                      style={[styles.budgetInput, !!rowError && styles.inputError]}
+                      placeholder="0.00"
+                      placeholderTextColor={COLORS.textMuted}
+                      keyboardType="decimal-pad"
+                      value={budgetDraft[c.id] || ''}
+                      onChangeText={(t) => setDraftAmount(c.id, t)}
+                    />
+                  </View>
+                </View>
+                {rowError ? (
+                  <View style={styles.fieldErrorRow}>
+                    <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+                    <Text style={styles.fieldErrorText}>{rowError}</Text>
+                  </View>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+
+        {budgetListError ? (
+          <View style={styles.fieldErrorRow}>
+            <Ionicons name="alert-circle" size={13} color={COLORS.danger} />
+            <Text style={styles.fieldErrorText}>{budgetListError}</Text>
+          </View>
+        ) : null}
       </Sheet>
 
       {/* MEMBER PICKER */}
@@ -2119,4 +2554,150 @@ const styles = StyleSheet.create({
   dayCellToday: { borderWidth: 1.5, borderColor: COLORS.primaryMid, borderRadius: 20 },
   dayCellTextToday: { color: COLORS.primaryMid, fontWeight: '800' },
   dayCellTextSelected: { color: COLORS.white },
+
+  /* Budget allocation */
+  budgetCard: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
+    borderRadius: 16,
+    padding: 12,
+  },
+  budgetCardError: { borderColor: COLORS.danger, backgroundColor: COLORS.dangerSoft },
+  budgetRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  budgetIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  budgetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  budgetTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary },
+  optionalTag: {
+    backgroundColor: '#EBEFF4',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 7,
+  },
+  optionalTagText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: COLORS.textSubtle,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  budgetSubtitle: { fontSize: 11, color: COLORS.textMuted, marginTop: 3, lineHeight: 15 },
+  budgetSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  budgetSummaryText: { flex: 1, fontSize: 12, fontWeight: '600' },
+  budgetEditBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: COLORS.primarySoft,
+  },
+  budgetEditText: { fontSize: 12, fontWeight: '700', color: COLORS.primary },
+
+  budgetHero: {
+    backgroundColor: COLORS.primarySoft,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+  budgetHeroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  budgetHeroLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primaryMid,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  budgetHeroAmount: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: COLORS.primary,
+    letterSpacing: -0.5,
+    marginTop: 4,
+  },
+  budgetHeroBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: COLORS.white,
+  },
+  budgetHeroBadgeText: { fontSize: 11, fontWeight: '700' },
+  budgetTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(15,61,46,0.12)',
+    overflow: 'hidden',
+    marginTop: 14,
+  },
+  budgetFill: { height: '100%', borderRadius: 4 },
+  budgetToolsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  budgetToolsLabel: { fontSize: 12, fontWeight: '700', color: COLORS.textPrimary },
+  budgetToolsActions: { flexDirection: 'row', gap: 8 },
+  toolBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  toolBtnText: { fontSize: 11, fontWeight: '700', color: COLORS.textSubtle },
+  budgetItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.bg,
+    borderRadius: 14,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  budgetItemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  budgetItemName: { flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.textPrimary },
+  budgetInputWrap: { width: 118, justifyContent: 'center' },
+  budgetPrefix: {
+    position: 'absolute',
+    left: 10,
+    zIndex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  budgetInput: {
+    height: 40,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingLeft: 24,
+    paddingRight: 10,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    backgroundColor: COLORS.white,
+    textAlign: 'right',
+  },
 });

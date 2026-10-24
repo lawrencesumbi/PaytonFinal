@@ -86,8 +86,8 @@ export default function SponsorTabsLayout() {
             <TabIcon
               color={color}
               focused={focused}
-              activeIcon="bar-chart"
-              inactiveIcon="bar-chart-outline"
+              activeIcon="wallet"
+              inactiveIcon="wallet-outline"
             />
           ),
         }}
@@ -116,7 +116,7 @@ export default function SponsorTabsLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    position: "absolute",
+    position: "relative",
     bottom: 0,
     left: 0,
     right: 0,

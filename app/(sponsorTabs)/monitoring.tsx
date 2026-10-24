@@ -1,32 +1,32 @@
 // app/monitoring.tsx
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
+  DimensionValue,
+  FlatList,
   Image,
   Modal,
+  StatusBar as NativeStatusBar,
+  Platform,
+  Pressable,
+  RefreshControl,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
+  ViewStyle,
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 
-interface AllowanceItem {
-  id: string;
-  allowance_name: string;
-  amount: number;
-  start_date: string;
-  end_date: string;
-  received_at: string;
-  is_archived?: boolean;
-}
-
+/* ---------- Types ---------- */
 interface ExpenseItem {
   id: string;
   description: string;
@@ -40,89 +40,214 @@ interface ExpenseItem {
   };
 }
 
-interface CustomAlertConfig {
-  visible: boolean;
-  title: string;
-  message: string;
-  type: 'archive' | 'delete' | 'error';
-  onConfirm: () => void;
-}
+type ExpenseFilter = 'all' | 'today' | 'week' | 'month' | 'year';
+
+const FILTERS: { key: ExpenseFilter; label: string; caption: string }[] = [
+  { key: 'all', label: 'All', caption: 'All time' },
+  { key: 'today', label: 'Today', caption: 'Today' },
+  { key: 'week', label: 'This Week', caption: 'This week' },
+  { key: 'month', label: 'This Month', caption: 'This month' },
+  { key: 'year', label: 'This Year', caption: 'This year' },
+];
 
 /* ---------- Design Tokens ---------- */
 const COLORS = {
-  bgLight: '#F3F4F6',
-  lightGreen: '#C0E6BA',
-  mediumGreen: '#4CA771',
-  darkTeal: '#013237',
-  bg: '#F9FAFB',
+  bg: '#F5F7FA',
   card: '#FFFFFF',
   white: '#FFFFFF',
+  primary: '#0F3D2E',
+  primarySoft: '#E6F3EB',
+  primaryMid: '#2F7D5B',
+  accentGreen: '#C1F038',
   textPrimary: '#111827',
-  textMuted: '#6B7280',
-  danger: '#DC2626',
-  borderLight: '#E5E7EB',
-  success: '#2E7D32',
+  textMuted: '#8E9BAE',
+  textSubtle: '#6B7280',
+  danger: '#E53E3E',
+  dangerSoft: '#FEF2F2',
+  border: '#E8ECF1',
+  borderLight: '#F0F2F5',
 };
 
+/* ---------- Helpers ---------- */
+const formatPeso = (n: number, fixed = true) =>
+  `₱${n.toLocaleString('en-US', {
+    minimumFractionDigits: fixed ? 2 : 0,
+    maximumFractionDigits: 2,
+  })}`;
+
+/** Start of the selected period in local time, or null for "All". */
+const getFilterStart = (filter: ExpenseFilter): Date | null => {
+  const n = new Date();
+  const y = n.getFullYear();
+  const m = n.getMonth();
+  const d = n.getDate();
+
+  switch (filter) {
+    case 'today':
+      return new Date(y, m, d);
+    case 'week':
+      return new Date(y, m, d - n.getDay());
+    case 'month':
+      return new Date(y, m, 1);
+    case 'year':
+      return new Date(y, 0, 1);
+    default:
+      return null;
+  }
+};
+
+const formatDateTime = (dateStr: string) => {
+  try {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    return (
+      d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+      ' at ' +
+      d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    );
+  } catch {
+    return dateStr;
+  }
+};
+
+/* ---------- Reusable UI ---------- */
+function Avatar({ uri, size = 42 }: { uri?: string | null; size?: number }) {
+  const [failed, setFailed] = useState(false);
+
+  if (uri && !failed) {
+    return (
+      <Image
+        source={{ uri }}
+        onError={() => setFailed(true)}
+        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#E2E8F0' }}
+      />
+    );
+  }
+
+  const head = size * 0.32;
+  const body = size * 0.74;
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: '#DDF0E5',
+        overflow: 'hidden',
+      }}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          width: head,
+          height: head,
+          borderRadius: head / 2,
+          backgroundColor: '#86C4A2',
+          top: size * 0.2,
+          left: (size - head) / 2,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          width: body,
+          height: body,
+          borderRadius: body / 2,
+          backgroundColor: '#86C4A2',
+          top: size * 0.6,
+          left: (size - body) / 2,
+        }}
+      />
+    </View>
+  );
+}
+
+function Skeleton({
+  width,
+  height,
+  radius = 10,
+  style,
+}: {
+  width: DimensionValue;
+  height: number;
+  radius?: number;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const opacity = useRef(new Animated.Value(0.45)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 750, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.45, duration: 750, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+
+  return (
+    <Animated.View
+      style={[{ width, height, borderRadius: radius, backgroundColor: '#DFE5EC', opacity }, style]}
+    />
+  );
+}
+
+function MonitoringSkeleton() {
+  return (
+    <View style={styles.listContent}>
+      <Skeleton width="100%" height={190} radius={26} />
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 20 }}>
+        {[64, 84, 96, 100, 96].map((w, i) => (
+          <Skeleton key={i} width={w} height={38} radius={19} />
+        ))}
+      </View>
+      <Skeleton width="100%" height={48} radius={14} style={{ marginTop: 14, marginBottom: 16 }} />
+      <View style={{ gap: 10 }}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <View key={i} style={styles.expenseCard}>
+            <Skeleton width={42} height={42} radius={14} />
+            <View style={{ marginLeft: 12, flex: 1, gap: 8 }}>
+              <Skeleton width="60%" height={12} radius={6} />
+              <Skeleton width="45%" height={10} radius={5} />
+            </View>
+            <Skeleton width={64} height={14} radius={7} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/* ---------- Screen ---------- */
 export default function MonitoringScreen() {
   const router = useRouter();
   const { spenderId } = useLocalSearchParams<{ spenderId: string }>();
 
   const [loading, setLoading] = useState(true);
-  const [spenderName, setSpenderName] = useState('Spender Log');
-  const [allowances, setAllowances] = useState<AllowanceItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [spenderName, setSpenderName] = useState('Spender');
+  const [spenderAvatar, setSpenderAvatar] = useState<string | null>(null);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
-  
+
+  const [filter, setFilter] = useState<ExpenseFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
 
-  // Success Banner State
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
-  const triggerSuccess = (msg: string) => {
-    setSuccessMessage(msg);
-    setTimeout(() => {
-      setSuccessMessage(null);
-    }, 3500);
-  };
-
-  // Custom Alert State
-  const [alertConfig, setAlertConfig] = useState<CustomAlertConfig>({
-    visible: false,
-    title: '',
-    message: '',
-    type: 'archive',
-    onConfirm: () => {},
-  });
-
-  const hideAlert = () => {
-    setAlertConfig((prev) => ({ ...prev, visible: false }));
-  };
-
-  const fetchMonitoringData = async () => {
+  /* ---------- Data ---------- */
+  const fetchMonitoringData = async (isRefreshing = false) => {
     if (!spenderId) return;
     try {
-      setLoading(true);
+      if (!isRefreshing) setLoading(true);
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name')
+        .select('full_name, avatar_url')
         .eq('id', spenderId)
         .single();
 
-      if (profile?.full_name) {
-        setSpenderName(profile.full_name);
-      }
-
-      const { data: allowanceData, error: allowanceError } = await supabase
-        .from('allowances')
-        .select('*')
-        .eq('spender_id', spenderId)
-        .eq('is_archived', false)
-        .order('start_date', { ascending: false });
-
-      if (allowanceError) throw allowanceError;
-      setAllowances(allowanceData || []);
+      if (profile?.full_name) setSpenderName(profile.full_name);
+      setSpenderAvatar(profile?.avatar_url || null);
 
       const { data: expenseData, error: expenseError } = await supabase
         .from('expenses')
@@ -136,788 +261,495 @@ export default function MonitoringScreen() {
         .order('spent_at', { ascending: false });
 
       if (expenseError) throw expenseError;
-      setExpenses(
-        (expenseData || []).map((expense) => ({
-          ...expense,
-          categories: Array.isArray(expense.categories)
-            ? expense.categories[0]
-            : expense.categories,
-        }))
-      );
 
+      setExpenses(
+        (expenseData || []).map((expense: any) => ({
+          ...expense,
+          categories: Array.isArray(expense.categories) ? expense.categories[0] : expense.categories,
+        })),
+      );
     } catch (e: any) {
       console.error('Error loading monitoring data:', e.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useFocusEffect(
     useCallback(() => {
       fetchMonitoringData();
-    }, [spenderId])
+    }, [spenderId]),
   );
 
-  const handleArchiveAllowance = (allowanceId: string, allowanceName: string) => {
-    setAlertConfig({
-      visible: true,
-      title: 'Archive Allowance',
-      message: `This allowance ("${allowanceName}") will be moved to archives and hidden from active tracking. You can restore it later if needed.`,
-      type: 'archive',
-      onConfirm: async () => {
-        hideAlert();
-        const { error } = await supabase
-          .from('allowances')
-          .update({ is_archived: true })
-          .eq('id', allowanceId);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchMonitoringData(true);
+  }, [spenderId]);
 
-        if (error) {
-          setAlertConfig({
-            visible: true,
-            title: 'Action Failed',
-            message: 'Unable to archive the allowance right now. Please try again.',
-            type: 'error',
-            onConfirm: hideAlert,
-          });
-        } else {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            await supabase.from('logs').insert({
-              user_id: user.id,
-              details: `archived allowance record ("${allowanceName}").`,
-            });
-          }
+  /* ---------- Derived ---------- */
+  const filteredExpenses = useMemo(() => {
+    const start = getFilterStart(filter);
+    const query = searchQuery.trim().toLowerCase();
 
-          fetchMonitoringData();
-          triggerSuccess(`Allowance "${allowanceName}" archived successfully.`);
-        }
-      },
+    return expenses.filter((exp) => {
+      if (start && new Date(exp.spent_at) < start) return false;
+      if (!query) return true;
+      return (
+        exp.description?.toLowerCase().includes(query) ||
+        exp.categories?.name?.toLowerCase().includes(query)
+      );
     });
-  };
+  }, [expenses, filter, searchQuery]);
 
-  const handleDeleteAllowance = (allowanceId: string, allowanceName: string) => {
-    setAlertConfig({
-      visible: true,
-      title: 'Delete Allowance',
-      message: `This action is permanent and cannot be undone for "${allowanceName}". Associated tracking records may be affected.`,
-      type: 'delete',
-      onConfirm: async () => {
-        hideAlert();
-        const { error } = await supabase.from('allowances').delete().eq('id', allowanceId);
-        
-        if (error) {
-          setAlertConfig({
-            visible: true,
-            title: 'Action Failed',
-            message: 'Unable to delete the allowance item right now.',
-            type: 'error',
-            onConfirm: hideAlert,
-          });
-        } else {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            await supabase.from('logs').insert({
-              user_id: user.id,
-              details: `deleted allowance record ("${allowanceName}").`,
-            });
-          }
+  const summary = useMemo(() => {
+    const amounts = filteredExpenses.map((e) => Number(e.amount));
+    const total = amounts.reduce((s, n) => s + n, 0);
+    return {
+      total,
+      count: amounts.length,
+      highest: amounts.length ? Math.max(...amounts) : 0,
+      average: amounts.length ? total / amounts.length : 0,
+    };
+  }, [filteredExpenses]);
 
-          fetchMonitoringData();
-          triggerSuccess(`Allowance "${allowanceName}" permanently deleted.`);
-        }
-      },
-    });
-  };
+  const filterCaption = FILTERS.find((f) => f.key === filter)?.caption ?? 'All time';
+  const showSkeleton = loading && !refreshing;
 
-  const formatDateTime = (dateStr: string) => {
-    try {
-      if (!dateStr) return '';
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + 
-        ' at ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return dateStr;
-    }
-  };
+  /* ---------- Render ---------- */
+  const renderListHeader = () => (
+    <View>
+      <LinearGradient
+        colors={['#4FA87A', '#1E6244', '#013237']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.heroCard}
+      >
+        <View style={styles.cardCircleLarge} />
+        <View style={styles.cardCircleSmall} />
 
-  const formatDateOnly = (dateStr: string) => {
-    try {
-      if (!dateStr) return '';
-      const d = new Date(dateStr.includes('T') ? dateStr : `${dateStr}T00:00:00`);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch {
-      return dateStr;
-    }
-  };
+        <View style={styles.heroLabelRow}>
+          <View style={styles.heroLabelLeft}>
+            <View style={styles.heroIconChip}>
+              <Ionicons name="receipt-outline" size={14} color={COLORS.white} />
+            </View>
+            <Text style={styles.heroLabel}>Total Spent</Text>
+          </View>
+          <View style={styles.captionPill}>
+            <Text style={styles.captionPillText}>{filterCaption}</Text>
+          </View>
+        </View>
 
-  const formatAllowanceDateRange = (startDate: string, endDate: string, receivedAt: string) => {
-    if (startDate && endDate) {
-      try {
-        const startD = new Date(startDate.includes('T') ? startDate : `${startDate}T00:00:00`);
-        const endD = new Date(endDate.includes('T') ? endDate : `${endDate}T00:00:00`);
+        <Text style={styles.heroAmount}>{formatPeso(summary.total)}</Text>
 
-        const startMonth = startD.toLocaleDateString('en-US', { month: 'short' });
-        const endMonth = endD.toLocaleDateString('en-US', { month: 'short' });
-        const startDay = startD.getDate();
-        const endDay = endD.getDate();
-        const startYear = startD.getFullYear();
-        const endYear = endD.getFullYear();
+        <View style={styles.heroStatsRow}>
+          <View style={styles.heroStat}>
+            <View style={styles.statLabelRow}>
+              <Ionicons name="list" size={13} color="rgba(255,255,255,0.85)" />
+              <Text style={styles.statLabel}>Entries</Text>
+            </View>
+            <Text style={styles.statValue}>{summary.count}</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.heroStat}>
+            <View style={styles.statLabelRow}>
+              <Ionicons name="trending-up" size={13} color="#FCA5A5" />
+              <Text style={styles.statLabel}>Highest</Text>
+            </View>
+            <Text style={styles.statValue}>{formatPeso(summary.highest, false)}</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.heroStat}>
+            <View style={styles.statLabelRow}>
+              <Ionicons name="analytics" size={13} color={COLORS.accentGreen} />
+              <Text style={styles.statLabel}>Average</Text>
+            </View>
+            <Text style={styles.statValue}>{formatPeso(summary.average, false)}</Text>
+          </View>
+        </View>
+      </LinearGradient>
 
-        if (startMonth === endMonth && startDay === endDay && startYear === endYear) {
-          return `${startMonth} ${startDay}, ${startYear}`;
-        }
+      {/* Filters */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+      >
+        {FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.filterChip, active && styles.filterChipActive]}
+              activeOpacity={0.8}
+              onPress={() => setFilter(f.key)}
+            >
+              <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
-        if (startMonth === endMonth && startYear === endYear) {
-          return `${startMonth} ${startDay} - ${endDay}, ${startYear}`;
-        }
+      {/* Search */}
+      {expenses.length > 0 && (
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={18} color={COLORS.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by description or category"
+            placeholderTextColor={COLORS.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle" size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </View>
+  );
 
-        return `${startMonth} ${startDay}, ${startYear} - ${endMonth} ${endDay}, ${endYear}`;
-      } catch {
-        return `${formatDateOnly(startDate)} - ${formatDateOnly(endDate)}`;
-      }
-    }
-    return formatDateOnly(startDate || receivedAt);
-  };
+  const renderExpense = ({ item: exp }: { item: ExpenseItem }) => (
+    <View style={styles.expenseCard}>
+      <View style={styles.expenseIconBox}>
+        <Ionicons
+          name={(exp.categories?.icon as any) || 'pricetag-outline'}
+          size={19}
+          color={COLORS.primaryMid}
+        />
+      </View>
 
-  const filteredExpenses = expenses.filter((exp) => {
-    const query = searchQuery.toLowerCase();
-    const descriptionMatch = exp.description?.toLowerCase().includes(query);
-    const categoryMatch = exp.categories?.name?.toLowerCase().includes(query);
-    return descriptionMatch || categoryMatch;
-  });
+      <View style={{ flex: 1, marginLeft: 12, marginRight: 8 }}>
+        <View style={styles.expenseNameRow}>
+          <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
+          {exp.photo_url ? (
+            <TouchableOpacity
+              style={styles.photoBadge}
+              onPress={() => setSelectedImageUri(exp.photo_url!)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="image" size={11} color={COLORS.primaryMid} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <Text style={styles.expenseTime} numberOfLines={1}>
+          {exp.categories?.name ? `${exp.categories.name} • ` : ''}
+          {formatDateTime(exp.spent_at)}
+        </Text>
+      </View>
+
+      <Text style={styles.expenseAmount}>-{formatPeso(Number(exp.amount))}</Text>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
 
-      {/* Header */}
-      <View style={styles.header}>
+      {/* HEADER */}
+      <View style={styles.topBar}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.7}>
           <Ionicons name="arrow-back" size={20} color={COLORS.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{spenderName}</Text>
-        <View style={{ width: 36 }} />
+
+        <View style={styles.headerCenter}>
+          {showSkeleton ? (
+            <>
+              <Skeleton width={120} height={16} radius={8} />
+              <Skeleton width={70} height={10} radius={5} style={{ marginTop: 6 }} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.headerTitle} numberOfLines={1}>{spenderName}</Text>
+              <Text style={styles.headerSubtitle}>Expense log</Text>
+            </>
+          )}
+        </View>
+
+        {showSkeleton ? <Skeleton width={40} height={40} radius={20} /> : <Avatar uri={spenderAvatar} size={40} />}
       </View>
 
-      {/* Modern Inline Success Banner */}
-      {successMessage ? (
-        <View style={styles.successBanner}>
-          <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
-          <Text style={styles.successBannerText}>{successMessage}</Text>
-        </View>
-      ) : null}
-
-      {loading ? (
-        <ActivityIndicator size="large" color={COLORS.textPrimary} style={{ marginTop: 40 }} />
-      ) : (
-        <View style={styles.contentContainer}>
-          
-          {/* TOP SECTION (Allowances & Search) */}
-          <View>
-            {/* RECEIPT / ALLOWANCES CARD CONTAINER */}
-            <View style={styles.receiptCard}>
-              <View style={styles.receiptHeaderRow}>
-                <View style={styles.receiptIconWrapper}>
-                  <Ionicons name="wallet-outline" size={16} color={COLORS.textPrimary} />
-                </View>
-                <Text style={styles.receiptTitle}>Allocated Allowances</Text>
-              </View>
-
-              <View style={styles.receiptDividerDashed} />
-
-              {allowances.length === 0 ? (
-                <Text style={styles.emptyReceiptText}>No allowances assigned yet.</Text>
-              ) : (
-                <ScrollView 
-                  style={styles.allowancesScrollContainer} 
-                  showsVerticalScrollIndicator={true}
-                  nestedScrollEnabled={true}
-                >
-                  {allowances.map((item) => (
-                    <View key={item.id} style={styles.receiptItemRow}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.receiptItemName} numberOfLines={1}>{item.allowance_name}</Text>
-                        <Text style={styles.receiptItemDate}>
-                          {formatAllowanceDateRange(item.start_date, item.end_date, item.received_at)}
-                        </Text>
-                      </View>
-                      <View style={styles.receiptRightSection}>
-                        <Text style={styles.receiptItemAmount}>
-                          +₱{item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </Text>
-                        
-                        <TouchableOpacity onPress={() => handleArchiveAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
-                          <Ionicons name="archive-outline" size={15} color={COLORS.textPrimary} />
-                        </TouchableOpacity>
-
-                        <TouchableOpacity onPress={() => handleDeleteAllowance(item.id, item.allowance_name)} style={styles.actionBtn}>
-                          <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))}
-                </ScrollView>
-              )}
-            </View>
-
-            {/* EXPENSES LOG LIST HEADER */}
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeading}>Logged Expenses</Text>
-              <View style={styles.badgeContainer}>
-                <Text style={styles.expenseCountText}>{filteredExpenses.length} entries</Text>
-              </View>
-            </View>
-
-            {/* SEARCH BAR */}
-            {expenses.length > 0 && (
-              <View style={styles.searchContainer}>
-                <Ionicons name="search-outline" size={18} color={COLORS.textMuted} style={styles.searchIcon} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search by description or category..."
-                  placeholderTextColor={COLORS.textMuted}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                />
-                {searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
-                    <Ionicons name="close-circle" size={16} color={COLORS.textMuted} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-          </View>
-
-          {/* SCROLLABLE EXPENSES LIST */}
-          <ScrollView 
-            contentContainerStyle={styles.expensesScrollContent} 
+      {/* BODY */}
+      <View style={styles.bodyContent}>
+        {showSkeleton ? (
+          <MonitoringSkeleton />
+        ) : (
+          <FlatList
+            data={filteredExpenses}
+            keyExtractor={(item) => item.id}
+            renderItem={renderExpense}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-          >
-            {expenses.length === 0 ? (
-              <View style={styles.emptyExpensesBox}>
-                <Ionicons name="receipt-outline" size={32} color={COLORS.textMuted} />
-                <Text style={styles.emptyExpensesText}>No expenses logged by spender yet.</Text>
-              </View>
-            ) : filteredExpenses.length === 0 ? (
-              <View style={styles.emptyExpensesBox}>
-                <Ionicons name="search-outline" size={32} color={COLORS.textMuted} />
-                <Text style={styles.emptyExpensesText}>No expenses match your search.</Text>
-              </View>
-            ) : (
-              <View style={styles.expensesListContainer}>
-                {filteredExpenses.map((exp) => (
-                  <View key={exp.id} style={styles.expenseCard}>
-                    <View style={styles.expenseCategoryIconCircle}>
-                      <Ionicons 
-                        name={(exp.categories?.icon as any) || 'pricetag-outline'} 
-                        size={18} 
-                        color={COLORS.textPrimary} 
-                      />
-                    </View>
-                    
-                    <View style={{ flex: 1, marginLeft: 12, marginRight: 8 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={styles.expenseName} numberOfLines={1}>{exp.description}</Text>
-                        
-                        {exp.photo_url ? (
-                          <TouchableOpacity 
-                            style={styles.photoIndicatorBadge}
-                            onPress={() => setSelectedImageUri(exp.photo_url!)}
-                            activeOpacity={0.7}
-                          >
-                            <Ionicons name="image" size={11} color={COLORS.textPrimary} />
-                          </TouchableOpacity>
-                        ) : null}
-                      </View>
-                      
-                      <Text style={styles.expenseTime}>
-                        {exp.categories?.name ? `${exp.categories.name} • ` : ''}{formatDateTime(exp.spent_at)}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.expenseAmount}>
-                      -₱{Number(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </ScrollView>
-
-          {/* FULL-SCREEN IMAGE VIEWER MODAL */}
-          <Modal
-            visible={!!selectedImageUri}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={() => setSelectedImageUri(null)}
-          >
-            <View style={styles.imageModalOverlay}>
-              <TouchableOpacity 
-                style={styles.closeImageButton} 
-                onPress={() => setSelectedImageUri(null)}
-              >
-                <Ionicons name="close" size={28} color="#FFFFFF" />
-              </TouchableOpacity>
-              {selectedImageUri ? (
-                <Image 
-                  source={{ uri: selectedImageUri }} 
-                  style={styles.fullScreenImage} 
-                  resizeMode="contain" 
-                />
-              ) : null}
-            </View>
-          </Modal>
-
-          {/* MODERN CUSTOM ALERT MODAL */}
-          <Modal
-            visible={alertConfig.visible}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={hideAlert}
-          >
-            <View style={styles.alertOverlay}>
-              <View style={styles.alertContainer}>
-                <View style={[
-                  styles.alertIconBadge, 
-                  alertConfig.type === 'delete' && styles.alertIconBadgeDanger,
-                  alertConfig.type === 'error' && styles.alertIconBadgeDanger
-                ]}>
-                  <Ionicons 
-                    name={
-                      alertConfig.type === 'archive' ? 'archive-outline' :
-                      alertConfig.type === 'delete' ? 'trash-outline' : 'alert-circle-outline'
-                    } 
-                    size={22} 
-                    color={alertConfig.type === 'archive' ? COLORS.textPrimary : COLORS.danger} 
+            contentContainerStyle={styles.listContent}
+            ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[COLORS.primary]}
+                tintColor={COLORS.primary}
+              />
+            }
+            ListHeaderComponent={renderListHeader()}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <View style={styles.emptyIcon}>
+                  <Ionicons
+                    name={expenses.length === 0 ? 'receipt-outline' : 'search-outline'}
+                    size={22}
+                    color={COLORS.textMuted}
                   />
                 </View>
-
-                <Text style={styles.alertTitle}>{alertConfig.title}</Text>
-                <Text style={styles.alertMessage}>{alertConfig.message}</Text>
-
-                <View style={styles.alertButtonRow}>
-                  {alertConfig.type !== 'error' && (
-                    <TouchableOpacity 
-                      style={styles.alertCancelButton} 
-                      onPress={hideAlert}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.alertCancelButtonText}>Cancel</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity 
-                    style={[
-                      styles.alertConfirmButton,
-                      (alertConfig.type === 'delete' || alertConfig.type === 'error') && styles.alertConfirmButtonDanger,
-                      alertConfig.type === 'error' && { flex: 1 }
-                    ]} 
-                    onPress={alertConfig.onConfirm}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.alertConfirmButtonText}>
-                      {alertConfig.type === 'archive' ? 'Archive' : 
-                       alertConfig.type === 'delete' ? 'Delete' : 'Okay'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                <Text style={styles.emptyTitle}>
+                  {expenses.length === 0 ? 'No expenses logged yet' : 'No expenses found'}
+                </Text>
+                <Text style={styles.emptySubtitle}>
+                  {expenses.length === 0
+                    ? 'Expenses logged by this spender will appear here.'
+                    : 'Try a different time period or search.'}
+                </Text>
               </View>
-            </View>
-          </Modal>
+            }
+          />
+        )}
+      </View>
 
+      {/* IMAGE VIEWER */}
+      <Modal
+        visible={!!selectedImageUri}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedImageUri(null)}
+        statusBarTranslucent
+      >
+        <View style={styles.imageOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedImageUri(null)} />
+          <TouchableOpacity
+            style={styles.closeImageButton}
+            onPress={() => setSelectedImageUri(null)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="close" size={22} color={COLORS.white} />
+          </TouchableOpacity>
+          {selectedImageUri ? (
+            <Image source={{ uri: selectedImageUri }} style={styles.fullScreenImage} resizeMode="contain" />
+          ) : null}
         </View>
-      )}
+      </Modal>
     </View>
   );
 }
 
+/* ---------- Styles ---------- */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1, backgroundColor: COLORS.bg },
+
+  /* Header */
+  topBar: {
+    paddingTop: (Platform.OS === 'android' ? NativeStatusBar.currentHeight || 24 : 44) + 12,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: COLORS.bg,
   },
-  header: {
-    backgroundColor: COLORS.white,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    paddingTop: 45,
-    borderBottomWidth: 1,
-    borderColor: COLORS.borderLight,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
-  },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.bgLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    flex: 1,
-    textAlign: 'center',
-  },
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#DCFCE7',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 4,
-    gap: 8,
-  },
-  successBannerText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.success,
-    flex: 1,
-  },
-  contentContainer: {
-    flex: 1,
-    padding: 16,
-  },
-  
-  receiptCard: {
-    backgroundColor: COLORS.card,
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    padding: 16,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
-    marginBottom: 16,
-  },
-  receiptHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
-  },
-  receiptIconWrapper: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: COLORS.bgLight,
+    backgroundColor: COLORS.white,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    borderColor: COLORS.border,
   },
-  receiptTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  receiptDividerDashed: {
-    height: 1,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    borderStyle: 'dashed',
-    marginBottom: 10,
-  },
-  allowancesScrollContainer: {
-    maxHeight: 180,
-  },
-  emptyReceiptText: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-  receiptItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderLight,
-  },
-  receiptItemName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  receiptItemDate: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  receiptRightSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  receiptItemAmount: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.success,
-    marginRight: 4,
-  },
-  actionBtn: {
-    padding: 6,
-    borderRadius: 8,
-    backgroundColor: COLORS.bgLight,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
+  headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 12 },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.3 },
+  headerSubtitle: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
 
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  bodyContent: { flex: 1 },
+  listContent: { paddingHorizontal: 20, paddingBottom: 40 },
+
+  /* Hero card */
+  heroCard: {
+    borderRadius: 26,
+    padding: 22,
+    overflow: 'hidden',
+    shadowColor: '#0F3D2E',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  cardCircleLarge: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    top: -80,
+    right: -60,
+  },
+  cardCircleSmall: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(193,240,56,0.08)',
+    bottom: -50,
+    left: -30,
+  },
+  heroLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  heroLabelLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroIconChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
-    marginBottom: 10,
-    paddingHorizontal: 4,
+    justifyContent: 'center',
   },
-  sectionHeading: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+  heroLabel: { color: 'rgba(255,255,255,0.88)', fontSize: 14, fontWeight: '600', letterSpacing: 0.2 },
+  captionPill: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
-  badgeContainer: {
-    backgroundColor: COLORS.bgLight,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+  captionPillText: { fontSize: 11, fontWeight: '700', color: COLORS.white },
+  heroAmount: {
+    color: COLORS.white,
+    fontSize: 38,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    marginTop: 14,
+    marginBottom: 18,
+  },
+  heroStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    borderRadius: 16,
+    paddingVertical: 12,
+  },
+  heroStat: { flex: 1, alignItems: 'center', gap: 4 },
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statLabel: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
+  statValue: { fontSize: 14, fontWeight: '700', color: COLORS.white },
+  statDivider: { width: 1, height: 28, backgroundColor: 'rgba(255,255,255,0.18)' },
+
+  /* Filters */
+  filterRow: { gap: 8, paddingVertical: 20, paddingRight: 8 },
+  filterChip: {
+    paddingHorizontal: 16,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: COLORS.white,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  expenseCountText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
+  filterChipActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  filterChipText: { fontSize: 12, fontWeight: '600', color: COLORS.textSubtle },
+  filterChipTextActive: { color: COLORS.white, fontWeight: '700' },
+
+  /* Search */
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.card,
+    gap: 8,
+    height: 48,
+    backgroundColor: COLORS.white,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    borderColor: COLORS.border,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 14,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.02,
-    shadowRadius: 3,
-    elevation: 1,
+    marginBottom: 16,
   },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 13,
-    color: COLORS.textPrimary,
-    paddingVertical: 0,
-  },
-  clearSearchBtn: {
-    padding: 2,
-  },
+  searchInput: { flex: 1, fontSize: 14, color: COLORS.textPrimary, paddingVertical: 0 },
 
-  expensesScrollContent: {
-    paddingBottom: 40,
-  },
-  expensesListContainer: {
-    gap: 10,
-  },
+  /* Expenses */
   expenseCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.card,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    elevation: 1,
+    borderColor: COLORS.border,
   },
-  expenseCategoryIconCircle: {
+  expenseIconBox: {
     width: 42,
     height: 42,
-    borderRadius: 21,
-    backgroundColor: COLORS.bgLight,
+    borderRadius: 14,
+    backgroundColor: COLORS.primarySoft,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  expenseNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  expenseName: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary, flexShrink: 1 },
+  expenseTime: { fontSize: 11, color: COLORS.textMuted, marginTop: 3 },
+  expenseAmount: { fontSize: 14, fontWeight: '700', color: COLORS.danger },
+  photoBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    backgroundColor: COLORS.primarySoft,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
-  expenseName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    flexShrink: 1,
-  },
-  expenseTime: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    marginTop: 3,
-  },
-  expenseAmount: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.danger,
-  },
-  photoIndicatorBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.bgLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    gap: 3,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    justifyContent: 'center',
   },
 
-  emptyExpensesBox: {
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
-    padding: 40,
+  /* Empty */
+  emptyState: {
     alignItems: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    backgroundColor: COLORS.card,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    marginTop: 10,
-    elevation: 1,
+    borderColor: COLORS.border,
   },
-  emptyExpensesText: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  imageModalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.9)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  fullScreenImage: { 
-    width: '92%', 
-    height: '82%',
-    borderRadius: 12,
-  },
-  closeImageButton: { 
-    position: 'absolute', 
-    top: 50, 
-    right: 20, 
-    zIndex: 10, 
-    padding: 8,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 20,
-  },
-
-  alertOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  alertContainer: {
-    width: '100%',
-    maxWidth: 340,
-    backgroundColor: COLORS.card,
+  emptyIcon: {
+    width: 48,
+    height: 48,
     borderRadius: 24,
-    padding: 24,
+    backgroundColor: '#EBEFF4',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 5,
-  },
-  alertIconBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: COLORS.bgLight,
     justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    marginBottom: 10,
   },
-  alertIconBadgeDanger: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FEE2E2',
-  },
-  alertTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  alertMessage: {
-    fontSize: 13,
+  emptyTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary },
+  emptySubtitle: {
+    fontSize: 12,
     color: COLORS.textMuted,
     textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 24,
+    marginTop: 4,
+    lineHeight: 17,
   },
-  alertButtonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    width: '100%',
-  },
-  alertCancelButton: {
+
+  /* Image viewer */
+  imageOverlay: {
     flex: 1,
-    backgroundColor: COLORS.bg,
-    paddingVertical: 12,
-    borderRadius: 14,
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: { width: '92%', height: '80%', borderRadius: 16 },
+  closeImageButton: {
+    position: 'absolute',
+    top: (Platform.OS === 'android' ? NativeStatusBar.currentHeight || 24 : 44) + 12,
+    right: 20,
+    zIndex: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.borderLight,
-  },
-  alertCancelButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  alertConfirmButton: {
-    flex: 1,
-    backgroundColor: COLORS.textPrimary,
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  alertConfirmButtonDanger: {
-    backgroundColor: COLORS.danger,
-  },
-  alertConfirmButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.white,
   },
 });
