@@ -4,6 +4,7 @@ import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Dimensions,
   Image,
   Modal,
@@ -18,51 +19,114 @@ import {
   View
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
-import Svg, { Circle, G, Line, Polyline, Text as SvgText } from 'react-native-svg';
+import Svg, {
+  Circle,
+  Defs,
+  G,
+  Line,
+  LinearGradient,
+  Polygon,
+  Polyline,
+  Rect,
+  Stop,
+  Text as SvgText,
+} from 'react-native-svg';
 
 import { supabase } from '../../lib/supabase';
 
 const COLORS = {
   black: '#000000',
-  headerDark: '#1F4F59',   
-  headerDarker: '#173D45', 
-  deepTeal: '#1F4F59',
-  cyan: '#54C9CC',
-  cyanLight: '#7EDDE0',
-  olive: '#7EA00E',
-  yellowGreen: '#DCD964',
-  darkOlive: '#213502',
-  bg: '#F8FAFC',
+  headerDark: '#013237',
+  deepTeal: '#013237',
+  cyan: '#4CA771',
+  cyanLight: '#C0E6BA',      // fixed: was '#COE6BA' (letter O instead of zero = invalid color)
+  olive: '#4CA771',
+  yellowGreen: '#C0E6BA',    // fixed: same typo as above
+  darkOlive: '#013237',
+  bg: '#EAF9E7',
   card: '#FFFFFF',
   white: '#FFFFFF',
   textMuted: '#64748B',
-  overlay: 'rgba(9, 20, 19, 0.5)',
-  modalShadow: '#04201C',
+  overlay: 'rgba(1, 50, 55, 0.5)',
+  modalShadow: '#013237',
+
+  // Redesign tokens
+  primary: '#2F5D5E',
+  headerGradientTop: '#6DB596',
+  headerGradientBottom: '#2F5D5E',
+  balanceTrack: '#E8F7EA',
+  surfaceSoft: '#F6F8F7',
+  border: '#EAEFEC',
+  donutTrack: '#F1F3F2',
+  expenseRed: '#E5252A',
 };
 
+// Vivid, clearly distinguishable category colors (matches the reference donut)
 const CATEGORY_COLORS = [
-  // Original Colors
-  '#54C9CC', // Cyan
-  '#1F4F59', // Dark Teal
-  '#7EA00E', // Olive Green
-  '#DCD964', // Light Yellow-Green
-  '#213502', // Deep Forest Green
-
-  // New Neighboring Colors
-  '#3AA8AC', // Muted Cyan (closer to Dark Teal / Cyan mix)
-  '#357380', // Medium Teal (between Cyan and Dark Teal)
-  '#9BC915', // Vibrant Olive Green (bright relative to your Olive)
-  '#F4F19C', // Soft Pastel Yellow-Green (lighter shade of Light Yellow-Green)
-  '#3D6105', // Mid Forest Green (softer transition into Deep Forest Green)
+  '#4C6FFF', // blue
+  '#14D2BC', // teal
+  '#FFA62B', // orange
+  '#FF4FA8', // pink
+  '#8B5CF6', // violet
+  '#4CA771', // brand green
 ];
 
 const PALETTE_LIGHT_CARDS = [
-  '#E6F0F2',
-  '#F4F8E8',
-  '#FAFAD8',
+  '#F6F8F7',
+  '#F2F8F3',
+  '#F6F8F7',
 ];
 
+const DUE_TILE_COLORS = ['#4CA771', '#1F8A83'];
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Display-only helper for the due-date tile ("14" / "Oct")
+function getDateParts(dateStr: string): { day: string; month: string } {
+  const [, month, day] = (dateStr || '').split('-').map(Number);
+  return {
+    day: day ? String(day) : '',
+    month: MONTH_SHORT[(month || 0) - 1] || '',
+  };
+}
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// ---------- Collapsing header geometry (UI only) ----------
+const H_INSET = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 56;
+const HEADER_EXPANDED_H = H_INSET + 254;
+const HEADER_COLLAPSED_H = H_INSET + 92;
+const HEADER_SCROLL_RANGE = HEADER_EXPANDED_H - HEADER_COLLAPSED_H;
+const AMOUNT_SHIFT = (H_INSET + 69) - (H_INSET + 180); // moves the amount line up into the compact bar
+
+// ---------- Expense period filter ----------
+type CategoryPeriod = 'daily' | 'weekly' | 'monthly';
+
+const PERIOD_OPTIONS: { key: CategoryPeriod; label: string; hint: string; empty: string; icon: string }[] = [
+  { key: 'daily', label: 'Daily', hint: 'Today', empty: 'today', icon: 'today-outline' },
+  { key: 'weekly', label: 'Weekly', hint: 'This week (Mon–Sun)', empty: 'this week', icon: 'calendar-outline' },
+  { key: 'monthly', label: 'Monthly', hint: 'This month', empty: 'this month', icon: 'calendar-number-outline' },
+];
+
+function isInPeriod(spentAt: string | null | undefined, period: CategoryPeriod): boolean {
+  if (!spentAt) return false;
+  const d = new Date(spentAt);
+  if (isNaN(d.getTime())) return false;
+
+  const now = new Date();
+  if (period === 'daily') {
+    return d.toDateString() === now.toDateString();
+  }
+  if (period === 'weekly') {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // Monday
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+    return d >= start && d < end;
+  }
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+}
 
 function extractErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -131,7 +195,6 @@ function generateDateRange() {
     });
   }
 
-  // Trailing "More" tile that opens the full month calendar
   dates.push({
     isSeeMore: true,
   });
@@ -154,7 +217,7 @@ interface ReminderItem {
   amount: number;
   due_date: string;
   status: string;
-  category_id?: string | null; // <--- Add this line
+  category_id?: string | null;
   categories?: {
     name?: string;
     icon?: string;
@@ -198,7 +261,6 @@ function DueDatesCalendarModal({
   onClose,
   onSelectDate,
 }: DueDatesCalendarModalProps) {
-  // Dates with at least one pending (unpaid) reminder get a dot indicator
   const markedDates = useMemo(() => {
     const marks: Record<string, any> = {};
 
@@ -214,9 +276,8 @@ function DueDatesCalendarModal({
     marks[selectedDate] = {
       ...(marks[selectedDate] || {}),
       selected: true,
-      selectedColor: COLORS.headerDark,
+      selectedColor: COLORS.primary,
       selectedTextColor: COLORS.white,
-      // keep the dot visible on the selected (dark) day
       ...(marks[selectedDate]?.marked ? { dotColor: COLORS.yellowGreen } : {}),
     };
 
@@ -232,6 +293,7 @@ function DueDatesCalendarModal({
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
+          <View style={styles.modalHandle} />
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalTitle}>Upcoming Dues</Text>
@@ -252,14 +314,14 @@ function DueDatesCalendarModal({
                 backgroundColor: COLORS.card,
                 calendarBackground: COLORS.card,
                 textSectionTitleColor: COLORS.textMuted,
-                selectedDayBackgroundColor: COLORS.headerDark,
+                selectedDayBackgroundColor: COLORS.primary,
                 selectedDayTextColor: COLORS.white,
                 todayTextColor: COLORS.cyan,
                 dayTextColor: COLORS.darkOlive,
                 textDisabledColor: '#CBD5E1',
                 dotColor: COLORS.olive,
                 selectedDotColor: COLORS.yellowGreen,
-                arrowColor: COLORS.headerDark,
+                arrowColor: COLORS.primary,
                 monthTextColor: COLORS.darkOlive,
                 textDayFontWeight: '600',
                 textMonthFontWeight: '700',
@@ -285,17 +347,51 @@ export default function SpenderHomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [spenderName, setSpenderName] = useState('Guian Sumbi');
-  const [spenderRole, setSpenderRole] = useState('Member');
+  const [spenderName, setSpenderName] = useState('Patricia Ann');
+  const [spenderRole, setSpenderRole] = useState('Spender');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [upcomingDues, setUpcomingDues] = useState<ReminderItem[]>([]);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   
-  // Statistics State
-  const [categoryStats, setCategoryStats] = useState<CategoryStat[]>([]);
-  const [overallTotalExpenses, setOverallTotalExpenses] = useState<number>(0);
+  const [expenseRecords, setExpenseRecords] = useState<any[]>([]);
+  const [categoryPeriod, setCategoryPeriod] = useState<CategoryPeriod>('monthly');
+  const [periodMenuVisible, setPeriodMenuVisible] = useState(false);
+
+  // Category breakdown for the selected period (Daily / Weekly / Monthly)
+  const { categoryStats, overallTotalExpenses } = useMemo(() => {
+    const filtered = expenseRecords.filter((exp: any) => isInPeriod(exp.spent_at, categoryPeriod));
+    const total = filtered.reduce((sum: number, exp: any) => sum + Number(exp.amount || 0), 0);
+
+    const categoryMap: { [key: string]: { name: string; icon?: string; total: number } } = {};
+    filtered.forEach((exp: any) => {
+      const catId = exp.category_id || 'uncategorized';
+      const catName = exp.categories?.name || 'Uncategorized';
+      const catIcon = exp.categories?.icon;
+      const amt = Number(exp.amount || 0);
+
+      if (!categoryMap[catId]) {
+        categoryMap[catId] = { name: catName, icon: catIcon, total: 0 };
+      }
+      categoryMap[catId].total += amt;
+    });
+
+    const stats: CategoryStat[] = Object.keys(categoryMap).map((catId, index) => {
+      const item = categoryMap[catId];
+      const percentage = total > 0 ? (item.total / total) * 100 : 0;
+      return {
+        categoryId: catId,
+        categoryName: item.name,
+        icon: item.icon,
+        total: item.total,
+        percentage,
+        color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+      };
+    });
+
+    return { categoryStats: stats, overallTotalExpenses: total };
+  }, [expenseRecords, categoryPeriod]);
   const [dailyTrends, setDailyTrends] = useState<DailyTrendItem[]>([]);
   
   const dateList = generateDateRange();
@@ -319,6 +415,10 @@ export default function SpenderHomeScreen() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [isCalendarModalVisible, setIsCalendarModalVisible] = useState(false);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const mainScrollRef = useRef<any>(null);
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
+  const headerCollapsedRef = useRef(false);
 
   const centerToday = (animated = false) => {
     const todayIndex = dateList.findIndex(item => item.isToday);
@@ -346,7 +446,6 @@ export default function SpenderHomeScreen() {
   const fetchCategories = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
       let query = supabase.from('categories').select('id, name, icon, color');
       
       if (user) {
@@ -356,7 +455,6 @@ export default function SpenderHomeScreen() {
       }
 
       const { data, error } = await query;
-
       if (error) throw error;
       setCategories(data || []);
     } catch (error: unknown) {
@@ -383,7 +481,7 @@ export default function SpenderHomeScreen() {
         .from('allowances')
         .select('id, allowance_name, amount, received_at')
         .eq('spender_id', user.id)
-        .eq('is_archived', false) // Only fetch non-archived allowances
+        .eq('is_archived', false)
         .order('received_at', { ascending: false });
 
       if (allowanceError) throw allowanceError;
@@ -418,37 +516,8 @@ export default function SpenderHomeScreen() {
           0
         );
 
-        setOverallTotalExpenses(totalSpentCounter);
+        setExpenseRecords(expensesData || []);
 
-        const categoryMap: { [key: string]: { name: string; icon?: string; total: number } } = {};
-        (expensesData || []).forEach((exp: any) => {
-          const catId = exp.category_id || 'uncategorized';
-          const catName = exp.categories?.name || 'Uncategorized';
-          const catIcon = exp.categories?.icon;
-          const amt = Number(exp.amount || 0);
-
-          if (!categoryMap[catId]) {
-            categoryMap[catId] = { name: catName, icon: catIcon, total: 0 };
-          }
-          categoryMap[catId].total += amt;
-        });
-
-        const statsArray: CategoryStat[] = Object.keys(categoryMap).map((catId, index) => {
-          const item = categoryMap[catId];
-          const percentage = totalSpentCounter > 0 ? (item.total / totalSpentCounter) * 100 : 0;
-          return {
-            categoryId: catId,
-            categoryName: item.name,
-            icon: item.icon,
-            total: item.total,
-            percentage,
-            color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
-          };
-        });
-
-        setCategoryStats(statsArray);
-
-        // Compute past 7 days trend data for the Line Graph
         const todayObj = new Date();
         const trendData: DailyTrendItem[] = [];
         
@@ -479,8 +548,7 @@ export default function SpenderHomeScreen() {
         });
       } else {
         setSummary(null);
-        setOverallTotalExpenses(0);
-        setCategoryStats([]);
+        setExpenseRecords([]);
         setDailyTrends([]);
       }
 
@@ -538,238 +606,199 @@ export default function SpenderHomeScreen() {
     setNewDueDate(todayStr);
     setNewCategoryId(null);
     setSubmitting(false);
-    setErrorMessage(null);    // <-- Add this
-    setSuccessMessage(null); // <-- Add this
+    setErrorMessage(null);
+    setSuccessMessage(null);
   };
 
-const handleCalendarDateSelect = (dateString: string) => {
-  // 1. Remember the picked date (drives filteredDues for the Scheduled Dues modal)
-  setSelectedDate(dateString);
-  setErrorMessage(null);
-  setSuccessMessage(null);
+  const handleCalendarDateSelect = (dateString: string) => {
+    setSelectedDate(dateString);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setIsCalendarModalVisible(false);
+    setTimeout(() => setModalVisible(true), 350);
+  };
 
-  // 2. Close the calendar modal
-  setIsCalendarModalVisible(false);
+  const handleCreateReminder = async () => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
 
-  // 3. Open the Scheduled Dues modal once the calendar has finished closing.
-  //    Presenting two RN Modals at the same moment is unreliable (esp. iOS),
-  //    so we wait for the dismiss animation. If the date has no reminders,
-  //    the modal shows its "All Clear" empty state.
-  setTimeout(() => setModalVisible(true), 350);
-};
+    if (!newTitle.trim() || !newAmount.trim()) {
+      setErrorMessage('Please fill in both title and amount.');
+      return;
+    }
 
-const handleCreateReminder = async () => {
-  setErrorMessage(null);
-  setSuccessMessage(null);
+    if (!newCategoryId) {
+      setErrorMessage('Please choose a category for this reminder.');
+      return;
+    }
 
-  if (!newTitle.trim() || !newAmount.trim()) {
-    setErrorMessage('Please fill in both title and amount.');
-    return;
-  }
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(newDueDate)) {
+      setErrorMessage('Invalid due date. Please use YYYY-MM-DD.');
+      return;
+    }
 
-  if (!newCategoryId) {
-    setErrorMessage('Please choose a category for this reminder.');
-    return;
-  }
+    try {
+      setSubmitting(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-  
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(newDueDate)) {
-    setErrorMessage('Invalid due date. Please use YYYY-MM-DD.');
-    return;
-  }
+      const parsedAmount = parseFloat(newAmount);
 
-  // 3. Optional: Validate if it's a real calendar date (e.g., catching "2026-02-31")
-  const parsedDate = new Date(newDueDate);
-  const timestamp = parsedDate.getTime();
-  
-  if (
-    isNaN(timestamp) || 
-    parsedDate.toISOString().slice(0, 10) !== newDueDate
-  ) {
-    setErrorMessage('Please enter a valid calendar date (YYYY-MM-DD).');
-    return;
-  }
+      const { error } = await supabase.from('reminders').insert({
+        user_id: user.id,
+        title: newTitle.trim(),
+        amount: parsedAmount,
+        due_date: newDueDate,
+        status: 'pending',
+        allowance_id: summary?.allowanceId || null,
+        category_id: newCategoryId,
+      });
 
-  try {
-    setSubmitting(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+      if (error) throw error;
 
-    const parsedAmount = parseFloat(newAmount);
-
-    const { error } = await supabase.from('reminders').insert({
-      user_id: user.id,
-      title: newTitle.trim(),
-      amount: parsedAmount,
-      due_date: newDueDate,
-      status: 'pending',
-      allowance_id: summary?.allowanceId || null,
-      category_id: newCategoryId,
-    });
-
-    if (error) throw error;
-
-    // Log the successful reminder creation matching your logs table schema
-    await supabase.from('logs').insert({
-      user_id: user.id,
-      details: `created reminder "${newTitle.trim()}" (${parsedAmount}).`,
-    });
-
-    // Set success message
-    setSuccessMessage('Reminder saved successfully!');
-    fetchDashboardData();
-
-    // Optional: Wait 1 second so the user sees the success banner before closing the modal
-    setTimeout(() => {
-      resetForm();
-      setAddModalVisible(false);
-      setSuccessMessage(null);
-    }, 1000);
-
-  } catch (error: unknown) {
-    console.error('Error adding reminder:', extractErrorMessage(error));
-    setErrorMessage('Failed to save reminder. Please try again.');
-  } finally {
-    setSubmitting(false);
-  }
-};
-
-const handleDeleteReminder = (reminderId: string, reminderTitle: string) => {
-  setReminderToDelete({ id: reminderId, title: reminderTitle });
-  setDeleteModalVisible(true);
-};
-
-const confirmDeleteReminder = async () => {
-  if (!reminderToDelete) return;
-
-  try {
-    setIsDeleting(true);
-    const { error } = await supabase
-      .from('reminders')
-      .delete()
-      .eq('id', reminderToDelete.id);
-
-    if (error) throw error;
-    
-    // Fetch current user and log the deletion action matching your logs table schema
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
       await supabase.from('logs').insert({
         user_id: user.id,
-        details: `deleted reminder "${reminderToDelete.title || reminderToDelete.id}".`,
+        details: `created reminder "${newTitle.trim()}" (${parsedAmount}).`,
       });
+
+      setSuccessMessage('Reminder saved successfully!');
+      fetchDashboardData();
+
+      setTimeout(() => {
+        resetForm();
+        setAddModalVisible(false);
+        setSuccessMessage(null);
+      }, 1000);
+
+    } catch (error: unknown) {
+      console.error('Error adding reminder:', extractErrorMessage(error));
+      setErrorMessage('Failed to save reminder. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
+  };
 
-    fetchDashboardData();
-    
-    // 1. Clear any old errors and set your success message
-    setErrorMessage(null);
-    setSuccessMessage(`Successfully deleted "${reminderToDelete.title || 'reminder'}"`);
+  const handleDeleteReminder = (reminderId: string, reminderTitle: string) => {
+    setReminderToDelete({ id: reminderId, title: reminderTitle });
+    setDeleteModalVisible(true);
+  };
 
-    // 2. Close the delete confirmation modal and clear temporary deletion state
-    setDeleteModalVisible(false);
-    setReminderToDelete(null);
+  const confirmDeleteReminder = async () => {
+    if (!reminderToDelete) return;
 
-    // 3. Optional: Automatically clear the success banner after 4 seconds
-    setTimeout(() => {
+    try {
+      setIsDeleting(true);
+      const { error } = await supabase
+        .from('reminders')
+        .delete()
+        .eq('id', reminderToDelete.id);
+
+      if (error) throw error;
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('logs').insert({
+          user_id: user.id,
+          details: `deleted reminder "${reminderToDelete.title || reminderToDelete.id}".`,
+        });
+      }
+
+      fetchDashboardData();
+      setErrorMessage(null);
+      setSuccessMessage(`Successfully deleted "${reminderToDelete.title || 'reminder'}"`);
+      setDeleteModalVisible(false);
+      setReminderToDelete(null);
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 4000);
+
+    } catch (error: unknown) {
+      console.error('Error deleting reminder:', extractErrorMessage(error));
       setSuccessMessage(null);
-    }, 4000);
-
-  } catch (error: unknown) {
-    console.error('Error deleting reminder:', extractErrorMessage(error));
-    setSuccessMessage(null); // Clear any old success message on failure
-    setErrorMessage('Failed to delete reminder.');
-  } finally {
-    setIsDeleting(false);
-  }
-};
-
-const handleSettleReminder = async (reminder: ReminderItem) => {
-  setErrorMessage(null);
-  setSuccessMessage(null);
-
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    // 1. Fetch the user's active (non-archived) allowance records[cite: 1]
-    const { data: allowances, error: allowanceFetchError } = await supabase
-      .from('allowances')
-      .select('amount')
-      .eq('spender_id', user.id)
-      .eq('is_archived', false);
-
-    if (allowanceFetchError) throw allowanceFetchError;
-
-    if (!allowances || allowances.length === 0) {
-      setErrorMessage('Cannot settle reminder: No allowance records found.');
-      return;
+      setErrorMessage('Failed to delete reminder.');
+    } finally {
+      setIsDeleting(false);
     }
+  };
 
-    const totalAllowance = allowances.reduce((sum, item) => sum + Number(item.amount), 0);
+  const handleSettleReminder = async (reminder: ReminderItem) => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
 
-    // 2. Fetch expenses only where the associated allowance has is_archived = false
-    // Note: Replace 'allowances' with the exact foreign table name if it differs in your schema
-    const { data: expenses, error: expenseFetchError } = await supabase
-      .from('expenses')
-      .select(`
-        amount,
-        allowances!inner (
-          is_archived
-        )
-      `)
-      .eq('user_id', user.id)
-      .eq('allowances.is_archived', false);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    if (expenseFetchError) throw expenseFetchError;
+      const { data: allowances, error: allowanceFetchError } = await supabase
+        .from('allowances')
+        .select('amount')
+        .eq('spender_id', user.id)
+        .eq('is_archived', false);
 
-    const totalExpenses = expenses ? expenses.reduce((sum, item) => sum + Number(item.amount), 0) : 0;
+      if (allowanceFetchError) throw allowanceFetchError;
 
-    // 3. Calculate the actual remaining balance
-    const remaining = totalAllowance - totalExpenses;
+      if (!allowances || allowances.length === 0) {
+        setErrorMessage('Cannot settle reminder: No allowance records found.');
+        return;
+      }
 
-    // 4. Check if the reminder amount exceeds the remaining balance
-    if (reminder.amount > remaining) {
-      setErrorMessage(`Cannot settle reminder: The amount (${reminder.amount}) exceeds your remaining balance (${remaining}).`);
-      return;
-    }
+      const totalAllowance = allowances.reduce((sum, item) => sum + Number(item.amount), 0);
 
-    // 5. Update reminder status to 'paid'
-    const { error: updateError } = await supabase
-      .from('reminders')
-      .update({ status: 'paid' })
-      .eq('id', reminder.id);
+      const { data: expenses, error: expenseFetchError } = await supabase
+        .from('expenses')
+        .select(`
+          amount,
+          allowances!inner (
+            is_archived
+          )
+        `)
+        .eq('user_id', user.id)
+        .eq('allowances.is_archived', false);
 
-    if (updateError) throw updateError;
+      if (expenseFetchError) throw expenseFetchError;
 
-    // 6. Insert record into the expenses table
-    const { error: expenseError } = await supabase
-      .from('expenses')
-      .insert({
+      const totalExpenses = expenses ? expenses.reduce((sum, item) => sum + Number(item.amount), 0) : 0;
+      const remaining = totalAllowance - totalExpenses;
+
+      if (reminder.amount > remaining) {
+        setErrorMessage(`Cannot settle reminder: The amount (${reminder.amount}) exceeds your remaining balance (${remaining}).`);
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from('reminders')
+        .update({ status: 'paid' })
+        .eq('id', reminder.id);
+
+      if (updateError) throw updateError;
+
+      const { error: expenseError } = await supabase
+        .from('expenses')
+        .insert({
+          user_id: user.id,
+          description: reminder.title,
+          amount: reminder.amount,
+          category_id: reminder.category_id || null,
+          allowance_id: summary?.allowanceId || null,
+          spent_at: new Date().toISOString(),
+        });
+
+      if (expenseError) throw expenseError;
+
+      await supabase.from('logs').insert({
         user_id: user.id,
-        description: reminder.title,
-        amount: reminder.amount,
-        category_id: reminder.category_id || null,
-        allowance_id: summary?.allowanceId || null,
-        spent_at: new Date().toISOString(),
+        details: `settled reminder "${reminder.title}" (${reminder.amount}).`,
       });
 
-    if (expenseError) throw expenseError;
-
-    // Log the successful settlement action matching your logs table schema
-    await supabase.from('logs').insert({
-      user_id: user.id,
-      details: `settled reminder "${reminder.title}" (${reminder.amount}).`,
-    });
-
-    setSuccessMessage(`"${reminder.title}" has been settled and recorded.`);
-    fetchDashboardData();
-  } catch (error: unknown) {
-    console.error('Error settling reminder:', extractErrorMessage(error));
-    setErrorMessage('Failed to settle reminder.');
-  }
-};
+      setSuccessMessage(`"${reminder.title}" has been settled and recorded.`);
+      fetchDashboardData();
+    } catch (error: unknown) {
+      console.error('Error settling reminder:', extractErrorMessage(error));
+      setErrorMessage('Failed to settle reminder.');
+    }
+  };
 
   if (loading) {
     return (
@@ -796,244 +825,403 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
   const filteredDues = upcomingDues.filter(due => due.due_date === selectedDate);
   const selectedDaysInfo = getDaysInfo(selectedDate);
 
-  // SVG Donut Chart Calculation variables
-  const size = 200;
-  const strokeWidth = 23;
+  // ---------- UI-only layout values ----------
+  const size = 190;
+  const strokeWidth = 24;
   const center = size / 2;
-  const radius = center - strokeWidth;
+  const radius = center - strokeWidth / 2;
   const circumference = 2 * Math.PI * radius;
+  const segmentGap = 6; // visual gap between donut segments
 
-  let accumulatedPercent = 0;
+  const CONTENT_WIDTH = SCREEN_WIDTH - 40;
+  const DONUT_AREA_HEIGHT = 250;
+  const labelRadius = radius + strokeWidth / 2 + 20;
+  const DUE_CARD_GAP = 12;
+  const DUE_CARD_WIDTH = (CONTENT_WIDTH - DUE_CARD_GAP) / 2;
+
+  // Donut segments + label positions (derived from the same categoryStats data)
+  let runningPercent = 0;
+  const donutSegments = categoryStats.map((stat) => {
+    const startPercent = runningPercent;
+    runningPercent += stat.percentage;
+
+    const midAngle = ((startPercent + stat.percentage / 2) / 100) * 2 * Math.PI; // clockwise from top
+    const arcLength = (circumference * stat.percentage) / 100;
+    const full = stat.percentage >= 99.5;
+    const dashLength = full ? circumference : Math.max(0.1, arcLength - strokeWidth - segmentGap);
+    const startOffsetPx = strokeWidth / 2 + segmentGap / 2;
+    const rotation = full ? -90 : (startPercent / 100) * 360 - 90 + (startOffsetPx / radius) * (180 / Math.PI);
+
+    return {
+      stat,
+      full,
+      dashLength,
+      rotation,
+      labelX: CONTENT_WIDTH / 2 + (labelRadius + Math.abs(Math.sin(midAngle)) * 10) * Math.sin(midAngle),
+      labelY: DONUT_AREA_HEIGHT / 2 - labelRadius * Math.cos(midAngle),
+    };
+  });
+
+  const pendingDues = upcomingDues.filter((due) => due.status === 'pending');
+  const roleLabel = spenderRole ? spenderRole.charAt(0).toUpperCase() + spenderRole.slice(1) : 'Spender';
+  const selectedPeriod = PERIOD_OPTIONS.find((p) => p.key === categoryPeriod) || PERIOD_OPTIONS[2];
+
+  // Header collapse animation: transforms + opacity only, so it runs on the native thread
+  const clampTo = (outputRange: number[], inputRange: number[] = [0, HEADER_SCROLL_RANGE]) =>
+    scrollY.interpolate({ inputRange, outputRange, extrapolate: 'clamp' });
+
+  const headerTranslateY = clampTo([0, -HEADER_SCROLL_RANGE]);        // whole header slides up
+  const pinnedTranslateY = clampTo([0, HEADER_SCROLL_RANGE]);         // compact bar + thin bar stay put
+  const expandedOpacity = clampTo([1, 0], [0, HEADER_SCROLL_RANGE * 0.45]);
+  const labelOpacity = clampTo([1, 0], [0, HEADER_SCROLL_RANGE * 0.3]);
+  const thickPillOpacity = clampTo([1, 0], [HEADER_SCROLL_RANGE * 0.1, HEADER_SCROLL_RANGE * 0.55]);
+  const thinPillOpacity = clampTo([0, 1], [HEADER_SCROLL_RANGE * 0.35, HEADER_SCROLL_RANGE * 0.8]);
+  const compactOpacity = clampTo([0, 1], [HEADER_SCROLL_RANGE * 0.5, HEADER_SCROLL_RANGE * 0.9]);
+  const amountTranslateY = clampTo([0, AMOUNT_SHIFT + HEADER_SCROLL_RANGE]);
+  const amountScale = clampTo([1, 0.45]);
+
+  const snapHeader = (offsetY: number) => {
+    if (offsetY > 0 && offsetY < HEADER_SCROLL_RANGE) {
+      const node = mainScrollRef.current?.getNode?.() ?? mainScrollRef.current;
+      node?.scrollTo({ y: offsetY < HEADER_SCROLL_RANGE / 2 ? 0 : HEADER_SCROLL_RANGE, animated: true });
+    }
+  };
 
   return (
     <View style={styles.mainContainer}>
       <ExpoStatusBar style="light" />
 
-      {/* HEADER */}
-      <View style={styles.headerBackground}>
-        <View style={styles.topRowContainer}>
-          <View style={styles.topRow}>
-            <View style={styles.userProfileGroup}>
-              <TouchableOpacity onPress={() => router.push('/profile')}>
-                <View>
-                  {avatarUrl ? (
-                    <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
-                  ) : (
-                    <View style={styles.avatarFallback}>
-                      <Text style={styles.avatarInitial}>{spenderName.charAt(0).toUpperCase()}</Text>
-                    </View>
-                  )}
+      {/* HEADER (collapses on scroll) */}
+      <Animated.View style={[styles.headerBackground, { transform: [{ translateY: headerTranslateY }] }]}>
+        <Svg width={SCREEN_WIDTH} height={HEADER_EXPANDED_H} style={styles.headerGradient}>
+          <Defs>
+            <LinearGradient id="headerGradient" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={COLORS.headerGradientTop} />
+              <Stop offset="1" stopColor={COLORS.headerGradientBottom} />
+            </LinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width={SCREEN_WIDTH} height={HEADER_EXPANDED_H} fill="url(#headerGradient)" />
+        </Svg>
+
+        {/* Expanded greeting row */}
+        <Animated.View
+          pointerEvents={headerCollapsed ? 'none' : 'auto'}
+          style={[styles.headerExpandedRow, { opacity: expandedOpacity }]}
+        >
+          <View style={styles.userProfileGroup}>
+            <TouchableOpacity onPress={() => router.push('/profile')} activeOpacity={0.8}>
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              ) : (
+                <View style={styles.avatarFallback}>
+                  <Text style={styles.avatarInitial}>{spenderName.charAt(0).toUpperCase()}</Text>
                 </View>
-              </TouchableOpacity>
+              )}
+            </TouchableOpacity>
 
-              <View>
-                <Text style={styles.helloText}>Hello,</Text>
-                <Text style={styles.userNameText} numberOfLines={1}>
-                  {spenderName}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.roleBadgeContainer}>
-              <Text style={styles.roleBadgeText} numberOfLines={1}>
-                {spenderRole ? spenderRole.toUpperCase() : ''}
+            <View style={styles.greetingGroup}>
+              <Text style={styles.helloText}>Hello,</Text>
+              <Text style={styles.userNameText} numberOfLines={1}>
+                {spenderName}
               </Text>
             </View>
           </View>
-        </View>
 
-        <View style={styles.balanceBlock}>
-          <View style={styles.balanceLabelRow}>
-            <View style={styles.balanceLabelIconWrap}>
-              <Ionicons name="wallet-outline" size={13} color={COLORS.deepTeal} />
-            </View>
-            <Text style={styles.balanceLabel}>Total Remaining</Text>
-          </View>
-
-          <View style={styles.pillTrackOuter}>
-            <View style={styles.pillTrack}>
-              <View style={[styles.pillFill, { width: `${remainingPercentage}%` }]} />
-            </View>
-          </View>
-
-          <View style={styles.balanceAmountRow}>
-            <Text style={styles.pillAmountText}>
-              ₱{summary ? summary.remaining.toLocaleString('en-US') : '0'}
-            </Text>
-            <Text style={styles.pillAmountDivider}>/</Text>
-            <Text style={styles.pillAmountTotal}>
-              ₱{summary ? summary.totalAllowance.toLocaleString('en-US') : '0'}
+          <View style={styles.roleBadgeContainer}>
+            <Text style={styles.roleBadgeText} numberOfLines={1}>
+              {roleLabel}
             </Text>
           </View>
-        </View>
-      </View>
+        </Animated.View>
+
+        {/* Compact bar (appears when collapsed) */}
+        <Animated.View
+          pointerEvents={headerCollapsed ? 'auto' : 'none'}
+          style={[styles.headerCompactRow, { opacity: compactOpacity, transform: [{ translateY: pinnedTranslateY }] }]}
+        >
+          <TouchableOpacity
+            onPress={() => router.push('/profile')}
+            activeOpacity={0.8}
+            style={styles.compactProfile}
+          >
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={styles.compactAvatar} />
+            ) : (
+              <View style={[styles.compactAvatar, styles.compactAvatarFallback]}>
+                <Text style={styles.compactAvatarInitial}>{spenderName.charAt(0).toUpperCase()}</Text>
+              </View>
+            )}
+            <Text style={styles.compactName} numberOfLines={1}>{spenderName}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.roleBadgeContainer}>
+            <Text style={styles.roleBadgeText} numberOfLines={1}>
+              {roleLabel}
+            </Text>
+          </View>
+        </Animated.View>
+
+        {/* Shared balance block: label fades, bar thins, amount shrinks upward */}
+        <Animated.Text style={[styles.balanceLabel, { opacity: labelOpacity }]}>Remaining Balance</Animated.Text>
+
+        <Animated.View style={[styles.pillTrack, { opacity: thickPillOpacity }]}>
+          <View style={[styles.pillFill, { width: `${remainingPercentage}%` }]} />
+        </Animated.View>
+        <Animated.View
+          style={[styles.pillTrackThin, { opacity: thinPillOpacity, transform: [{ translateY: pinnedTranslateY }] }]}
+        >
+          <View style={[styles.pillFill, { width: `${remainingPercentage}%` }]} />
+        </Animated.View>
+
+        <Animated.View
+          style={[styles.balanceAmountRow, { transform: [{ translateY: amountTranslateY }, { scale: amountScale }] }]}
+        >
+          <Text style={styles.pillAmountText}>
+            ₱{summary ? summary.remaining.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '1,998.65'}
+          </Text>
+          <Text style={styles.pillAmountSlash}>/</Text>
+          <Text style={styles.pillAmountTotal}>
+            ₱{summary ? summary.totalAllowance.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '7,045'}
+          </Text>
+        </Animated.View>
+      </Animated.View>
 
       {/* SCROLLABLE CONTENT */}
-      <ScrollView
+      <Animated.ScrollView
+        ref={mainScrollRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.olive]} tintColor={COLORS.olive} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[COLORS.cyan]}
+            tintColor={COLORS.cyan}
+            progressViewOffset={HEADER_EXPANDED_H}
+          />
         }
         showsVerticalScrollIndicator={false}
         bounces
+        scrollEventThrottle={16}
+        onScrollBeginDrag={() => setPeriodMenuVisible(false)}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          useNativeDriver: true,
+          listener: (e: any) => {
+            const collapsed = e.nativeEvent.contentOffset.y > HEADER_SCROLL_RANGE * 0.5;
+            if (collapsed !== headerCollapsedRef.current) {
+              headerCollapsedRef.current = collapsed;
+              setHeaderCollapsed(collapsed);
+            }
+          },
+        })}
+        onScrollEndDrag={(e) => {
+          const v = e.nativeEvent.velocity?.y;
+          if (v !== undefined && Math.abs(v) < 0.1) snapHeader(e.nativeEvent.contentOffset.y);
+        }}
+        onMomentumScrollEnd={(e) => snapHeader(e.nativeEvent.contentOffset.y)}
       >
+        {periodMenuVisible && (
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.periodBackdrop}
+            onPress={() => setPeriodMenuVisible(false)}
+          />
+        )}
+
+        {/* UPCOMING DUES */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Upcoming Dues</Text>
-            <TouchableOpacity onPress={() => setAddModalVisible(true)}>
-              <Text style={styles.seeAllText}>+ Set Reminders</Text>
+            <View style={styles.sectionActions}>
+              <TouchableOpacity
+                onPress={() => setIsCalendarModalVisible(true)}
+                style={styles.calendarIconBtn}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="calendar-outline" size={16} color={COLORS.deepTeal} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setAddModalVisible(true)} style={styles.reminderBtn} activeOpacity={0.8}>
+                <Ionicons name="add" size={14} color={COLORS.deepTeal} />
+                <Text style={styles.reminderText}>Set Reminders</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {pendingDues.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.dueCardsScroll}
+              contentContainerStyle={styles.dueCardsRow}
+              snapToInterval={DUE_CARD_WIDTH + DUE_CARD_GAP}
+              snapToAlignment="start"
+              decelerationRate="fast"
+            >
+              {pendingDues.map((due, index) => {
+                const parts = getDateParts(due.due_date);
+                const daysInfo = getDaysInfo(due.due_date);
+
+                return (
+                  <TouchableOpacity
+                    key={due.id}
+                    activeOpacity={0.85}
+                    onPress={() => handleDatePress(due.due_date)}
+                    style={[styles.dueCard, { width: DUE_CARD_WIDTH }]}
+                  >
+                    <View style={styles.dueCardTop}>
+                      <View style={[styles.dueDateTile, { backgroundColor: DUE_TILE_COLORS[index % DUE_TILE_COLORS.length] }]}>
+                        <Text style={styles.dueDateDay}>{parts.day}</Text>
+                        <Text style={styles.dueDateMonth}>{parts.month}</Text>
+                      </View>
+
+                      <View style={styles.dueCardInfo}>
+                        <Text style={styles.dueTitle} numberOfLines={1}>{due.title}</Text>
+                        <Text style={styles.dueAmount} numberOfLines={1}>
+                          ₱{Number(due.amount).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.dueCardBottom}>
+                      <Text style={[styles.dueMeta, daysInfo.urgent && styles.dueMetaUrgent]} numberOfLines={1}>
+                        Due {parts.month} {parts.day} · {daysInfo.text}
+                      </Text>
+                      <Ionicons name="chevron-forward" size={12} color={COLORS.textMuted} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <View style={styles.dueEmptyCard}>
+              <Ionicons name="checkmark-circle-outline" size={26} color={COLORS.cyan} />
+              <Text style={styles.dueEmptyTitle}>No upcoming dues</Text>
+              <Text style={styles.dueEmptyText}>Tap “Set Reminders” to add one.</Text>
+            </View>
+          )}
+        </View>
+
+        {/* EXPENSE PER CATEGORY */}
+        <View style={[styles.sectionBlock, styles.periodSection]}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Expense per Category</Text>
+            <TouchableOpacity
+              style={styles.dropdownContainer}
+              activeOpacity={0.8}
+              onPress={() => setPeriodMenuVisible((v) => !v)}
+            >
+              <Text style={styles.dropdownText}>{selectedPeriod.label}</Text>
+              <Ionicons name={periodMenuVisible ? 'chevron-up' : 'chevron-down'} size={12} color={COLORS.deepTeal} />
             </TouchableOpacity>
           </View>
 
-          {/* Horizontal Date Strip */}
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.dateStripContainer}
-            ref={horizontalScrollRef}
-            onLayout={() => centerToday(false)}
-          >
-            {dateList.map((item) => {
-              // Trailing "More" tile opens the full calendar
-              if (item.isSeeMore) {
-                return (
-                  <TouchableOpacity
-                    key="see-more-calendar"
-                    activeOpacity={0.8}
-                    onPress={() => setIsCalendarModalVisible(true)}
-                    style={[styles.dateBox, styles.seeMoreDateBox]}
-                  >
-                    <Ionicons name="calendar-outline" size={18} color={COLORS.deepTeal} style={{ marginBottom: 4 }} />
-                    <Text style={styles.seeMoreLabel}>More</Text>
-                  </TouchableOpacity>
-                );
-              }
-
-              const dateString = item.dateString;
-              if (!dateString) return null;
-
-              const isSelected = selectedDate === dateString;
-              const hasPending = hasPendingOnDate(dateString);
-
-              return (
-                <TouchableOpacity
-                  key={dateString}
-                  activeOpacity={hasPending ? 0.8 : 1}
-                  onPress={() => handleDatePress(dateString)}
-                  style={[
-                    styles.dateBox,
-                    item.isToday ? styles.dateBoxToday : (isSelected && styles.dateBoxBorderSelected)
-                  ]}
-                >
-                  <Text style={[
-                    styles.dateDayName, 
-                    item.isToday && styles.dateTextToday,
-                    !item.isToday && isSelected && styles.dateTextBorderSelected
-                  ]}>
-                    {item.dayName}
-                  </Text>
-                  <Text style={[
-                    styles.dateDayNumber, 
-                    item.isToday && styles.dateTextToday,
-                    !item.isToday && isSelected && styles.dateTextBorderSelected
-                  ]}>
-                    {item.dayNumber}
-                  </Text>
-                  
-                  <View style={styles.dotContainer}>
-                    {hasPending && (
-                      <View style={[
-                        styles.pendingDot, 
-                        item.isToday && styles.pendingDotToday,
-                        !item.isToday && isSelected && styles.pendingDotBorderSelected
-                      ]} />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-
-        {/* STATISTICS SECTION */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Expenses per Category</Text>
-          </View>
-
-          <View style={styles.statsCard}>
-            {/* Multi-Segment Donut Chart Display */}
-            <View style={styles.circleContainer}>
+          <View style={[styles.donutArea, { height: DONUT_AREA_HEIGHT }]}>
+            <View style={{ width: size, height: size }}>
               <Svg width={size} height={size}>
-                {/* Background Track Circle */}
                 <Circle
                   cx={center}
                   cy={center}
                   r={radius}
-                  stroke="#E2E8F0"
+                  stroke={COLORS.donutTrack}
                   strokeWidth={strokeWidth}
                   fill="none"
                 />
-                
-                {/* Dynamic Category Segments */}
-                {categoryStats.map((stat) => {
-                  const strokeDashoffset = circumference - (circumference * stat.percentage) / 100;
-                  const currentRotation = (accumulatedPercent / 100) * 360 - 90;
-                  accumulatedPercent += stat.percentage;
 
-                  return (
-                    <Circle
-                      key={stat.categoryId}
-                      cx={center}
-                      cy={center}
-                      r={radius}
-                      stroke={stat.color}
-                      strokeWidth={strokeWidth}
-                      strokeDasharray={circumference}
-                      strokeDashoffset={strokeDashoffset}
-                      strokeLinecap="round"
-                      fill="none"
-                      rotation={currentRotation}
-                      origin={`${center}, ${center}`}
-                    />
-                  );
-                })}
+                {donutSegments.map(({ stat, full, dashLength, rotation }) => (
+                  <Circle
+                    key={stat.categoryId}
+                    cx={center}
+                    cy={center}
+                    r={radius}
+                    stroke={stat.color}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={[dashLength, circumference]}
+                    strokeLinecap={full ? 'butt' : 'round'}
+                    fill="none"
+                    rotation={rotation}
+                    origin={`${center}, ${center}`}
+                  />
+                ))}
               </Svg>
 
               <View style={styles.innerCircle}>
-                <Text style={styles.statsLabel}>Total Expenses</Text>
-                <Text style={styles.statsAmount}>
-                  ₱{overallTotalExpenses.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                <Text style={styles.statsAmount} numberOfLines={1} adjustsFontSizeToFit>
+                  ₱{overallTotalExpenses.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </Text>
+                <Text style={styles.statsLabel}>Total Expenses</Text>
               </View>
             </View>
 
-            {/* Category Breakdown Legend List */}
-<View style={styles.legendContainer}>
-  {categoryStats
-    .slice() // Creates a shallow copy so you don't mutate the original array
-    .sort((a, b) => b.total - a.total) // Sorts from highest to lowest
-    .map((stat) => (
-      <View key={stat.categoryId} style={styles.legendRow}>
-        <View style={styles.legendLeft}>
-          <View style={[styles.legendColorDot, { backgroundColor: stat.color }]} />
-          <Text style={styles.legendCategoryName} numberOfLines={1}>{stat.categoryName}</Text>
-        </View>
-        <View style={styles.legendRight}>
-          <Text style={styles.legendAmount}>₱{stat.total.toLocaleString('en-US')}</Text>
-          <Text style={styles.legendPercentage}>({stat.percentage.toFixed(1)}%)</Text>
-        </View>
-      </View>
-    ))}
-  {categoryStats.length === 0 && (
-    <Text style={styles.emptyLegendText}>No expense records found.</Text>
-  )}
-</View>
+            {donutSegments
+              .filter((seg) => seg.stat.percentage >= 4)
+              .map((seg) => (
+                <View
+                  key={`label-${seg.stat.categoryId}`}
+                  style={[styles.donutLabel, { left: seg.labelX - 28, top: seg.labelY - 10 }]}
+                >
+                  <Ionicons name={(seg.stat.icon || 'pricetag-outline') as any} size={12} color={seg.stat.color} />
+                  <Text style={[styles.donutLabelText, { color: seg.stat.color }]}>
+                    {seg.stat.percentage.toFixed(0)}%
+                  </Text>
+                </View>
+              ))}
           </View>
+
+          <View style={styles.legendContainer}>
+            {categoryStats
+              .slice()
+              .sort((a, b) => b.total - a.total)
+              .map((stat) => (
+                <View key={stat.categoryId} style={styles.legendRow}>
+                  <View style={styles.legendLeft}>
+                    <View style={[styles.legendColorDot, { backgroundColor: stat.color }]} />
+                    <View style={styles.legendTextGroup}>
+                      <Text style={styles.legendCategoryName} numberOfLines={1}>{stat.categoryName}</Text>
+                      <Text style={styles.legendSubText}>{stat.percentage.toFixed(0)}% of total</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.legendAmount}>
+                    -₱{stat.total.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+              ))}
+            {categoryStats.length === 0 && (
+              <Text style={styles.emptyLegendText}>No expenses recorded {selectedPeriod.empty}.</Text>
+            )}
+          </View>
+
+          {/* Period dropdown (inline, anchored under the pill) */}
+          {periodMenuVisible && (
+            <View style={styles.periodMenu}>
+              {PERIOD_OPTIONS.map((opt, idx) => {
+                const active = opt.key === categoryPeriod;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.periodMenuItem,
+                      idx < PERIOD_OPTIONS.length - 1 && styles.periodMenuItemDivider,
+                      active && styles.periodMenuItemActive,
+                    ]}
+                    onPress={() => {
+                      setCategoryPeriod(opt.key);
+                      setPeriodMenuVisible(false);
+                    }}
+                  >
+                    <View style={styles.periodMenuText}>
+                      <Text style={[styles.periodMenuLabel, active && styles.periodMenuLabelActive]}>{opt.label}</Text>
+                      <Text style={styles.periodMenuHint}>{opt.hint}</Text>
+                    </View>
+                    {active && <Ionicons name="checkmark" size={18} color={COLORS.cyan} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </View>
 
-        {/* DAILY SPENDING TREND LINE GRAPH */}
+        {/* DAILY SPENDING TREND */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Daily Spending Trend</Text>
@@ -1041,11 +1229,11 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
 
           <View style={styles.statsCard}>
             <Text style={styles.lineGraphSubtitle}>Expenses incurred per day (Past 7 Days)</Text>
-            
+
             <View style={styles.graphWrapper}>
               {(() => {
-                const chartWidth = SCREEN_WIDTH - 88;
-                const chartHeight = 160;
+                const chartWidth = SCREEN_WIDTH - 80;
+                const chartHeight = 170;
                 const paddingLeft = 35;
                 const paddingRight = 15;
                 const paddingTop = 20;
@@ -1053,6 +1241,7 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
 
                 const usableWidth = chartWidth - paddingLeft - paddingRight;
                 const usableHeight = chartHeight - paddingTop - paddingBottom;
+                const baseY = paddingTop + usableHeight;
 
                 const maxAmount = Math.max(...dailyTrends.map(d => d.amount), 100);
 
@@ -1063,9 +1252,19 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                 });
 
                 const polylinePoints = points.map(p => `${p.x},${p.y}`).join(' ');
+                const areaPoints = points.length > 0
+                  ? `${points[0].x},${baseY} ${polylinePoints} ${points[points.length - 1].x},${baseY}`
+                  : '';
 
                 return (
                   <Svg width={chartWidth} height={chartHeight}>
+                    <Defs>
+                      <LinearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                        <Stop offset="0" stopColor={COLORS.cyan} stopOpacity="0.28" />
+                        <Stop offset="1" stopColor={COLORS.cyan} stopOpacity="0" />
+                      </LinearGradient>
+                    </Defs>
+
                     {[0, 0.5, 1].map((ratio, idx) => {
                       const yPos = paddingTop + usableHeight * ratio;
                       const valLabel = Math.round(maxAmount * (1 - ratio));
@@ -1076,7 +1275,7 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                             y1={yPos}
                             x2={chartWidth - paddingRight}
                             y2={yPos}
-                            stroke="#E2E8F0"
+                            stroke="#E8EEEA"
                             strokeDasharray="4,4"
                             strokeWidth="1"
                           />
@@ -1093,10 +1292,12 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                       );
                     })}
 
+                    {points.length > 0 && <Polygon points={areaPoints} fill="url(#trendGradient)" />}
+
                     <Polyline
                       points={polylinePoints}
                       fill="none"
-                      stroke={COLORS.deepTeal}
+                      stroke={COLORS.cyan}
                       strokeWidth="3"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -1108,9 +1309,9 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                           cx={p.x}
                           cy={p.y}
                           r={4.5}
-                          fill={COLORS.yellowGreen}
-                          stroke={COLORS.deepTeal}
-                          strokeWidth="2"
+                          fill="#FFFFFF"
+                          stroke={COLORS.cyan}
+                          strokeWidth="2.5"
                         />
                         <SvgText
                           x={p.x}
@@ -1129,9 +1330,9 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
             </View>
           </View>
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
 
-      {/* MODAL FOR PENDING DUES */}
+      {/* PENDING DUES MODAL */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -1140,20 +1341,20 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderLeft}>
                 <View>
                   <Text style={styles.modalTitle}>Scheduled Dues</Text>
                   <Text style={styles.modalSubtitle}>{formatReadableDate(selectedDate)}</Text>
                 </View>
-                {/* Only show the days remaining/overdue badge if there are pending dues or if not all items are paid */}
                 {filteredDues.length > 0 && filteredDues.some(d => d.status === 'pending') && (
                   <View style={[
-                    styles.dueBadgeHome, 
-                    { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(31, 79, 89, 0.1)' }
+                    styles.dueBadgeHome,
+                    { backgroundColor: selectedDaysInfo.urgent ? '#FEF2F2' : 'rgba(76, 167, 113, 0.12)' }
                   ]}>
                     <Text style={[
-                      styles.dueBadgeTextHome, 
+                      styles.dueBadgeTextHome,
                       { color: selectedDaysInfo.urgent ? '#DC2626' : COLORS.deepTeal }
                     ]}>
                       {selectedDaysInfo.text}
@@ -1162,13 +1363,13 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                 )}
               </View>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => {
                   setModalVisible(false);
                   setSelectedDate(todayStr);
-                  setErrorMessage(null);   // <-- Add this
-                  setSuccessMessage(null); // <-- Add this
-                }} 
+                  setErrorMessage(null);
+                  setSuccessMessage(null);
+                }}
                 style={styles.modalCloseButton}
               >
                 <Ionicons name="close" size={20} color={COLORS.textMuted} />
@@ -1202,7 +1403,7 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                       style={[styles.reminderCardHome, { backgroundColor: cardBgColor, opacity: isPaid ? 0.75 : 1 }]}
                     >
                       <View style={styles.calendarBadgeHome}>
-                        <Ionicons name={categoryIcon as any} size={22} color={COLORS.deepTeal} />
+                        <Ionicons name={categoryIcon as any} size={22} color={COLORS.primary} />
                       </View>
 
                       <View style={styles.cardContentHome}>
@@ -1214,26 +1415,23 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                         </Text>
                       </View>
 
-                      {/* Conditional Actions or Paid Badge */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={styles.reminderActions}>
                         {isPaid ? (
-                          <View style={{ paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(126, 160, 14, 0.15)', borderRadius: 8, marginRight: 4 }}>
-                            <Text style={{ color: COLORS.olive, fontWeight: '600', fontSize: 13 }}>Paid</Text>
+                          <View style={styles.paidBadge}>
+                            <Text style={styles.paidBadgeText}>Paid</Text>
                           </View>
                         ) : (
-                          /* Settle Button (Only shown when not paid) */
-                          <TouchableOpacity 
-                            style={[styles.deleteButtonHome, { backgroundColor: 'rgba(31, 79, 89, 0.1)' }]} 
+                          <TouchableOpacity
+                            style={styles.settleButton}
                             onPress={() => handleSettleReminder(due)}
                             activeOpacity={0.7}
                           >
-                            <Ionicons name="checkmark-outline" size={18} color={COLORS.deepTeal} />
+                            <Ionicons name="checkmark-outline" size={18} color={COLORS.primary} />
                           </TouchableOpacity>
                         )}
 
-                        {/* Delete Button (Always shown) */}
-                        <TouchableOpacity 
-                          style={styles.deleteButtonHome} 
+                        <TouchableOpacity
+                          style={styles.deleteButtonHome}
                           onPress={() => handleDeleteReminder(due.id, due.title)}
                           activeOpacity={0.7}
                         >
@@ -1245,7 +1443,7 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                 })
               ) : (
                 <View style={styles.emptyStateContainer}>
-                  <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.deepTeal} />
+                  <Ionicons name="checkmark-circle-outline" size={48} color={COLORS.cyan} />
                   <Text style={styles.emptyStateTitle}>All Clear!</Text>
                   <Text style={styles.emptyStateText}>No reminders set for this date.</Text>
                 </View>
@@ -1255,80 +1453,51 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
         </View>
       </Modal>
 
-{/* CUSTOM DELETE CONFIRMATION MODAL */}
-<Modal
-  animationType="fade"
-  transparent={true}
-  visible={deleteModalVisible}
-  onRequestClose={() => !isDeleting && setDeleteModalVisible(false)}
->
-  {/* Ensure modalOverlay has justifyContent and alignItems set to 'center' */}
-  <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
-    <View style={[styles.modalContainer2, { width: '85%', maxWidth: 340, padding: 24, alignItems: 'center', alignSelf: 'center' }]}>
-      
-      {/* Warning Icon with subtle red aura */}
-      <View style={{
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#FEF2F2',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
-        borderWidth: 8,
-        borderColor: '#FEE2E2'
-      }}>
-        <Ionicons name="alert-circle-outline" size={24} color="#DC2626" />
-      </View>
+      {/* DELETE CONFIRMATION MODAL */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={deleteModalVisible}
+        onRequestClose={() => {
+          if (!isDeleting) setDeleteModalVisible(false);
+        }}
+      >
+        <View style={[styles.modalOverlay, styles.modalOverlayCentered]}>
+          <View style={styles.deleteCard}>
+            <View style={styles.deleteIconWrap}>
+              <Ionicons name="alert-circle-outline" size={24} color="#DC2626" />
+            </View>
 
-      {/* Title */}
-      <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 8, textAlign: 'center' }}>
-        Delete Reminder
-      </Text>
+            <Text style={styles.deleteTitle}>Delete Reminder</Text>
 
-      {/* Subtitle / Description */}
-      <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
-        Are you sure you want to delete "{reminderToDelete?.title}"?{'\n'}This action cannot be undone.
-      </Text>
+            <Text style={styles.deleteMessage}>
+              Are you sure you want to delete "{reminderToDelete?.title}"?{'\n'}This action cannot be undone.
+            </Text>
 
-      {/* Action Buttons */}
-      <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            backgroundColor: '#F3F4F6',
-            paddingVertical: 12,
-            borderRadius: 12,
-            alignItems: 'center',
-          }}
-          onPress={() => setDeleteModalVisible(false)}
-          disabled={isDeleting}
-        >
-          <Text style={{ color: '#374151', fontWeight: '600', fontSize: 15 }}>Cancel</Text>
-        </TouchableOpacity>
+            <View style={styles.deleteActions}>
+              <TouchableOpacity
+                style={styles.deleteCancelBtn}
+                onPress={() => setDeleteModalVisible(false)}
+                disabled={isDeleting}
+              >
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
 
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            backgroundColor: '#DC2626',
-            paddingVertical: 12,
-            borderRadius: 12,
-            alignItems: 'center',
-          }}
-          onPress={confirmDeleteReminder}
-          disabled={isDeleting}
-        >
-          <Text style={{ color: '#FFFFFF', fontWeight: '600', fontSize: 15 }}>
-            {isDeleting ? 'Deleting...' : 'Delete'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+              <TouchableOpacity
+                style={styles.deleteConfirmBtn}
+                onPress={confirmDeleteReminder}
+                disabled={isDeleting}
+              >
+                <Text style={styles.deleteConfirmText}>
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
-    </View>
-  </View>
-</Modal>
-
-      {/* MODAL FOR ADDING A NEW REMINDER */}
+      {/* ADD REMINDER MODAL */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -1336,30 +1505,30 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
         onRequestClose={() => {
           resetForm();
           setAddModalVisible(false);
-          setErrorMessage(null);   // <-- Add this
-          setSuccessMessage(null); // <-- Add this
+          setErrorMessage(null);
+          setSuccessMessage(null);
         }}
         onShow={() => fetchCategories()}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
+            <View style={styles.modalHandle} />
             <View style={styles.modalHeader}>
               <View>
                 <Text style={styles.modalTitle}>Add New Reminder</Text>
                 <Text style={styles.modalSubtitle}>Fill in reminder details</Text>
               </View>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => {
                   resetForm();
                   setAddModalVisible(false);
-                }} 
+                }}
                 style={styles.modalCloseButton}
               >
                 <Ionicons name="close" size={20} color={COLORS.textMuted} />
               </TouchableOpacity>
             </View>
 
-            {/* Inline Error Banner */}
             {errorMessage && (
               <View style={styles.inlineErrorContainer}>
                 <Ionicons name="alert-circle-outline" size={18} color="#DC2626" />
@@ -1367,7 +1536,6 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
               </View>
             )}
 
-            {/* Inline Success Banner */}
             {successMessage && (
               <View style={styles.inlineSuccessContainer}>
                 <Ionicons name="checkmark-circle-outline" size={18} color="#16A34A" />
@@ -1403,12 +1571,9 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                     <TouchableOpacity
                       key={cat.id}
                       onPress={() => setNewCategoryId(cat.id)}
-                      style={[
-                        styles.categoryChip,
-                        isSelected && { backgroundColor: COLORS.headerDark, borderColor: COLORS.headerDark }
-                      ]}
+                      style={[styles.categoryChip, isSelected && styles.categoryChipActive]}
                     >
-                      <Text style={[styles.categoryChipText, isSelected && { color: '#FFFFFF' }]}>
+                      <Text style={[styles.categoryChipText, isSelected && styles.categoryChipTextActive]}>
                         {cat.name}
                       </Text>
                     </TouchableOpacity>
@@ -1425,8 +1590,8 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
                 onChangeText={setNewDueDate}
               />
 
-              <TouchableOpacity 
-                style={styles.submitButton} 
+              <TouchableOpacity
+                style={styles.submitButton}
                 onPress={handleCreateReminder}
                 disabled={submitting}
               >
@@ -1441,7 +1606,6 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
         </View>
       </Modal>
 
-      {/* Due Dates Calendar Modal */}
       <DueDatesCalendarModal
         visible={isCalendarModalVisible}
         selectedDate={selectedDate}
@@ -1454,189 +1618,254 @@ const handleSettleReminder = async (reminder: ReminderItem) => {
 }
 
 const styles = StyleSheet.create({
-  mainContainer: { flex: 1, backgroundColor: COLORS.bg },
+  mainContainer: { flex: 1, backgroundColor: '#FFFFFF' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scrollView: { flex: 1 },
-  scrollContent: { backgroundColor: COLORS.bg, paddingBottom: 50 },
+  scrollView: { flex: 1, backgroundColor: '#FFFFFF' },
+  scrollContent: {
+    backgroundColor: '#FFFFFF',
+    paddingTop: HEADER_EXPANDED_H,
+    paddingBottom: 48,
+    minHeight: SCREEN_HEIGHT + HEADER_SCROLL_RANGE,
+  },
 
+  // ---------- Header ----------
   headerBackground: {
-    backgroundColor: COLORS.headerDark,
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 22,
-    paddingBottom: 30,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: HEADER_EXPANDED_H,
+    backgroundColor: '#3F7F77',
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 16,
-    elevation: 5,
+    overflow: 'hidden',
     zIndex: 10,
   },
-  topRowContainer: { marginBottom: 24 },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  userProfileGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatarImage: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: '#FFFFFF' },
-  avatarFallback: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
+  headerGradient: { position: 'absolute', bottom: 0, left: 0 },
+  headerExpandedRow: {
+    position: 'absolute',
+    top: H_INSET,
+    left: 20,
+    right: 20,
+    height: 56,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.yellowGreen,
   },
-  avatarInitial: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
-  helloText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.3, lineHeight: 26 },
-  userNameText: { fontSize: 18, fontWeight: '600', color: 'rgba(255,255,255,0.82)', marginTop: 1 },
-  
-  roleBadgeContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
+  headerCompactRow: {
+    position: 'absolute',
+    top: H_INSET - 8,
+    left: 20,
+    right: 20,
+    height: 40,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  compactProfile: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 12 },
+  compactAvatar: { width: 34, height: 34, borderRadius: 17, borderWidth: 1.5, borderColor: '#FFFFFF' },
+  compactAvatarFallback: { backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
+  compactAvatarInitial: { color: COLORS.primary, fontSize: 15, fontWeight: '800' },
+  compactName: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', flexShrink: 1 },
+  userProfileGroup: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, marginRight: 12 },
+  avatarImage: { width: 56, height: 56, borderRadius: 28, borderWidth: 2, borderColor: '#FFFFFF' },
+  avatarFallback: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    maxWidth: 120,
+  },
+  avatarInitial: { color: COLORS.primary, fontSize: 22, fontWeight: '800' },
+  greetingGroup: { flexShrink: 1 },
+  helloText: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  userNameText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF', marginTop: 1 },
+
+  roleBadgeContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   roleBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
+    color: COLORS.deepTeal,
+    fontSize: 12,
     fontWeight: '700',
-    textTransform: 'capitalize',
-    letterSpacing: 0.5,
   },
 
-  balanceBlock: { alignItems: 'center' },
-  balanceLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 12 },
-  balanceLabelIconWrap: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: COLORS.yellowGreen, justifyContent: 'center', alignItems: 'center',
+  balanceLabel: {
+    position: 'absolute',
+    top: H_INSET + 80,
+    left: 0,
+    right: 0,
+    fontSize: 13,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    textAlign: 'center',
   },
-  balanceLabel: { fontSize: 12, color: COLORS.white, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
-  pillTrackOuter: { width: '100%', padding: 4, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' },
-  pillTrack: { width: '100%', height: 46, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.15)', overflow: 'hidden' },
-  pillFill: { height: '100%', borderRadius: 26, backgroundColor: COLORS.cyan },
-  balanceAmountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 16 },
-  pillAmountText: { fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6 },
-  pillAmountDivider: { fontSize: 22, color: 'rgba(255,255,255,0.3)', fontWeight: '300' },
-  pillAmountTotal: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.65)' },
-
-  sectionBlock: { paddingHorizontal: 24, marginTop: 20 },
-  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: COLORS.darkOlive, letterSpacing: -0.3 },
-  seeAllText: { fontSize: 13, color: COLORS.deepTeal, fontWeight: '700' },
-
-  dateStripContainer: {
-    gap: 8,
-    paddingVertical: 4,
+  pillTrack: {
+    position: 'absolute',
+    top: H_INSET + 106,
+    left: 20,
+    right: 20,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.balanceTrack,
+    overflow: 'hidden',
   },
-  dateBox: {
-    width: 54,
-    height: 72,
-    borderRadius: 16,
-    backgroundColor: COLORS.card,
+  pillTrackThin: {
+    position: 'absolute',
+    top: H_INSET + 40,
+    left: 20,
+    right: 20,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.balanceTrack,
+    overflow: 'hidden',
+  },
+  pillFill: { height: '100%', borderRadius: 17, backgroundColor: COLORS.cyan },
+  balanceAmountRow: {
+    position: 'absolute',
+    top: H_INSET + 158,
+    left: 0,
+    right: 0,
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+  },
+  pillAmountText: { fontSize: 34, fontWeight: '800', color: '#FFFFFF' },
+  pillAmountSlash: { fontSize: 30, fontWeight: '600', color: '#FFFFFF', marginHorizontal: 10 },
+  pillAmountTotal: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+
+  // ---------- Sections ----------
+  sectionBlock: { paddingHorizontal: 20, marginTop: 26 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  sectionTitle: { fontSize: 17, fontWeight: '800', color: COLORS.darkOlive },
+  sectionActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+
+  calendarIconBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.cyanLight,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
   },
-  dateBoxToday: {
-    backgroundColor: COLORS.headerDark,
-    borderColor: COLORS.headerDark,
+  reminderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.cyanLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 15,
+    gap: 4,
   },
-  dateBoxBorderSelected: {
-    borderColor: COLORS.headerDark,
-    backgroundColor: COLORS.card,
-  },
-  dateDayName: {
-    fontSize: 10,
+  reminderText: {
+    fontSize: 11,
+    color: COLORS.deepTeal,
     fontWeight: '700',
-    color: COLORS.textMuted,
-    marginBottom: 2,
   },
-  dateDayNumber: {
-    fontSize: 18,
+
+  dropdownContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.cyanLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 15,
+    gap: 6,
+  },
+  dropdownText: {
+    fontSize: 11,
+    color: COLORS.deepTeal,
+    fontWeight: '700',
+  },
+
+  // ---------- Upcoming due cards ----------
+  dueCardsScroll: { marginHorizontal: -20 },
+  dueCardsRow: { paddingHorizontal: 20, gap: 12 },
+  dueCard: {
+    backgroundColor: COLORS.surfaceSoft,
+    borderRadius: 18,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  dueCardTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dueDateTile: {
+    width: 46,
+    height: 50,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dueDateDay: { fontSize: 20, fontWeight: '800', color: '#FFFFFF', lineHeight: 22 },
+  dueDateMonth: { fontSize: 10, fontWeight: '700', color: '#FFFFFF', opacity: 0.9 },
+  dueCardInfo: { flex: 1 },
+  dueTitle: { fontSize: 12, fontWeight: '700', color: COLORS.deepTeal },
+  dueAmount: { fontSize: 16, fontWeight: '800', color: COLORS.darkOlive, marginTop: 1 },
+  dueCardBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  dueMeta: { fontSize: 10, fontWeight: '500', color: COLORS.textMuted, flex: 1, marginRight: 4 },
+  dueMetaUrgent: { color: '#D9534F', fontWeight: '600' },
+
+  dueEmptyCard: {
+    backgroundColor: COLORS.surfaceSoft,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 20,
+    alignItems: 'center',
+    gap: 4,
+  },
+  dueEmptyTitle: { fontSize: 14, fontWeight: '700', color: COLORS.darkOlive, marginTop: 2 },
+  dueEmptyText: { fontSize: 12, color: COLORS.textMuted },
+
+  // ---------- Donut + legend ----------
+  donutArea: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  donutLabel: {
+    position: 'absolute',
+    width: 56,
+    height: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  donutLabelText: { fontSize: 11, fontWeight: '700' },
+  innerCircle: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 36,
+  },
+  statsAmount: {
+    fontSize: 20,
     fontWeight: '800',
     color: COLORS.darkOlive,
-  },
-  dateTextToday: {
-    color: '#FFFFFF',
-  },
-  dateTextBorderSelected: {
-    color: COLORS.headerDark,
-  },
-  dotContainer: {
-    height: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  pendingDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: COLORS.olive,
-  },
-  pendingDotToday: {
-    backgroundColor: COLORS.yellowGreen,
-  },
-  pendingDotBorderSelected: {
-    backgroundColor: COLORS.deepTeal,
-  },
-
-  // Statistics Styles
-  statsCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 24,
-    padding: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  circleContainer: {
-    width: 180,
-    height: 180,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  innerCircle: {
-    position: 'absolute',
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    backgroundColor: COLORS.card,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   statsLabel: {
     fontSize: 11,
     fontWeight: '600',
     color: COLORS.textMuted,
-    marginBottom: 2,
-  },
-  statsAmount: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.darkOlive,
-    letterSpacing: -0.5,
+    marginTop: 2,
   },
   legendContainer: {
-    width: '100%',
-    marginTop: 16,
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-    paddingTop: 16,
+    marginTop: 8,
+    gap: 16,
+    paddingHorizontal: 6,
   },
   legendRow: {
     flexDirection: 'row',
@@ -1646,68 +1875,117 @@ const styles = StyleSheet.create({
   legendLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 14,
     flex: 1,
     marginRight: 12,
   },
   legendColorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
   },
+  legendTextGroup: { flex: 1 },
   legendCategoryName: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.darkOlive,
   },
-  legendRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+  legendSubText: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    marginTop: 1,
   },
   legendAmount: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.black,
-  },
-  legendPercentage: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: COLORS.textMuted,
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.expenseRed,
   },
   emptyLegendText: {
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.textMuted,
     paddingVertical: 10,
   },
+
+  // ---------- Trend card ----------
+  statsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
   lineGraphSubtitle: {
-    fontSize: 12,
+    fontSize: 11,
     color: COLORS.textMuted,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 10,
     alignSelf: 'flex-start',
   },
   graphWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 8,
+    marginVertical: 6,
   },
 
-  // Modal Styles
+  // ---------- Modals ----------
+  periodSection: { zIndex: 10 },
+  periodBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
+  },
+  periodMenu: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    width: 196,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 4,
+    zIndex: 20,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+  },
+  periodMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  periodMenuItemDivider: { borderBottomWidth: 1, borderBottomColor: '#F1F4F2' },
+  periodMenuItemActive: { backgroundColor: '#F2F8F3' },
+  periodMenuText: { flex: 1 },
+  periodMenuLabel: { fontSize: 14, fontWeight: '700', color: COLORS.darkOlive },
+  periodMenuLabelActive: { color: COLORS.primary },
+  periodMenuHint: { fontSize: 11, fontWeight: '500', color: COLORS.textMuted, marginTop: 1 },
+
   modalOverlay: {
     flex: 1,
     backgroundColor: COLORS.overlay,
     justifyContent: 'flex-end',
   },
-  
+  modalOverlayCentered: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   modalContainer: {
-    backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
     paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 40,
+    paddingTop: 12,
+    paddingBottom: 36,
     maxHeight: SCREEN_HEIGHT * 0.75,
     shadowColor: COLORS.modalShadow,
     shadowOffset: { width: 0, height: -4 },
@@ -1715,32 +1993,19 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
-
-modalContainer2: {
-    backgroundColor: COLORS.bg,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 40,
-    maxHeight: SCREEN_HEIGHT * 0.75,
-    shadowColor: COLORS.modalShadow,
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 10,
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#D9E2DD',
+    alignSelf: 'center',
+    marginBottom: 16,
   },
-
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
+    marginBottom: 18,
   },
   modalHeaderLeft: {
     flexDirection: 'row',
@@ -1750,21 +2015,21 @@ modalContainer2: {
     marginRight: 10,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     color: COLORS.darkOlive,
   },
   modalSubtitle: {
     fontSize: 12,
     color: COLORS.textMuted,
-    fontWeight: '600',
+    fontWeight: '500',
     marginTop: 2,
   },
   modalCloseButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F1F5F9',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F1F5F3',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1776,9 +2041,11 @@ modalContainer2: {
   reminderCardHome: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   cardContentHome: {
     flex: 1,
@@ -1787,12 +2054,18 @@ modalContainer2: {
   reminderTitleHome: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1E293B',
+    color: '#0F2A2C',
   },
   reminderSubHome: {
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: '600',
     color: '#475569',
     marginTop: 2,
+  },
+  reminderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   dueBadgeHome: {
     paddingHorizontal: 10,
@@ -1803,29 +2076,81 @@ modalContainer2: {
     fontSize: 11,
     fontWeight: '700',
   },
-
   calendarBadgeHome: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(76, 167, 113, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
+  paidBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(76, 167, 113, 0.15)',
+    borderRadius: 10,
+  },
+  paidBadgeText: {
+    color: COLORS.olive,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  settleButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(76, 167, 113, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   deleteButtonHome: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: 'rgba(220, 38, 38, 0.08)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
   },
 
-  // Form Styles for Add Reminder
+  // Delete confirmation
+  deleteCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 28,
+    padding: 24,
+    width: '85%',
+    maxWidth: 340,
+    alignItems: 'center',
+    alignSelf: 'center',
+    shadowColor: COLORS.modalShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  deleteIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#FEF2F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 8,
+    borderColor: '#FEE2E2',
+  },
+  deleteTitle: { fontSize: 18, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
+  deleteMessage: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  deleteActions: { flexDirection: 'row', gap: 12, width: '100%' },
+  deleteCancelBtn: { flex: 1, backgroundColor: '#F3F4F6', paddingVertical: 13, borderRadius: 14, alignItems: 'center' },
+  deleteCancelText: { color: '#374151', fontWeight: '700', fontSize: 15 },
+  deleteConfirmBtn: { flex: 1, backgroundColor: '#DC2626', paddingVertical: 13, borderRadius: 14, alignItems: 'center' },
+  deleteConfirmText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+
+  // Add reminder form
   formContainer: {
     gap: 12,
+    paddingBottom: 8,
   },
   inputLabel: {
     fontSize: 13,
@@ -1833,12 +2158,12 @@ modalContainer2: {
     color: COLORS.darkOlive,
   },
   textInput: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surfaceSoft,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    borderRadius: 12,
+    borderColor: '#E4EAE6',
+    borderRadius: 14,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 14,
     color: COLORS.black,
   },
@@ -1847,23 +2172,30 @@ modalContainer2: {
     marginBottom: 4,
   },
   categoryChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#CBD5E1',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#E4EAE6',
+    backgroundColor: COLORS.surfaceSoft,
     marginRight: 8,
+  },
+  categoryChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   categoryChipText: {
     fontSize: 12,
     fontWeight: '600',
     color: COLORS.darkOlive,
   },
+  categoryChipTextActive: {
+    color: '#FFFFFF',
+  },
   submitButton: {
-    backgroundColor: COLORS.headerDark,
-    borderRadius: 14,
-    paddingVertical: 14,
+    backgroundColor: COLORS.primary,
+    borderRadius: 16,
+    paddingVertical: 15,
     alignItems: 'center',
     marginTop: 10,
   },
@@ -1872,6 +2204,8 @@ modalContainer2: {
     fontSize: 15,
     fontWeight: '700',
   },
+
+  // Feedback + empty states
   emptyStateContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1880,7 +2214,7 @@ modalContainer2: {
   },
   emptyStateTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.darkOlive,
     marginTop: 4,
   },
@@ -1890,78 +2224,67 @@ modalContainer2: {
     textAlign: 'center',
   },
   inlineErrorContainer: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: '#FEF2F2',
-  borderColor: '#FCA5A5',
-  borderWidth: 1,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  borderRadius: 8,
-  marginBottom: 16,
-  gap: 8,
-},
-inlineErrorText: {
-  color: '#DC2626',
-  fontSize: 13,
-  fontWeight: '500',
-  flex: 1,
-},
-inlineSuccessContainer: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: 'rgba(126, 160, 14, 0.1)',
-  borderColor: 'rgba(126, 160, 14, 0.3)',
-  borderWidth: 1,
-  paddingHorizontal: 12,
-  paddingVertical: 10,
-  borderRadius: 8,
-  marginBottom: 16,
-  gap: 8,
-},
-inlineSuccessText: {
-  color: COLORS.olive,
-  fontSize: 13,
-  fontWeight: '500',
-  flex: 1,
-},
-seeMoreDateBox: {
-  justifyContent: 'center',
-  alignItems: 'center',
-  backgroundColor: COLORS.card,
-  borderStyle: 'dashed',
-  borderWidth: 1.5,
-  borderColor: COLORS.deepTeal,
-},
-seeMoreLabel: {
-  fontSize: 12,
-  fontWeight: '600',
-  color: COLORS.deepTeal,
-},
-calendarCard: {
-  backgroundColor: COLORS.card,
-  borderRadius: 20,
-  borderWidth: 1,
-  borderColor: '#E2E8F0',
-  paddingVertical: 8,
-  overflow: 'hidden',
-},
-calendarLegendRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 8,
-  marginTop: 14,
-},
-calendarLegendDot: {
-  width: 6,
-  height: 6,
-  borderRadius: 3,
-  backgroundColor: COLORS.olive,
-},
-calendarLegendText: {
-  fontSize: 12,
-  fontWeight: '600',
-  color: COLORS.textMuted,
-},
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FCA5A5',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  inlineErrorText: {
+    color: '#DC2626',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  inlineSuccessContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 167, 113, 0.1)',
+    borderColor: 'rgba(76, 167, 113, 0.3)',
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  inlineSuccessText: {
+    color: COLORS.olive,
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+
+  // Calendar modal
+  calendarCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 8,
+    overflow: 'hidden',
+  },
+  calendarLegendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+  },
+  calendarLegendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.olive,
+  },
+  calendarLegendText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
 });
